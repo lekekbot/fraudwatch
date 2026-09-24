@@ -111,7 +111,7 @@ export function TransactionDetails({
     <section className="flex min-w-0 flex-col gap-4 p-3" aria-label="Transaction details">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <Badge variant={summary.kind === "FAILED" ? "destructive" : "secondary"}>{summary.kind}</Badge>
+          <Badge variant={summary.kind === "FAILED" ? "destructive" : "secondary"}>{summary.kind.replace("_", " ")}</Badge>
           <span className="text-xs text-muted-foreground tabular-nums">
             {position.index + 1} / {position.count}
           </span>
@@ -185,6 +185,61 @@ export function TransactionDetails({
         <dt className="text-muted-foreground">Fee paid</dt>
         <dd className="tabular-nums">{effect.feeLamports === "0" ? "None (another account paid)" : formatLamports(effect.feeLamports)}</dd>
       </dl>
+
+      {summary.nft && (
+        <Section title="NFT trade">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+            <dt className="text-muted-foreground">NFT</dt>
+            <dd className="min-w-0 truncate" title={summary.nft.mint}>
+              {assetLabel(summary.nft.mint, assets)}
+            </dd>
+            {summary.nft.payment && (
+              <>
+                <dt className="text-muted-foreground">
+                  {summary.kind === "NFT_SELL" ? "Received" : summary.kind === "NFT_MINT" ? "Mint price" : "Paid"}
+                </dt>
+                <dd className="tabular-nums">
+                  {format(summary.nft.payment.delta.replace("-", ""), summary.nft.payment.assetId)} {assetLabel(summary.nft.payment.assetId, assets)}
+                </dd>
+              </>
+            )}
+            {summary.nft.party && (
+              <>
+                <dt className="text-muted-foreground">
+                  {summary.kind === "NFT_BUY" ? "Seller" : summary.kind === "NFT_SELL" ? "Buyer" : summary.kind === "NFT_MINT" ? "Paid to" : "Other side"}
+                </dt>
+                <dd className="min-w-0">
+                  <AddressButton address={summary.nft.party} names={names} onSelect={onSelectAddress} />
+                </dd>
+              </>
+            )}
+            {summary.nft.marketplace && (
+              <>
+                <dt className="text-muted-foreground">Marketplace</dt>
+                <dd className="min-w-0 truncate">{names.of(summary.nft.marketplace)}</dd>
+              </>
+            )}
+          </dl>
+          {summary.nft.payment && summary.nft.others.length > 0 && (
+            <>
+              <p className="pt-1 text-xs text-muted-foreground">
+                Also paid in {assetLabel(summary.nft.payment.assetId, assets)}: marketplace fees, royalties and rent, most
+                likely. Only the amounts are certain.
+              </p>
+              <ul className="flex flex-col gap-1">
+                {summary.nft.others.slice(0, 6).map((o) => (
+                  <li key={o.address} className="flex items-center justify-between gap-2">
+                    <AddressButton address={o.address} names={names} onSelect={onSelectAddress} />
+                    <span className="text-xs whitespace-nowrap tabular-nums text-muted-foreground">
+                      {format(o.amount, summary.nft!.payment!.assetId)} {assetLabel(summary.nft!.payment!.assetId, assets)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </Section>
+      )}
 
       <Section title="Wallet before · change · after">
         {effect.assetChanges.length === 0 ? (

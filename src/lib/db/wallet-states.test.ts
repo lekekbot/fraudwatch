@@ -65,14 +65,19 @@ describe("asset metadata cache", () => {
     expect(first.known.get("SOL")?.symbol).toBe("SOL");
     expect(first.toFetch).toEqual([MINT]);
 
-    await saveAssetMetadata(db, [{ id: MINT, symbol: "MNT", name: "Mint", decimals: 6, source: "metaplex", fetchedAt: NOW.toISOString() }]);
+    await saveAssetMetadata(db, [{ id: MINT, symbol: "MNT", name: "Mint", decimals: 6, nft: false, source: "metaplex", fetchedAt: NOW.toISOString() }]);
     const second = await getAssetMetadata(db, [MINT], NOW);
     expect(second.known.get(MINT)?.symbol).toBe("MNT");
     expect(second.toFetch).toEqual([]);
   });
 
+  it("refetches a record saved before NFT detection once", async () => {
+    await saveAssetMetadata(db, [{ id: MINT, symbol: "MNT", name: "Mint", decimals: 0, source: "metaplex", fetchedAt: NOW.toISOString() }]);
+    expect((await getAssetMetadata(db, [MINT], NOW)).toFetch).toEqual([MINT]);
+  });
+
   it("retries a mint with no metadata after a week", async () => {
-    await saveAssetMetadata(db, [{ id: MINT, symbol: null, name: null, decimals: 6, source: "none", fetchedAt: NOW.toISOString() }]);
+    await saveAssetMetadata(db, [{ id: MINT, symbol: null, name: null, decimals: 6, nft: false, source: "none", fetchedAt: NOW.toISOString() }]);
     expect((await getAssetMetadata(db, [MINT], new Date(NOW.getTime() + 86_400_000))).toFetch).toEqual([]);
     expect((await getAssetMetadata(db, [MINT], new Date(NOW.getTime() + 8 * 86_400_000))).toFetch).toEqual([MINT]);
   });

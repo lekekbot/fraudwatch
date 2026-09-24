@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { type AssetMetadata, fetchAssetMetadata } from "@/lib/assets/assets";
+import { type AssetMetadata, fetchAssetMetadata, nftCandidates } from "@/lib/assets/assets";
 import type { CaseRange } from "@/lib/case/range";
 import { getDb } from "@/lib/db/db";
 import { getAssetMetadata, getWalletState, saveAssetMetadata } from "@/lib/db/wallet-states";
@@ -55,7 +55,12 @@ export function useWalletStates(
         );
       }
 
-      const ids = states.flatMap((s) => [...s.opening, ...s.closing].map((a) => a.assetId));
+      // Every asset the wallets held, plus possible NFTs anywhere in their transactions:
+      // a seller never holds an escrowed listing, but its sale still needs the NFT check.
+      const ids = [
+        ...states.flatMap((s) => [...s.opening, ...s.closing].map((a) => a.assetId)),
+        ...nftCandidates([...result.transactions.values()].flatMap((tx) => tx.tokenChanges)),
+      ];
       const { known, toFetch } = db ? await getAssetMetadata(db, ids) : { known: new Map<string, AssetMetadata>(), toFetch: [] };
       if (!active) return;
       setValue({ states, assets: new Map(known), source: result });

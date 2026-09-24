@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createGenericAdapter } from "@/lib/rpc/generic-adapter";
 import { type Fixture, replayFetch } from "@/test/fixture-rpc";
-import { builtinAsset, decodeMetaplexMetadata, fetchAssetMetadata, metaplexMetadataAddress, NATIVE_SOL } from "./assets";
+import { builtinAsset, decodeMetaplexMetadata, fetchAssetMetadata, metaplexMetadataAddress, NATIVE_SOL, nftCandidates } from "./assets";
 
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDG = "2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH";
@@ -31,6 +31,7 @@ describe("asset metadata", () => {
       symbol: "USDG",
       name: "Global Dollar",
       decimals: 6,
+      nft: false,
       source: "token-2022",
       fetchedAt: NOW.toISOString(),
     });
@@ -50,7 +51,36 @@ describe("asset metadata", () => {
       maxRetries: 0,
       fetchImpl: (async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { value: null } }))) as typeof fetch,
     });
-    expect(await fetchAssetMetadata(empty, USDC, signal, NOW)).toMatchObject({ symbol: null, name: null, source: "none" });
+    expect(await fetchAssetMetadata(empty, USDC, signal, NOW)).toMatchObject({ symbol: null, name: null, nft: null, source: "none" });
+  });
+
+  it("recognises an NFT from its mint account: 0 decimals and a supply of exactly 1", async () => {
+    const mintWith = (decimals: number, supply: string) =>
+      createGenericAdapter("https://rpc.example.com", {
+        maxRetries: 0,
+        fetchImpl: (async () =>
+          new Response(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              result: { value: { lamports: 1, owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", data: { parsed: { type: "mint", info: { decimals, supply } } } } },
+            }),
+          )) as typeof fetch,
+      });
+    expect((await fetchAssetMetadata(mintWith(0, "1"), USDC, signal, NOW)).nft).toBe(true);
+    // Semi-fungible (many copies) and fungible tokens aren't NFTs.
+    expect((await fetchAssetMetadata(mintWith(0, "500"), USDC, signal, NOW)).nft).toBe(false);
+    expect((await fetchAssetMetadata(mintWith(6, "1"), USDC, signal, NOW)).nft).toBe(false);
+  });
+
+  it("only flags 0-decimal, one-unit moves as NFT candidates", () => {
+    expect([
+      ...nftCandidates([
+        { mint: "nft", decimals: 0, delta: "-1" },
+        { mint: "sft", decimals: 0, delta: "5" },
+        { mint: "usdc", decimals: 6, delta: "1" },
+      ]),
+    ]).toEqual(["nft"]);
   });
 
   it("strips Metaplex NUL padding and rejects truncated data", () => {

@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import type { Names } from "@/lib/labels/labels";
 import type { WalletState } from "@/lib/state/reconstruct";
-import { describeAction, type EffectSummary, summarizeEffect } from "@/lib/state/summarize";
+import { describeAction, type EffectSummary } from "@/lib/state/summarize";
 import { eventAtOrAfter, eventTimes, type SpacingMode, stepEvent } from "@/lib/timeline/layout";
 import { type Assets, assetLabel, formatAssetAmount } from "../asset-format";
 import { SidePanel } from "../panel";
@@ -24,6 +24,12 @@ const cardDate = (ms: number) => {
 function headline(summary: EffectSummary, state: WalletState, assets: Assets, names: Names): string {
   const show = (c: { assetId: string; delta: string }) =>
     `${formatAssetAmount(c.delta, c.assetId, state, assets, true)} ${assetLabel(c.assetId, assets)}`;
+  if (summary.nft) {
+    const { mint, payment } = summary.nft;
+    const price = payment && `${formatAssetAmount(payment.delta.replace("-", ""), payment.assetId, state, assets)} ${assetLabel(payment.assetId, assets)}`;
+    // The NFT's name goes on the type line (see items), leaving the price room on a narrow card.
+    return price ?? assetLabel(mint, assets);
+  }
   if (summary.kind === "SWAP") return `${show(summary.outflows[0])} → ${show(summary.inflows[0])}`;
   const main = summary.kind === "RECEIVE" ? summary.inflows[0] : summary.outflows[0];
   if (main) return show(main);
@@ -32,6 +38,7 @@ function headline(summary: EffectSummary, state: WalletState, assets: Assets, na
 
 export function WalletTimeline({
   state,
+  summaries,
   transactions,
   range,
   assets,
@@ -46,6 +53,8 @@ export function WalletTimeline({
   sharedWith,
 }: {
   state: WalletState;
+  /** One per `state.effects` entry, NFT-aware; computed by the workspace. */
+  summaries: EffectSummary[];
   transactions: Map<string, CanonicalTransaction>;
   range: { start: string; end: string };
   assets: Assets;
@@ -73,10 +82,6 @@ export function WalletTimeline({
   const [jumpDate, setJumpDate] = useState("");
 
   const bounds = useMemo(() => ({ start: Date.parse(range.start), end: Date.parse(range.end) }), [range.start, range.end]);
-  const summaries = useMemo(
-    () => state.effects.map((e) => summarizeEffect(e, transactions.get(e.signature))),
-    [state, transactions],
-  );
   const times = useMemo(() => eventTimes(state.effects.map((e) => e.timestamp), bounds.start), [state, bounds.start]);
   const items = useMemo<TimelineItem[]>(
     () =>
@@ -90,9 +95,16 @@ export function WalletTimeline({
           kind: s.kind,
           lines: [
             cardDate(times[i]),
-            s.kind,
+            s.nft && s.nft.payment ? `${s.kind.replace("_", " ")} · ${assetLabel(s.nft.mint, assets)}` : s.kind.replace("_", " "),
             headline(s, state, assets, names),
-            cp ? `${arrow} ${names.of(cp.address, 3)}` : s.actor ? `by ${names.of(s.actor, 3)}` : "",
+            s.nft?.party
+              ? // Buyers and receivers get the NFT from the other party; sellers and senders give it to them.
+                `${s.kind === "NFT_BUY" || s.kind === "NFT_MINT" || (s.kind === "NFT_TRANSFER" && s.inflows.some((c) => c.assetId === s.nft!.mint)) ? "←" : "→"} ${names.of(s.nft.party, 3)}`
+              : cp
+                ? `${arrow} ${names.of(cp.address, 3)}`
+                : s.actor
+                  ? `by ${names.of(s.actor, 3)}`
+                  : "",
           ],
         };
       }),
