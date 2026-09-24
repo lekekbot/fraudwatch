@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { InfoIcon } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -18,10 +18,21 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { type FraudWatchCase, type NewCaseErrors, type NewCaseInput, createCase, validateNewCaseInput } from "@/lib/case/model";
+import {
+  type FraudWatchCase,
+  type NewCaseErrors,
+  type NewCaseInput,
+  type WalletActivity,
+  completeRange,
+  createCase,
+  validateNewCaseInput,
+} from "@/lib/case/model";
 import { type CaseRange, datesFromRange, formatRange, rangeFromDates, sameRange } from "@/lib/case/range";
 import { findDuplicateCases, saveCase } from "@/lib/db/cases";
 import { getDb } from "@/lib/db/db";
+import { getRpcSettings } from "@/lib/db/rpc-settings";
+import { findActivitySpan } from "@/lib/ingest/activity-span";
+import { createGenericAdapter } from "@/lib/rpc/generic-adapter";
 import { parseMapParams } from "@/lib/routing/map-params";
 
 type Pending = { value: { name: string; primaryWallet: string; range: CaseRange }; duplicates: FraudWatchCase[] };
@@ -48,6 +59,11 @@ export function NewCaseForm() {
   const [errors, setErrors] = useState<NewCaseErrors>({});
   const [saving, setSaving] = useState(false);
   const [pending, setPending] = useState<Pending | null>(null);
+  /** Looking up empty dates from the wallet's history: what's being found, and signatures scanned so far. */
+  const [lookup, setLookup] = useState<{ what: string; scanned: number } | null>(null);
+  const lookupAbort = useRef<AbortController | null>(null);
+
+  useEffect(() => () => lookupAbort.current?.abort(), []);
 
   function update<K extends keyof NewCaseInput>(key: K, value: NewCaseInput[K]) {
     setInput((prev) => ({ ...prev, [key]: value }));
@@ -66,23 +82,65 @@ export function NewCaseForm() {
     }
   }
 
+  /** The wallet's first/last activity, or null (with errors shown) when it can't be looked up. */
+  async function lookUpActivity(wallet: string, needFirst: boolean): Promise<WalletActivity | null> {
+    const rpc = await getRpcSettings(getDb()).catch(() => undefined);
+    if (!rpc) {
+      const message = "Enter a date, or add an RPC in settings to find it from the wallet's history.";
+      setErrors({ ...(input.startDate ? {} : { startDate: message }), ...(input.endDate ? {} : { endDate: message }) });
+      return null;
+    }
+    const controller = new AbortController();
+    lookupAbort.current = controller;
+    const what = needFirst ? "the wallet's first transaction" : "the wallet's latest transaction";
+    setLookup({ what, scanned: 0 });
+    try {
+      return await findActivitySpan(createGenericAdapter(rpc.url), wallet, {
+        needFirst,
+        signal: controller.signal,
+        onProgress: (scanned) => setLookup({ what, scanned }),
+      });
+    } catch (err) {
+      if (!controller.signal.aborted) toast.error(`Couldn't read the wallet's history: ${err instanceof Error ? err.message : "RPC error"}`);
+      return null;
+    } finally {
+      lookupAbort.current = null;
+      setLookup(null);
+    }
+  }
+
   async function submit() {
     const result = validateNewCaseInput(input);
     if (!result.ok) {
       setErrors(result.errors);
       return;
     }
+    const { dates, ...rest } = result.value;
+    let activity: WalletActivity | null = null;
+    if (!dates.startDate || !dates.endDate) {
+      activity = await lookUpActivity(rest.primaryWallet, !dates.startDate);
+      if (!activity) return;
+    }
+    const completed = completeRange(dates, activity);
+    if (!completed.ok) {
+      setErrors(completed.errors);
+      return;
+    }
+    // Show the dates that were filled in, so going back to edit keeps them.
+    const filled = datesFromRange(completed.range);
+    setInput((prev) => ({ ...prev, ...filled }));
+    const value = { ...rest, range: completed.range };
     try {
-      const duplicates = await findDuplicateCases(getDb(), result.value.primaryWallet, result.value.range);
+      const duplicates = await findDuplicateCases(getDb(), value.primaryWallet, value.range);
       if (duplicates.length > 0) {
-        setPending({ value: result.value, duplicates });
+        setPending({ value, duplicates });
         return;
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not read local cases.");
       return;
     }
-    await persist(result.value);
+    await persist(value);
   }
 
   return (
@@ -140,7 +198,11 @@ export function NewCaseForm() {
                     onChange={(e) => update("startDate", e.target.value)}
                     aria-invalid={errors.startDate ? true : undefined}
                   />
-                  <FieldError>{errors.startDate}</FieldError>
+                  {errors.startDate ? (
+                    <FieldError>{errors.startDate}</FieldError>
+                  ) : (
+                    <FieldDescription>Empty: the day of the wallet&apos;s first transaction.</FieldDescription>
+                  )}
                 </Field>
                 <Field data-invalid={errors.endDate ? true : undefined}>
                   <FieldLabel htmlFor="end-date">End date (UTC, inclusive)</FieldLabel>
@@ -151,7 +213,11 @@ export function NewCaseForm() {
                     onChange={(e) => update("endDate", e.target.value)}
                     aria-invalid={errors.endDate ? true : undefined}
                   />
-                  <FieldError>{errors.endDate}</FieldError>
+                  {errors.endDate ? (
+                    <FieldError>{errors.endDate}</FieldError>
+                  ) : (
+                    <FieldDescription>Empty: the day of its latest transaction.</FieldDescription>
+                  )}
                 </Field>
               </div>
 
@@ -170,10 +236,21 @@ export function NewCaseForm() {
           </form>
         </CardContent>
         <CardFooter className="justify-end gap-2">
-          <Link href="/" className={buttonVariants({ variant: "ghost" })}>
-            Cancel
-          </Link>
-          <Button type="submit" form="new-case" disabled={saving}>
+          {lookup ? (
+            <>
+              <span className="mr-auto text-sm text-muted-foreground" aria-live="polite">
+                Finding {lookup.what}…{lookup.scanned > 0 && ` ${lookup.scanned.toLocaleString()} signatures scanned`}
+              </span>
+              <Button variant="ghost" onClick={() => lookupAbort.current?.abort()}>
+                Stop
+              </Button>
+            </>
+          ) : (
+            <Link href="/" className={buttonVariants({ variant: "ghost" })}>
+              Cancel
+            </Link>
+          )}
+          <Button type="submit" form="new-case" disabled={saving || lookup !== null}>
             Create case
           </Button>
         </CardFooter>

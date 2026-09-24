@@ -5,7 +5,7 @@ import { ChevronLeftIcon, ChevronRightIcon, CircleHelpIcon, MaximizeIcon, MinusI
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
-import { shortenAddress } from "@/lib/solana/address";
+import type { Names } from "@/lib/labels/labels";
 import type { WalletState } from "@/lib/state/reconstruct";
 import { describeAction, type EffectSummary, summarizeEffect } from "@/lib/state/summarize";
 import { eventAtOrAfter, eventTimes, type SpacingMode, stepEvent } from "@/lib/timeline/layout";
@@ -21,13 +21,13 @@ const cardDate = (ms: number) => {
   return `${date} · ${d.toISOString().slice(11, 16)}`;
 };
 
-function headline(summary: EffectSummary, state: WalletState, assets: Assets): string {
+function headline(summary: EffectSummary, state: WalletState, assets: Assets, names: Names): string {
   const show = (c: { assetId: string; delta: string }) =>
     `${formatAssetAmount(c.delta, c.assetId, state, assets, true)} ${assetLabel(c.assetId, assets)}`;
   if (summary.kind === "SWAP") return `${show(summary.outflows[0])} → ${show(summary.inflows[0])}`;
   const main = summary.kind === "RECEIVE" ? summary.inflows[0] : summary.outflows[0];
   if (main) return show(main);
-  return summary.kind === "FAILED" ? "No balance change" : describeAction(summary.action);
+  return summary.kind === "FAILED" ? "No balance change" : describeAction(summary.action, summary.action ? names.known(summary.action.programId) : undefined);
 }
 
 export function WalletTimeline({
@@ -35,19 +35,24 @@ export function WalletTimeline({
   transactions,
   range,
   assets,
-  labels,
+  names,
   inspector,
+  addressPanel,
   inspectorOpen,
   emptyMessage = "No transactions to map in this range.",
   onHide,
+  onSelectAddress,
 }: {
   state: WalletState;
   transactions: Map<string, CanonicalTransaction>;
   range: { start: string; end: string };
   assets: Assets;
-  labels: Record<string, string>;
+  names: Names;
   /** Right-panel content while no transaction is selected. */
   inspector: React.ReactNode;
+  /** An address opened from the details; shown over them until dismissed. */
+  addressPanel: React.ReactNode;
+  onSelectAddress: (address: string) => void;
   /** Selecting a transaction opens the right panel even when it's hidden. */
   inspectorOpen: boolean;
   emptyMessage?: string;
@@ -80,16 +85,12 @@ export function WalletTimeline({
           lines: [
             cardDate(times[i]),
             s.kind,
-            headline(s, state, assets),
-            cp
-              ? `${arrow} ${labels[cp.address] ?? shortenAddress(cp.address, 3)}`
-              : s.actor
-                ? `by ${labels[s.actor] ?? shortenAddress(s.actor, 3)}`
-                : "",
+            headline(s, state, assets, names),
+            cp ? `${arrow} ${names.of(cp.address, 3)}` : s.actor ? `by ${names.of(s.actor, 3)}` : "",
           ],
         };
       }),
-    [state, summaries, times, assets, labels],
+    [state, summaries, times, assets, names],
   );
   const selectedIndex = selectedSignature === null ? -1 : items.findIndex((i) => i.signature === selectedSignature);
   const selected = selectedIndex === -1 ? null : selectedIndex;
@@ -119,9 +120,11 @@ export function WalletTimeline({
 
   const current = selected !== null ? state.effects[selected] : null;
 
-  const panel = (inspectorOpen || current) && (
+  const panel = (inspectorOpen || current || addressPanel) && (
     <SidePanel side="right" label="Inspector">
-      {current && selected !== null ? (
+      {addressPanel ? (
+        addressPanel
+      ) : current && selected !== null ? (
         <TransactionDetails
           effect={current}
           summary={summaries[selected]}
@@ -138,6 +141,8 @@ export function WalletTimeline({
             setSelectedSignature(next?.signature ?? null);
             onHide(current.signature);
           }}
+          names={names}
+          onSelectAddress={onSelectAddress}
         />
       ) : (
         inspector

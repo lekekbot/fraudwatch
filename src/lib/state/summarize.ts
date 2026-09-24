@@ -123,10 +123,13 @@ export function classifyInstructions(tx: CanonicalTransaction | undefined): { ki
   return { kind: "PROGRAM", action: toAction(main) };
 }
 
-/** "spl-token · approve", or a shortened program ID when the RPC couldn't name it. */
-export function describeAction(action: TxAction | null): string {
+/**
+ * "spl-token · approve". `programName` (a user label or registry name) wins over
+ * the RPC's program name; with neither, the program ID is shortened.
+ */
+export function describeAction(action: TxAction | null, programName?: string): string {
   if (!action) return "Unknown program";
-  const program = action.program ?? shortenAddress(action.programId, 4);
+  const program = programName ?? action.program ?? shortenAddress(action.programId, 4);
   return action.instruction ? `${program} · ${action.instruction}` : program;
 }
 

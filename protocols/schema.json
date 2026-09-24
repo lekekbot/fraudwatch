@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fraudwatch.local/protocols/schema.json",
+  "title": "FraudWatch protocol registry",
+  "description": "Maps addresses to protocols, roles and display labels. Lookup data only: transaction parsing logic belongs in code, not here. Bump `version` on every change so enriched transactions can tell which registry they were read against.",
+  "type": "object",
+  "required": ["version", "protocols"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "type": "integer", "minimum": 1 },
+    "protocols": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9_]+$" },
+      "additionalProperties": { "$ref": "#/$defs/protocol" }
+    }
+  },
+  "$defs": {
+    "protocol": {
+      "type": "object",
+      "required": ["name", "category", "addresses"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "category": {
+          "enum": [
+            "core",
+            "dex",
+            "dex_aggregator",
+            "lending",
+            "liquid_staking",
+            "perps",
+            "nft",
+            "nft_marketplace",
+            "bridge",
+            "launchpad"
+          ]
+        },
+        "website": { "type": "string" },
+        "addresses": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$" },
+          "additionalProperties": { "$ref": "#/$defs/address" }
+        }
+      }
+    },
+    "address": {
+      "type": "object",
+      "required": ["role", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "role": { "enum": ["program", "pool", "vault", "authority", "fee_account", "market"] },
+        "label": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

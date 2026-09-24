@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createCase } from "@/lib/case/model";
 import { FraudWatchDB } from "./db";
 import { deleteCase, findDuplicateCases, getCase, listRecentCases, saveCase, touchCase } from "./cases";
+import { getAddressLabels, saveAddressLabel } from "./address-labels";
 import { clearRpcSettings, getRpcSettings, saveRpcSettings } from "./rpc-settings";
 
 const WALLET = "dLm61Lvpigiaig9ZHcdh6iE7mFp7WmfqzkFMrDdf5Vo";
@@ -85,6 +86,62 @@ describe("schema upgrade", () => {
       expect(await getCase(upgraded, fwCase.id)).toEqual(fwCase);
       expect((await getRpcSettings(upgraded))?.url).toBe("https://rpc.example.com");
       expect(await upgraded.transactions.count()).toBe(0);
+    } finally {
+      await upgraded.delete();
+    }
+  });
+});
+
+describe("address labels", () => {
+  it("saves per case, normalises, and survives reopening the database", async () => {
+    const fwCase = createCase({ name: "A", primaryWallet: WALLET, range: RANGE });
+    await saveCase(db, fwCase);
+    await saveAddressLabel(db, { caseId: fwCase.id, address: OTHER, name: "  Scammer  ", tags: ["cex", "CEX", " "] });
+    await saveAddressLabel(db, { caseId: "other-case", address: OTHER, name: "Elsewhere", tags: [] });
+
+    const reopened = new FraudWatchDB(db.name);
+    try {
+      expect(await getAddressLabels(reopened, fwCase.id)).toEqual([{ caseId: fwCase.id, address: OTHER, name: "Scammer", tags: ["cex"] }]);
+    } finally {
+      reopened.close();
+    }
+  });
+
+  it("removes a label whose fields are all cleared", async () => {
+    await saveAddressLabel(db, { caseId: "c", address: OTHER, name: "x", tags: [] });
+    await saveAddressLabel(db, { caseId: "c", address: OTHER, name: " ", note: "", tags: [] });
+    expect(await getAddressLabels(db, "c")).toEqual([]);
+  });
+
+  it("deletes a case's labels with the case", async () => {
+    const fwCase = createCase({ name: "A", primaryWallet: WALLET, range: RANGE });
+    await saveCase(db, fwCase);
+    await saveAddressLabel(db, { caseId: fwCase.id, address: OTHER, name: "x", tags: [] });
+    await deleteCase(db, fwCase.id);
+    expect(await getAddressLabels(db, fwCase.id)).toEqual([]);
+  });
+
+  it("moves Sprint 01 case labels and tags into the table on upgrade", async () => {
+    const name = `upgrade-${crypto.randomUUID()}`;
+    const v3 = new Dexie(name);
+    v3.version(3).stores({ cases: "id, updatedAt, primaryWallet", rpc_settings: "id" });
+    const old = { ...createCase({ name: "old", primaryWallet: WALLET, range: RANGE }), version: 1, labels: { [OTHER]: "Exchange" }, tags: { [OTHER]: ["cex"], [WALLET]: ["victim"] } };
+    await v3.table("cases").put(old);
+    v3.close();
+
+    const upgraded = new FraudWatchDB(name);
+    try {
+      const stored = await getCase(upgraded, old.id);
+      expect(stored).not.toHaveProperty("labels");
+      expect(stored).not.toHaveProperty("tags");
+      expect(stored?.version).toBe(2);
+      const labels = await getAddressLabels(upgraded, old.id);
+      expect(labels).toEqual(
+        expect.arrayContaining([
+          { caseId: old.id, address: OTHER, name: "Exchange", tags: ["cex"] },
+          { caseId: old.id, address: WALLET, name: "", tags: ["victim"] },
+        ]),
+      );
     } finally {
       await upgraded.delete();
     }

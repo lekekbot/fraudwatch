@@ -5,17 +5,12 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { useIngestion } from "@/hooks/use-ingestion";
-import type { FraudWatchCase } from "@/lib/case/model";
 import type { IngestionProgress, WalletIngestion } from "@/lib/ingest/ingest";
+import type { Names } from "@/lib/labels/labels";
 import type { RpcSettings } from "@/lib/rpc/settings";
-import { shortenAddress } from "@/lib/solana/address";
 import { PanelSection } from "./panel";
 
-function walletName(c: FraudWatchCase, address: string) {
-  return c.labels[address] ?? shortenAddress(address, 6);
-}
-
-function ProgressLines({ progress, c }: { progress: IngestionProgress | null; c: FraudWatchCase }) {
+function ProgressLines({ progress, names }: { progress: IngestionProgress | null; names: Names }) {
   if (!progress) return <p className="text-sm">Starting…</p>;
   const { phase, done, total, signaturesFound } = progress;
   return (
@@ -23,7 +18,7 @@ function ProgressLines({ progress, c }: { progress: IngestionProgress | null; c:
       {progress.walletCount > 1 && (
         <p className="text-muted-foreground">
           Wallet {progress.walletIndex + 1} of {progress.walletCount}:{" "}
-          <span className="font-mono">{walletName(c, progress.wallet)}</span>
+          <span className="font-mono">{names.of(progress.wallet, 6)}</span>
         </p>
       )}
       <p>
@@ -44,12 +39,12 @@ function ProgressLines({ progress, c }: { progress: IngestionProgress | null; c:
   );
 }
 
-function WalletCoverage({ w, c }: { w: WalletIngestion; c: FraudWatchCase }) {
+function WalletCoverage({ w, names }: { w: WalletIngestion; names: Names }) {
   const { coverage } = w;
   return (
     <li className="flex flex-col gap-2 py-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-mono text-sm">{walletName(c, w.wallet)}</span>
+        <span className="font-mono text-sm">{names.of(w.wallet, 6)}</span>
         {coverage.complete ? <Badge variant="secondary">Complete</Badge> : <Badge variant="destructive">Partial history</Badge>}
         <span className="text-xs text-muted-foreground">
           {coverage.transactionCount.toLocaleString()} of {coverage.signatureCount.toLocaleString()} transactions
@@ -85,11 +80,11 @@ function WalletCoverage({ w, c }: { w: WalletIngestion; c: FraudWatchCase }) {
 
 /** Left-panel section: loads history from the RPC and reports how complete it is. */
 export function IngestionPanel({
-  c,
+  names,
   rpc,
   ingestion,
 }: {
-  c: FraudWatchCase;
+  names: Names;
   rpc: RpcSettings | undefined;
   ingestion: ReturnType<typeof useIngestion>;
 }) {
@@ -123,7 +118,7 @@ export function IngestionPanel({
         <span className="text-xs text-muted-foreground">Enhanced provider APIs are not used yet; loading with standard RPC.</span>
       )}
 
-      {state.status === "running" && <ProgressLines progress={state.progress} c={c} />}
+      {state.status === "running" && <ProgressLines progress={state.progress} names={names} />}
 
       {state.status === "error" && (
         <Alert variant="destructive">
@@ -147,7 +142,7 @@ export function IngestionPanel({
           )}
           <ul className="divide-y">
             {state.result.wallets.map((w) => (
-              <WalletCoverage key={w.wallet} w={w} c={c} />
+              <WalletCoverage key={w.wallet} w={w} names={names} />
             ))}
           </ul>
         </>
