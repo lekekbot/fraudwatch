@@ -8,12 +8,28 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { getDb } from "@/lib/db/db";
 import { getRawTransaction } from "@/lib/db/transaction-cache";
 import { NATIVE_SOL } from "@/lib/assets/assets";
+import type { Names } from "@/lib/labels/labels";
+import { enrichTransaction, protocolsUsed } from "@/lib/protocols/registry";
 import { formatLamports } from "@/lib/solana/amount";
-import { shortenAddress } from "@/lib/solana/address";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import type { WalletState, WalletTransactionEffect } from "@/lib/state/reconstruct";
 import { describeAction, type EffectSummary } from "@/lib/state/summarize";
 import { type Assets, assetLabel, formatAssetAmount, formatUtc } from "../asset-format";
+
+/** An address that opens in the inspector, where it can be labelled. */
+function AddressButton({ address, names, onSelect }: { address: string; names: Names; onSelect: (address: string) => void }) {
+  const known = names.known(address);
+  return (
+    <button
+      type="button"
+      title={address}
+      onClick={() => onSelect(address)}
+      className={`truncate text-left text-xs underline-offset-4 hover:underline ${known ? "" : "font-mono"}`}
+    >
+      {known ?? names.of(address, 6)}
+    </button>
+  );
+}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -68,6 +84,8 @@ export function TransactionDetails({
   onNext,
   onClose,
   onHide,
+  names,
+  onSelectAddress,
 }: {
   effect: WalletTransactionEffect;
   summary: EffectSummary;
@@ -79,7 +97,11 @@ export function TransactionDetails({
   onNext: () => void;
   onClose: () => void;
   onHide: () => void;
+  names: Names;
+  onSelectAddress: (address: string) => void;
 }) {
+  const enrichment = tx ? enrichTransaction(tx) : null;
+  const protocols = enrichment ? protocolsUsed(enrichment) : [];
   const format = (value: string, assetId: string, signed = false) => formatAssetAmount(value, assetId, state, assets, signed);
 
   return (
@@ -128,26 +150,25 @@ export function TransactionDetails({
         <dd className="tabular-nums">{effect.slot.toLocaleString()}</dd>
         <dt className="text-muted-foreground">Action</dt>
         <dd className="min-w-0 truncate font-mono text-xs" title={summary.action?.programId}>
-          {describeAction(summary.action)}
+          {describeAction(summary.action, summary.action ? names.known(summary.action.programId) : undefined)}
         </dd>
         {summary.actor && (
           <>
             <dt className="text-muted-foreground">Sent by</dt>
             <dd className="flex min-w-0 items-center gap-1">
-              <a
-                href={`https://solscan.io/account/${summary.actor}`}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="truncate font-mono text-xs underline-offset-4 hover:underline"
-              >
-                {shortenAddress(summary.actor, 6)}
-              </a>
+              <AddressButton address={summary.actor} names={names} onSelect={onSelectAddress} />
               <span className="text-xs text-muted-foreground">(not this wallet)</span>
             </dd>
           </>
         )}
         <dt className="text-muted-foreground">Protocol</dt>
-        <dd className="text-muted-foreground">Not identified yet</dd>
+        <dd className="min-w-0">
+          {protocols.length > 0 ? (
+            protocols.map((p) => p.name).join(", ")
+          ) : (
+            <span className="text-muted-foreground">{enrichment ? "None identified" : "Transaction not loaded"}</span>
+          )}
+        </dd>
         <dt className="text-muted-foreground">Fee paid</dt>
         <dd className="tabular-nums">{effect.feeLamports === "0" ? "None (another account paid)" : formatLamports(effect.feeLamports)}</dd>
       </dl>
@@ -190,14 +211,7 @@ export function TransactionDetails({
           <ul className="flex flex-col gap-1 text-sm">
             {summary.counterparties.slice(0, 8).map((cp) => (
               <li key={`${cp.address}:${cp.assetId}`} className="flex items-center justify-between gap-2">
-                <a
-                  href={`https://solscan.io/account/${cp.address}`}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="truncate font-mono text-xs underline-offset-4 hover:underline"
-                >
-                  {shortenAddress(cp.address, 6)}
-                </a>
+                <AddressButton address={cp.address} names={names} onSelect={onSelectAddress} />
                 <span className="text-xs whitespace-nowrap tabular-nums text-muted-foreground">
                   {format(cp.delta, cp.assetId, true)} {assetLabel(cp.assetId, assets)}
                 </span>
@@ -206,6 +220,22 @@ export function TransactionDetails({
           </ul>
         )}
       </Section>
+
+      {enrichment && enrichment.unknownPrograms.length > 0 && (
+        <Section title="Unknown programs">
+          <ul className="flex flex-col gap-1">
+            {enrichment.unknownPrograms.map((programId) => (
+              <li key={programId}>
+                <AddressButton address={programId} names={names} onSelect={onSelectAddress} />
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-muted-foreground">
+            Not in protocol registry v{enrichment.protocolRegistryVersion}. Name one yourself; it stays unknown to the
+            registry.
+          </p>
+        </Section>
+      )}
 
       {tx && (
         <Section title="Raw">

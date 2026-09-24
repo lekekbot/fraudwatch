@@ -116,6 +116,7 @@ Do not use force-directed positioning for the main graph.
 | 05 | Single-wallet chronological mapper |
 | 05A | Full-screen workspace and transaction filters |
 | 06 | Observed counterparties, labels, tags, protocol JSON |
+| 06A | Optional case dates from wallet activity |
 | 07 | Dynamic secondary-wallet mapping |
 | 08 | Multi-wallet chronological graph |
 | 09 | Scaling, filters, aggregation, navigation |
