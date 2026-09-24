@@ -1,0 +1,91 @@
+{
+  "id": "a-to-b-to-c",
+  "title": "A → B → C",
+  "description": "A sends 200 USDC to a short-lived intermediary B, which forwards 199.819667 USDC to C nine minutes later (gas-relayed) and closes its token account.",
+  "source": "mainnet-capture",
+  "capturedAt": "2026-09-24T04:38:14.519Z",
+  "rpc": "public mainnet-beta",
+  "wallets": [
+    {
+      "address": "dLm61Lvpigiaig9ZHcdh6iE7mFp7WmfqzkFMrDdf5Vo",
+      "role": "primary",
+      "label": "Grant recipient (dLm6)"
+    },
+    {
+      "address": "Ea3yxavbLEjgefLxvZLWtmXDMv3rbzfWrbtUSn9LB4ee",
+      "role": "mapped",
+      "label": "Intermediary (Ea3y)"
+    },
+    {
+      "address": "2hGUBZ7DFEdxAfturprijDLSQuG8byWijLZkUz5DE1An",
+      "role": "mapped",
+      "label": "Destination (2hGU)"
+    }
+  ],
+  "range": {
+    "start": "2026-07-30T08:40:00.000Z",
+    "end": "2026-07-30T09:10:00.000Z"
+  },
+  "expected": {
+    "signaturesByWallet": {
+      "dLm61Lvpigiaig9ZHcdh6iE7mFp7WmfqzkFMrDdf5Vo": [
+        "34T9T6rtjoNyuLRUhq3o3EqGU7uxkT54eNydVkmdhbySotsjS1XU7u686dCgTpG9XgWaK3svx6Qhcrt3vd9MhaVK",
+        "3dtc1fxP1AjH4EXVc5jYWMJ3MmGiDDEpRNnfiPHJrUWq3GKNw1Xm6stJEmDbJYxKPXZfBufaNhAJLfsYbGMPJwvn",
+        "4C2FSmimTs5XurB3jxYQKywZ6gTBRNCfLJonk6ySPHkcBcFAPNMcRg4vm3Ks7fKeL3xgWc7AmxnJuWwgp8LzNvjR"
+      ],
+      "Ea3yxavbLEjgefLxvZLWtmXDMv3rbzfWrbtUSn9LB4ee": [
+        "3PwsDsDBqMxL7HS41Q4Kn9iNk3hkn2R9ZGhW2hHVNuGcNPMNYH71nKr9WbAyJLKTGovQprqHhYvhmUdMZ1h7kA41",
+        "5sANhxg67e7tNStfrZo4Wy5DEXEcNdHdwAR6RPwEPj4X6kuWXNQrES5D9FXKcmvhTduGCwVy2dt3V9qpJkUbrnX3",
+        "4C2FSmimTs5XurB3jxYQKywZ6gTBRNCfLJonk6ySPHkcBcFAPNMcRg4vm3Ks7fKeL3xgWc7AmxnJuWwgp8LzNvjR"
+      ],
+      "2hGUBZ7DFEdxAfturprijDLSQuG8byWijLZkUz5DE1An": [
+        "3PwsDsDBqMxL7HS41Q4Kn9iNk3hkn2R9ZGhW2hHVNuGcNPMNYH71nKr9WbAyJLKTGovQprqHhYvhmUdMZ1h7kA41"
+      ]
+    },
+    "sharedSignatures": [
+      {
+        "signature": "4C2FSmimTs5XurB3jxYQKywZ6gTBRNCfLJonk6ySPHkcBcFAPNMcRg4vm3Ks7fKeL3xgWc7AmxnJuWwgp8LzNvjR",
+        "wallets": [
+          "dLm61Lvpigiaig9ZHcdh6iE7mFp7WmfqzkFMrDdf5Vo",
+          "Ea3yxavbLEjgefLxvZLWtmXDMv3rbzfWrbtUSn9LB4ee"
+        ]
+      },
+      {
+        "signature": "3PwsDsDBqMxL7HS41Q4Kn9iNk3hkn2R9ZGhW2hHVNuGcNPMNYH71nKr9WbAyJLKTGovQprqHhYvhmUdMZ1h7kA41",
+        "wallets": [
+          "Ea3yxavbLEjgefLxvZLWtmXDMv3rbzfWrbtUSn9LB4ee",
+          "2hGUBZ7DFEdxAfturprijDLSQuG8byWijLZkUz5DE1An"
+        ]
+      }
+    ],
+    "transactionCount": 5
+  },
+  "knownTransactions": [
+    {
+      "signature": "4C2FSmimTs5XurB3jxYQKywZ6gTBRNCfLJonk6ySPHkcBcFAPNMcRg4vm3Ks7fKeL3xgWc7AmxnJuWwgp8LzNvjR",
+      "wallets": [
+        "dLm61Lvpigiaig9ZHcdh6iE7mFp7WmfqzkFMrDdf5Vo",
+        "Ea3yxavbLEjgefLxvZLWtmXDMv3rbzfWrbtUSn9LB4ee"
+      ],
+      "description": "A -> B 200 USDC"
+    },
+    {
+      "signature": "3PwsDsDBqMxL7HS41Q4Kn9iNk3hkn2R9ZGhW2hHVNuGcNPMNYH71nKr9WbAyJLKTGovQprqHhYvhmUdMZ1h7kA41",
+      "wallets": [
+        "Ea3yxavbLEjgefLxvZLWtmXDMv3rbzfWrbtUSn9LB4ee",
+        "2hGUBZ7DFEdxAfturprijDLSQuG8byWijLZkUz5DE1An"
+      ],
+      "description": "B -> C 199.819667 USDC (fee paid by a gas relayer)"
+    }
+  ],
+  "notes": [
+    "ADDRESS POISONING in range: 5sANhxg6… (08:50:36) sends 0.001 USDC to B from dLm6yzRBcha48dokvEP9oNyZvFrt7p1syauDeBMf5Vo, a lookalike of A (dLm6…f5Vo), 29s after the real A->B transfer. That is why B held 200.001 USDC before forwarding.",
+    "ADDRESS POISONING in range: 34T9T6rt… (08:50:48) sends 0.001 USDC to A from Ea3Ru9KWxtpJGjMfvXqDDn6DqDe7v5x7gLbvkteHB4ee, and 3dtc1fxP… (08:50:48) sends 1,000 lamports to A from Ea12LDPUGLmd9b3EZaMnzv7vJmvnRgDxFvJHtwhvT4ee; both mimic B (Ea…4ee). They are not shared between mapped wallets and should not be treated as real flows.",
+    "B (Ea3yxavbLEjgefLxvZLWtmXDMv3rbzfWrbtUSn9LB4ee) has exactly 3 signatures in its entire history, all in range, and getSignaturesForAddress on the wallet address returns all of them (no token-account fallback needed). getAccountInfo(B) returns null: the system account never held lamports (A paid the ATA rent, a relayer paid the forward's fee).",
+    "B's USDC token account CzaKeRM7t9ysyuUGRRJVTu9iv17pSVpEgCyhREoDdFUs was NOT closed: getTokenAccountsByOwner(B) still returns it with a 0 balance. B 'ceased to exist' only in the sense that its system account does not exist.",
+    "3PwsDsDB… is gas-relayed: gasCUPQ7LzQf3DZtG4wGZUsBDQxqshW6GpugQ94MTRy is fee payer, takes a 0.181513 USDC fee via a second transferChecked and pays C's ATA rent; B co-signs. C receives 199.819667 USDC.",
+    "Outside this range, C's USDC token account 56emmenmWf3ZSSwnSfKzNAte8kb4FZbMfxEHGRUZsMuM has two transactions (2026-07-30 09:12:30 and 09:14:23) that getSignaturesForAddress(C) does NOT return — widening the range past 09:10 requires token-account coverage for C.",
+    "Address Ea3yxav…LB4ee resolved to Ea3yxavbLEjgefLxvZLWtmXDMv3rbzfWrbtUSn9LB4ee from the account keys of 4C2FSmimTs5XurB3jxYQKywZ6gTBRNCfLJonk6ySPHkcBcFAPNMcRg4vm3Ks7fKeL3xgWc7AmxnJuWwgp8LzNvjR.",
+    "Intermediary (Ea3y): history exhausted before range.start (oldest signature 2026-07-30T08:50:07.000Z)."
+  ]
+}
