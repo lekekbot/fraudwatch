@@ -1,5 +1,13 @@
 # Sprint 00 — Architecture Freeze
 
+**Status:** ✅ Complete (checked 2026-09-24)
+
+- Architecture decisions: `docs/ARCHITECTURE.md`, `docs/00_README.md`.
+- Prototype audit: `docs/PROTOTYPE_AUDIT.md` (Railway "Wallet Flow Map").
+- Fixtures: `fixtures/solana/` — all six scenarios plus `token-account-only`; `node scripts/fixtures/verify.ts` passes.
+- Terminology: `docs/TERMINOLOGY.md`.
+- Non-goals: "Explicitly not in MVP" in `docs/00_README.md`.
+
 **Goal:** Lock the database-free MVP architecture before implementation.
 
 ## Decisions to freeze
@@ -97,11 +105,11 @@ Create static fixtures for:
 
 ## Deliverables
 
-- [ ] architecture decision record;
-- [ ] prototype audit;
-- [ ] fixture set;
-- [ ] terminology list;
-- [ ] non-goals list.
+- [x] architecture decision record;
+- [x] prototype audit;
+- [x] fixture set;
+- [x] terminology list;
+- [x] non-goals list.
 
 ## Exit criteria
 

@@ -1,5 +1,13 @@
 # Sprint 01 — App Shell, RPC Settings, and Local Case Model
 
+**Status:** ✅ Complete (checked 2026-09-24)
+
+- Screens: home (`src/app/home-view.tsx`), new case (`src/app/cases/new/`), RPC settings (`src/app/settings/rpc/`), case shell (`src/app/case/`), `/map` startup (`src/app/map/`).
+- Model and storage: `src/lib/case/model.ts`, Dexie `cases` + `rpc_settings` stores in `src/lib/db/`.
+- Validation: Solana address, range, RPC URL scheme, connection test (`getVersion` + `getLatestBlockhash`), duplicate-case prompt.
+- `pnpm test` (33 tests), `pnpm typecheck`, `pnpm lint` all pass.
+- Note: the "Import case" button on Home is a disabled placeholder; import arrives in Sprint 10.
+
 **Goal:** Build the minimum application structure around local cases.
 
 ## Screens
@@ -105,8 +113,8 @@ Do not encode labels, RPC secrets, or fetched data in query parameters.
 
 ## Acceptance criteria
 
-- [ ] User can enter/save an RPC locally.
-- [ ] User can test RPC connectivity.
-- [ ] User can create a local case.
-- [ ] User can reopen a recent local case shell.
-- [ ] RPC credentials never enter the URL.
+- [x] User can enter/save an RPC locally.
+- [x] User can test RPC connectivity.
+- [x] User can create a local case.
+- [x] User can reopen a recent local case shell.
+- [x] RPC credentials never enter the URL.
