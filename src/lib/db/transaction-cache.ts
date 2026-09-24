@@ -92,3 +92,8 @@ export function createDbIngestionCache(db: FraudWatchDB, now: () => Date = () =>
     describeWriteError: describeStorageError,
   };
 }
+
+/** The RPC's original response for a transaction, if it's cached. */
+export async function getRawTransaction(db: FraudWatchDB, signature: string): Promise<unknown | undefined> {
+  return (await db.raw_transactions.get(transactionKey(signature)))?.raw;
+}

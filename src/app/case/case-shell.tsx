@@ -119,8 +119,8 @@ export function CaseShell() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Timeline</CardTitle>
-          <CardDescription>The chronological map arrives in a later sprint.</CardDescription>
+          <CardTitle>Startup link</CardTitle>
+          <CardDescription>Opens this wallet and date range in FraudWatch on another browser.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => copy(`${window.location.origin}/map/?${shareSearch}`, "Startup link")}>

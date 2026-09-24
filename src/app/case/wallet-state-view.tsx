@@ -5,30 +5,18 @@ import { ExternalLinkIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { AssetMetadata } from "@/lib/assets/assets";
 import type { FraudWatchCase } from "@/lib/case/model";
-import { formatBaseUnits, formatLamports } from "@/lib/solana/amount";
+import { formatLamports } from "@/lib/solana/amount";
 import { shortenAddress } from "@/lib/solana/address";
+import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import type { AssetState, WalletState, WalletTransactionEffect } from "@/lib/state/reconstruct";
+import { type Assets, assetLabel, formatAssetAmount, formatUtc } from "./asset-format";
+import { WalletTimeline } from "./timeline/wallet-timeline";
 
 const MAX_ROWS = 200;
 
-type Assets = Map<string, AssetMetadata>;
-
-function assetLabel(assetId: string, assets: Assets) {
-  const meta = assets.get(assetId);
-  return meta?.symbol || meta?.name || shortenAddress(assetId, 4);
-}
-
-function amount(value: string, assetId: string, state: WalletState, assets: Assets, signed = false) {
-  const decimals = state.decimals[assetId] ?? assets.get(assetId)?.decimals ?? 0;
-  const text = formatBaseUnits(value, decimals);
-  return signed && !value.startsWith("-") && value !== "0" ? `+${text}` : text;
-}
-
-function time(timestamp: string | null) {
-  return timestamp ? timestamp.slice(0, 19).replace("T", " ") : "—";
-}
+const amount = formatAssetAmount;
+const time = formatUtc;
 
 function TransactionCell({ e }: { e: WalletTransactionEffect }) {
   return (
@@ -80,8 +68,7 @@ function StateTable({ title, rows, status, state, assets }: {
   );
 }
 
-function WalletStatePanel({ state, assets }: { state: WalletState; assets: Assets }) {
-  const effects = state.effects.slice(0, MAX_ROWS);
+function WalletStateSummary({ state, assets }: { state: WalletState; assets: Assets }) {
   return (
     <div className="flex flex-col gap-4">
       {state.mismatches.length > 0 && (
@@ -115,7 +102,14 @@ function WalletStatePanel({ state, assets }: { state: WalletState; assets: Asset
         ))}
         <li>Only assets that moved in this range are shown. Holdings that sat untouched aren&apos;t visible yet.</li>
       </ul>
+    </div>
+  );
+}
 
+function WalletStateTable({ state, assets }: { state: WalletState; assets: Assets }) {
+  const effects = state.effects.slice(0, MAX_ROWS);
+  return (
+    <div className="flex flex-col gap-4">
       {effects.length === 0 ? (
         <p className="text-sm text-muted-foreground">No transactions in this range.</p>
       ) : (
@@ -180,8 +174,19 @@ function WalletStatePanel({ state, assets }: { state: WalletState; assets: Asset
   );
 }
 
-export function WalletStateView({ c, states, assets }: { c: FraudWatchCase; states: WalletState[]; assets: Assets }) {
+export function WalletStateView({
+  c,
+  states,
+  assets,
+  transactions,
+}: {
+  c: FraudWatchCase;
+  states: WalletState[];
+  assets: Assets;
+  transactions: Map<string, CanonicalTransaction>;
+}) {
   const [selected, setSelected] = useState(0);
+  const [view, setView] = useState<"timeline" | "table">("timeline");
   const state = states[Math.min(selected, states.length - 1)];
   if (!state) return null;
 
@@ -197,7 +202,19 @@ export function WalletStateView({ c, states, assets }: { c: FraudWatchCase; stat
             </Button>
           ))}
       </div>
-      <WalletStatePanel state={state} assets={assets} />
+      <WalletStateSummary state={state} assets={assets} />
+      <div className="flex rounded-md border p-0.5 self-start" role="group" aria-label="View">
+        {(["timeline", "table"] as const).map((v) => (
+          <Button key={v} size="xs" variant={view === v ? "secondary" : "ghost"} aria-pressed={view === v} onClick={() => setView(v)}>
+            {v === "timeline" ? "Timeline" : "Table"}
+          </Button>
+        ))}
+      </div>
+      {view === "timeline" ? (
+        <WalletTimeline key={state.wallet} state={state} transactions={transactions} range={c.range} assets={assets} labels={c.labels} />
+      ) : (
+        <WalletStateTable state={state} assets={assets} />
+      )}
     </div>
   );
 }
