@@ -57,7 +57,7 @@ export type WalletIngestion = {
 };
 
 export type IngestionStats = {
-  /** Transactions served from the local cache instead of the RPC. */
+  /** Transactions reused instead of fetched: from the local cache, or already loaded for another wallet in this run. */
   cachedTransactions: number;
   fetchedTransactions: number;
   /** Sub-ranges that had to be fetched because the cache didn't cover them. */
@@ -88,6 +88,8 @@ export type IngestOptions = {
   adapter: SolanaRpcAdapter;
   wallets: string[];
   range: CaseRange;
+  /** Per-wallet ranges (mapped wallets can start later than the case); `range` otherwise. */
+  ranges?: Record<string, CaseRange>;
   signal: AbortSignal;
   limits?: Partial<IngestionLimits>;
   onProgress?: (progress: IngestionProgress) => void;
@@ -177,7 +179,7 @@ function describeLimit(what: string, scan: SignatureScan, limits: IngestionLimit
  * Cancelling via `signal` stops work and returns what was loaded, marked incomplete.
  */
 export async function ingestWallets(options: IngestOptions): Promise<IngestionResult> {
-  const { adapter, wallets, range, signal, onProgress, cache } = options;
+  const { adapter, wallets, signal, onProgress, cache } = options;
   const limits: IngestionLimits = { ...DEFAULT_LIMITS, ...options.limits };
   const startedAt = (options.now ?? (() => new Date()))();
   const transactions = new Map<string, CanonicalTransaction>();
@@ -208,6 +210,7 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
   };
 
   for (const [walletIndex, wallet] of wallets.entries()) {
+    const range = options.ranges?.[wallet] ?? options.range;
     const signatures = new Map<string, number>();
     const newEntries: SignatureEntry[] = [];
     const tokenAccounts: string[] = [];
@@ -239,7 +242,6 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
       if (cache && missing.length > 0) {
         const cached = await guard(cache.getTransactions(missing));
         for (const [s, tx] of cached) transactions.set(s, tx);
-        stats.cachedTransactions += cached.size;
         missing = missing.filter((s) => !cached.has(s));
       }
       let done = 0;
@@ -369,6 +371,8 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
     }
 
     const ordered = [...signatures].sort(([, a], [, b]) => b - a).map(([s]) => s);
+    // Everything this wallet has that wasn't fetched for it: from the local cache, or already loaded for another wallet.
+    stats.cachedTransactions = ordered.filter((s) => transactions.has(s)).length - stats.fetchedTransactions;
     const timestamps = ordered
       .map((s) => transactions.get(s)?.timestamp)
       .filter((t): t is string => t != null)

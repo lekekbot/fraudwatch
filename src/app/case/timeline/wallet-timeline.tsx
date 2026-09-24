@@ -43,6 +43,7 @@ export function WalletTimeline({
   initialSignature,
   onHide,
   onSelectAddress,
+  sharedWith,
 }: {
   state: WalletState;
   transactions: Map<string, CanonicalTransaction>;
@@ -61,6 +62,8 @@ export function WalletTimeline({
   initialSignature?: string;
   /** Leaves a transaction off the map. */
   onHide: (signature: string) => void;
+  /** Other mapped wallets that also have this transaction. */
+  sharedWith: (signature: string) => string[];
 }) {
   const timeline = useRef<TimelineHandle>(null);
   const [mode, setMode] = useState<SpacingMode>("time");
@@ -153,6 +156,7 @@ export function WalletTimeline({
           }}
           names={names}
           onSelectAddress={onSelectAddress}
+          sharedWith={sharedWith(current.signature)}
         />
       ) : (
         inspector

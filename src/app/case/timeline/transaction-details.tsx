@@ -86,6 +86,7 @@ export function TransactionDetails({
   onHide,
   names,
   onSelectAddress,
+  sharedWith,
 }: {
   effect: WalletTransactionEffect;
   summary: EffectSummary;
@@ -99,6 +100,8 @@ export function TransactionDetails({
   onHide: () => void;
   names: Names;
   onSelectAddress: (address: string) => void;
+  /** Other mapped wallets that also have this transaction. */
+  sharedWith: string[];
 }) {
   const enrichment = tx ? enrichTransaction(tx) : null;
   const protocols = enrichment ? protocolsUsed(enrichment) : [];
@@ -158,6 +161,16 @@ export function TransactionDetails({
             <dd className="flex min-w-0 items-center gap-1">
               <AddressButton address={summary.actor} names={names} onSelect={onSelectAddress} />
               <span className="text-xs text-muted-foreground">(not this wallet)</span>
+            </dd>
+          </>
+        )}
+        {sharedWith.length > 0 && (
+          <>
+            <dt className="text-muted-foreground">Shared with</dt>
+            <dd className="flex min-w-0 flex-wrap gap-x-2">
+              {sharedWith.map((w) => (
+                <AddressButton key={w} address={w} names={names} onSelect={onSelectAddress} />
+              ))}
             </dd>
           </>
         )}

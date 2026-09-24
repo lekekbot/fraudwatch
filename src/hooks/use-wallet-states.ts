@@ -17,13 +17,21 @@ export type WalletStates = { states: WalletState[]; assets: Map<string, AssetMet
  * for every asset involved. Unknown mints are looked up on-chain once through
  * the user's RPC and cached; without an RPC they show as shortened mints.
  */
-export function useWalletStates(result: IngestionResult | null, range: CaseRange, rpcUrl: string | undefined) {
+export function useWalletStates(
+  result: IngestionResult | null,
+  range: CaseRange,
+  rpcUrl: string | undefined,
+  /** Mapped wallets that start later than the case; their cached state is keyed by their own range. */
+  ranges: Record<string, CaseRange> = {},
+) {
   // Tagged with the result it was computed from, so a stale value is never shown for a newer result.
   const [value, setValue] = useState<(WalletStates & { source: IngestionResult }) | null>(null);
 
   const { start, end } = range;
+  const rangesKey = JSON.stringify(ranges);
   useEffect(() => {
     const range: CaseRange = { start, end };
+    const ranges = JSON.parse(rangesKey) as Record<string, CaseRange>;
     if (!result) return;
     let active = true;
     const controller = new AbortController();
@@ -42,7 +50,7 @@ export function useWalletStates(result: IngestionResult | null, range: CaseRange
         const complete = w.coverage.complete;
         states.push(
           db
-            ? await getWalletState(db, w.wallet, range, txs, complete)
+            ? await getWalletState(db, w.wallet, ranges[w.wallet] ?? range, txs, complete)
             : reconstructWalletState(w.wallet, txs, { historyComplete: complete }),
         );
       }
@@ -74,7 +82,7 @@ export function useWalletStates(result: IngestionResult | null, range: CaseRange
       active = false;
       controller.abort();
     };
-  }, [result, start, end, rpcUrl]);
+  }, [result, start, end, rpcUrl, rangesKey]);
 
   return value && value.source === result ? value : null;
 }
