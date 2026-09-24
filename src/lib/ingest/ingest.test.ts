@@ -1,0 +1,161 @@
+import { describe, expect, it } from "vitest";
+import { generateHighActivity } from "../../../fixtures/solana/synthetic/generate";
+import { createGenericAdapter } from "@/lib/rpc/generic-adapter";
+import { type Fixture, loadFixture, type ReplayLog, replayFetch } from "@/test/fixture-rpc";
+import { type IngestOptions, ingestWallets } from "./ingest";
+
+function run(fixture: Fixture, overrides: Partial<IngestOptions> & { fetchImpl?: typeof fetch; wallets?: string[] } = {}) {
+  const { fetchImpl = replayFetch(fixture), ...rest } = overrides;
+  return ingestWallets({
+    adapter: createGenericAdapter("https://rpc.example.com/?api-key=k", { fetchImpl, maxRetries: 0 }),
+    wallets: fixture.manifest.wallets.map((w) => w.address),
+    range: fixture.manifest.range,
+    signal: new AbortController().signal,
+    ...rest,
+  });
+}
+
+function expectMatchesManifest(fixture: Fixture, result: Awaited<ReturnType<typeof ingestWallets>>) {
+  const { expected } = fixture.manifest;
+  for (const w of result.wallets) {
+    expect(new Set(w.signatures), w.wallet).toEqual(new Set(expected.signaturesByWallet[w.wallet]));
+    expect(w.signatures).toHaveLength(new Set(w.signatures).size);
+    expect(w.coverage.complete, w.coverage.warnings.join("; ")).toBe(true);
+    expect(w.coverage.transactionCount).toBe(w.signatures.length);
+  }
+  expect(result.transactions.size).toBe(expected.transactionCount);
+  expect(result.cancelled).toBe(false);
+}
+
+describe("ingestWallets against recorded mainnet fixtures", () => {
+  for (const id of ["simple-transfers", "swap", "a-to-b-to-c", "loop-c-d-a", "token-account-only"]) {
+    it(`reproduces ${id}`, async () => {
+      const fixture = loadFixture(id);
+      expectMatchesManifest(fixture, await run(fixture));
+    });
+  }
+
+  it("finds transfers that reference only a wallet's token account", async () => {
+    const fixture = loadFixture("token-account-only");
+    const [{ signature, wallet, tokenAccount }] = fixture.manifest.expected.signaturesOnlyViaTokenAccount!;
+    const result = await run(fixture, { wallets: [wallet] });
+    const w = result.wallets[0];
+    expect(w.signatures).toContain(signature);
+    expect(w.tokenAccounts).toContain(tokenAccount);
+  });
+
+  it("stores a transaction shared by two mapped wallets once and fetches it once", async () => {
+    const fixture = loadFixture("a-to-b-to-c");
+    const log: ReplayLog = [];
+    const result = await run(fixture, { fetchImpl: replayFetch(fixture, log) });
+    const fetched = log.filter((c) => c.method === "getTransaction").map((c) => c.params[0]);
+    expect(fetched).toHaveLength(new Set(fetched).size);
+    for (const shared of fixture.manifest.expected.sharedSignatures) {
+      for (const wallet of shared.wallets) {
+        expect(result.wallets.find((w) => w.wallet === wallet)!.signatures).toContain(shared.signature);
+      }
+    }
+  });
+
+  it("orders each wallet's signatures newest first", async () => {
+    const fixture = loadFixture("a-to-b-to-c");
+    const result = await run(fixture);
+    for (const w of result.wallets) {
+      const times = w.signatures.map((s) => result.transactions.get(s)!.timestamp!);
+      expect(times).toEqual([...times].sort().reverse());
+    }
+  });
+});
+
+describe("ingestWallets on a high-activity wallet", () => {
+  const fixture = generateHighActivity() as unknown as Fixture;
+
+  it("pages through signature history across multiple pages", async () => {
+    const log: ReplayLog = [];
+    const result = await run(fixture, { fetchImpl: replayFetch(fixture, log) });
+    expect(log.filter((c) => c.method === "getSignaturesForAddress").length).toBeGreaterThan(1);
+    expectMatchesManifest(fixture, result);
+  });
+
+  it("marks history partial when the signature safety limit is hit", async () => {
+    const result = await run(fixture, { limits: { maxSignaturesPerAddress: 100 } });
+    const w = result.wallets[0];
+    expect(w.signatures).toHaveLength(100);
+    expect(w.coverage.complete).toBe(false);
+    expect(w.coverage.warnings.join(" ")).toMatch(/safety limit of 100 signatures/);
+  });
+
+  it("marks history partial when the page limit is hit before the range start", async () => {
+    const result = await run(fixture, { limits: { maxPagesPerAddress: 1 } });
+    expect(result.wallets[0].coverage.complete).toBe(false);
+    expect(result.wallets[0].coverage.warnings.join(" ")).toMatch(/without reaching the range start/);
+  });
+
+  it("reports progress through each phase", async () => {
+    const phases = new Set<string>();
+    let last = { done: 0, total: 0 };
+    await run(fixture, {
+      onProgress: (p) => {
+        phases.add(p.phase);
+        if (p.phase === "transactions") last = p;
+      },
+    });
+    expect(phases).toEqual(new Set(["signatures", "transactions", "token_accounts"]));
+    expect(last.done).toBe(last.total);
+  });
+});
+
+describe("ingestWallets failure handling", () => {
+  it("returns partial, incomplete results when cancelled", async () => {
+    const fixture = loadFixture("a-to-b-to-c");
+    const controller = new AbortController();
+    const base = replayFetch(fixture);
+    let transactions = 0;
+    const fetchImpl = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      const { method } = JSON.parse(String(init?.body));
+      if (method === "getTransaction" && ++transactions === 2) controller.abort();
+      return base(url, init);
+    }) as typeof fetch;
+
+    const result = await run(fixture, { fetchImpl, signal: controller.signal, limits: { concurrency: 1 } });
+    expect(result.cancelled).toBe(true);
+    expect(result.wallets).toHaveLength(1);
+    expect(result.wallets[0].coverage.complete).toBe(false);
+    expect(result.wallets[0].coverage.warnings).toContain("Cancelled before this wallet finished loading.");
+    expect(result.transactions.size).toBe(1);
+  });
+
+  it("flags transactions the RPC no longer returns", async () => {
+    const fixture = loadFixture("simple-transfers");
+    const base = replayFetch(fixture);
+    const fetchImpl = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      const { method } = JSON.parse(String(init?.body));
+      if (method === "getTransaction") return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: null }));
+      return base(url, init);
+    }) as typeof fetch;
+
+    const w = (await run(fixture, { fetchImpl })).wallets[0];
+    expect(w.coverage.complete).toBe(false);
+    expect(w.coverage.transactionCount).toBe(0);
+    expect(w.coverage.warnings.join(" ")).toMatch(/not returned by the RPC/);
+  });
+
+  it("reports a wallet whose history cannot be loaded and continues with the next", async () => {
+    const fixture = loadFixture("a-to-b-to-c");
+    const [first] = fixture.manifest.wallets;
+    const base = replayFetch(fixture);
+    const fetchImpl = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      const { method, params } = JSON.parse(String(init?.body));
+      if (method === "getSignaturesForAddress" && params[0] === first.address) {
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32005, message: "busy" } }));
+      }
+      return base(url, init);
+    }) as typeof fetch;
+
+    const result = await run(fixture, { fetchImpl });
+    expect(result.wallets[0].error).toMatch(/busy/);
+    expect(result.wallets[0].coverage.complete).toBe(false);
+    expect(result.wallets[1].error).toBeUndefined();
+    expect(result.wallets[1].signatures.length).toBeGreaterThan(0);
+  });
+});
