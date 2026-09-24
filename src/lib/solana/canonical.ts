@@ -1,6 +1,12 @@
 import type { RawInstruction, RawParsedTransaction, RawTokenBalance } from "@/lib/rpc/generic-adapter";
 
 /**
+ * Bump when `canonicalize` output changes. Cached canonical transactions from an
+ * older version are re-derived from the stored raw response, not refetched.
+ */
+export const PARSER_VERSION = 1;
+
+/**
  * Provider-independent transaction shape. Amounts are integer strings in base
  * units (lamports / raw token amount) so no precision is lost.
  */

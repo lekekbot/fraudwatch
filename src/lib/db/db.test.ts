@@ -1,4 +1,5 @@
 import "fake-indexeddb/auto";
+import Dexie from "dexie";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createCase } from "@/lib/case/model";
 import { FraudWatchDB } from "./db";
@@ -66,5 +67,26 @@ describe("rpc_settings store", () => {
 
     await clearRpcSettings(db);
     expect(await getRpcSettings(db)).toBeUndefined();
+  });
+});
+
+describe("schema upgrade", () => {
+  it("keeps Sprint 01 cases and RPC settings when upgrading to the transaction cache schema", async () => {
+    const name = `upgrade-${crypto.randomUUID()}`;
+    const v1 = new Dexie(name);
+    v1.version(1).stores({ cases: "id, updatedAt, primaryWallet", rpc_settings: "id" });
+    const fwCase = createCase({ name: "old", primaryWallet: WALLET, range: RANGE });
+    await v1.table("cases").put(fwCase);
+    await v1.table("rpc_settings").put({ id: "default", url: "https://rpc.example.com", providerType: "auto", updatedAt: "x" });
+    v1.close();
+
+    const upgraded = new FraudWatchDB(name);
+    try {
+      expect(await getCase(upgraded, fwCase.id)).toEqual(fwCase);
+      expect((await getRpcSettings(upgraded))?.url).toBe("https://rpc.example.com");
+      expect(await upgraded.transactions.count()).toBe(0);
+    } finally {
+      await upgraded.delete();
+    }
   });
 });

@@ -19,8 +19,15 @@ export async function touchCase(db: FraudWatchDB, id: string, now = new Date()):
   await db.cases.update(id, { updatedAt: now.toISOString() });
 }
 
+/**
+ * Delete a case and its last-load record. Cached chain data stays: it is shared
+ * by every case that maps the same wallets.
+ */
 export async function deleteCase(db: FraudWatchDB, id: string): Promise<void> {
-  await db.cases.delete(id);
+  await db.transaction("rw", db.cases, db.ingestion_jobs, async () => {
+    await db.cases.delete(id);
+    await db.ingestion_jobs.delete(id);
+  });
 }
 
 /** Cases with the same primary wallet and exactly the same range. */

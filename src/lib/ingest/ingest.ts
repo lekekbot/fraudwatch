@@ -1,5 +1,6 @@
+import { type CachedCoverage, clampToFinalized, missingRanges, recordCoverage } from "@/lib/cache/coverage";
 import type { CaseRange } from "@/lib/case/range";
-import { SIGNATURE_PAGE_LIMIT, type SolanaRpcAdapter } from "@/lib/rpc/generic-adapter";
+import { type RawParsedTransaction, SIGNATURE_PAGE_LIMIT, type SolanaRpcAdapter } from "@/lib/rpc/generic-adapter";
 import { type CanonicalTransaction, canonicalize } from "@/lib/solana/canonical";
 import { TOKEN_PROGRAMS } from "@/lib/solana/programs";
 import { mapPool } from "./pool";
@@ -50,8 +51,30 @@ export type WalletIngestion = {
   /** Token accounts whose history was searched. */
   tokenAccounts: string[];
   coverage: IngestionCoverage;
+  stats: IngestionStats;
   /** Set when the wallet's own signature history could not be loaded at all. */
   error?: string;
+};
+
+export type IngestionStats = {
+  /** Transactions served from the local cache instead of the RPC. */
+  cachedTransactions: number;
+  fetchedTransactions: number;
+  /** Sub-ranges that had to be fetched because the cache didn't cover them. */
+  rangesFetched: CaseRange[];
+};
+
+export type SignatureEntry = { signature: string; blockTime: number };
+
+/** Local persistence used by ingestion; see `createDbIngestionCache`. */
+export type IngestionCache = {
+  getCoverage(wallet: string): Promise<CachedCoverage | undefined>;
+  putCoverage(coverage: CachedCoverage): Promise<void>;
+  getWalletSignatures(wallet: string, range: CaseRange): Promise<SignatureEntry[]>;
+  putWalletSignatures(wallet: string, entries: SignatureEntry[]): Promise<void>;
+  getTransactions(signatures: string[]): Promise<Map<string, CanonicalTransaction>>;
+  putTransactions(entries: Array<{ tx: CanonicalTransaction; raw: RawParsedTransaction }>): Promise<void>;
+  describeWriteError(err: unknown): string;
 };
 
 export type IngestionResult = {
@@ -68,6 +91,9 @@ export type IngestOptions = {
   signal: AbortSignal;
   limits?: Partial<IngestionLimits>;
   onProgress?: (progress: IngestionProgress) => void;
+  /** When set, cached coverage and transactions are reused and new results are saved. */
+  cache?: IngestionCache;
+  now?: () => Date;
 };
 
 class Cancelled extends Error {}
@@ -87,11 +113,12 @@ type SignatureScan = {
 async function scanSignatures(
   adapter: SolanaRpcAdapter,
   address: string,
-  range: { start: number; end: number },
+  caseRange: CaseRange,
   limits: IngestionLimits,
   signal: AbortSignal,
   onPage?: (found: number) => void,
 ): Promise<SignatureScan> {
+  const range = { start: Date.parse(caseRange.start) / 1000, end: Date.parse(caseRange.end) / 1000 };
   const scan: SignatureScan = { entries: [], reachedStart: false, limitHit: null, missingBlockTime: 0 };
   let before: string | undefined;
   for (let page = 0; ; page++) {
@@ -144,21 +171,22 @@ function describeLimit(what: string, scan: SignatureScan, limits: IngestionLimit
  * account (common in v0 and relayed transactions), which getSignaturesForAddress
  * on the wallet itself does not return.
  *
+ * With a cache, only the parts of the range not already covered are fetched, and
+ * cached transactions are never requested again.
+ *
  * Cancelling via `signal` stops work and returns what was loaded, marked incomplete.
  */
 export async function ingestWallets(options: IngestOptions): Promise<IngestionResult> {
-  const { adapter, wallets, signal, onProgress } = options;
+  const { adapter, wallets, range, signal, onProgress, cache } = options;
   const limits: IngestionLimits = { ...DEFAULT_LIMITS, ...options.limits };
-  const range = {
-    start: Math.floor(Date.parse(options.range.start) / 1000),
-    end: Math.floor(Date.parse(options.range.end) / 1000),
-  };
+  const startedAt = (options.now ?? (() => new Date()))();
   const transactions = new Map<string, CanonicalTransaction>();
   // Signatures the RPC returned null for (pruned history) vs. requests that failed.
   const unavailable = new Set<string>();
   const failed = new Map<string, string>();
   const results: WalletIngestion[] = [];
   let cancelled = false;
+  let cacheWriteError: string | null = null;
 
   const guard = async <T>(work: Promise<T>): Promise<T> => {
     try {
@@ -169,17 +197,32 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
     }
   };
 
+  /** Cache writes never fail ingestion; the first failure disables further writes. */
+  const write = async (work: (c: IngestionCache) => Promise<void>) => {
+    if (!cache || cacheWriteError) return;
+    try {
+      await work(cache);
+    } catch (err) {
+      cacheWriteError = cache.describeWriteError(err);
+    }
+  };
+
   for (const [walletIndex, wallet] of wallets.entries()) {
     const signatures = new Map<string, number>();
+    const newEntries: SignatureEntry[] = [];
     const tokenAccounts: string[] = [];
     const warnings: string[] = [];
+    const stats: IngestionStats = { cachedTransactions: 0, fetchedTransactions: 0, rangesFetched: [] };
     let complete = true;
     let error: string | undefined;
     const progress = (phase: IngestionPhase, done: number, total: number, found = signatures.size) =>
       onProgress?.({ wallet, walletIndex, walletCount: wallets.length, phase, signaturesFound: found, done, total });
 
     const addScan = (scan: SignatureScan, what: string) => {
-      for (const e of scan.entries) signatures.set(e.signature, e.blockTime);
+      for (const e of scan.entries) {
+        if (!signatures.has(e.signature)) newEntries.push(e);
+        signatures.set(e.signature, e.blockTime);
+      }
       const limit = describeLimit(what, scan, limits);
       if (limit) {
         complete = false;
@@ -192,73 +235,104 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
     };
 
     const fetchMissing = async () => {
-      const missing = [...signatures.keys()].filter((s) => !transactions.has(s) && !unavailable.has(s) && !failed.has(s));
+      let missing = [...signatures.keys()].filter((s) => !transactions.has(s) && !unavailable.has(s) && !failed.has(s));
+      if (cache && missing.length > 0) {
+        const cached = await guard(cache.getTransactions(missing));
+        for (const [s, tx] of cached) transactions.set(s, tx);
+        stats.cachedTransactions += cached.size;
+        missing = missing.filter((s) => !cached.has(s));
+      }
       let done = 0;
+      const toSave: Array<{ tx: CanonicalTransaction; raw: RawParsedTransaction }> = [];
       progress("transactions", done, missing.length);
-      await mapPool(missing, limits.concurrency, async (signature) => {
-        try {
-          const raw = await adapter.getTransaction(signature, signal);
-          if (raw) transactions.set(signature, canonicalize(raw));
-          else unavailable.add(signature);
-        } catch (err) {
-          if (signal.aborted) throw err;
-          failed.set(signature, (err as Error).message);
-        }
-        progress("transactions", ++done, missing.length);
-      });
+      try {
+        await mapPool(missing, limits.concurrency, async (signature) => {
+          try {
+            const raw = await adapter.getTransaction(signature, signal);
+            if (raw) {
+              const tx = canonicalize(raw);
+              transactions.set(signature, tx);
+              toSave.push({ tx, raw });
+              stats.fetchedTransactions++;
+            } else unavailable.add(signature);
+          } catch (err) {
+            if (signal.aborted) throw err;
+            failed.set(signature, (err as Error).message);
+          }
+          progress("transactions", ++done, missing.length);
+        });
+      } finally {
+        // Keep whatever arrived, even if cancelled part-way.
+        if (toSave.length > 0) await write((c) => c.putTransactions(toSave));
+      }
     };
 
+    let gaps: CaseRange[] = [range];
     try {
       if (signal.aborted) throw new Cancelled();
 
-      progress("signatures", 0, 0);
-      let walletScan: SignatureScan;
-      try {
-        walletScan = await guard(
-          scanSignatures(adapter, wallet, range, limits, signal, (found) => progress("signatures", 0, 0, found)),
-        );
-      } catch (err) {
-        if (err instanceof Cancelled) throw err;
-        error = `Could not load wallet history: ${(err as Error).message}`;
-        throw err;
+      if (cache) {
+        gaps = missingRanges(await guard(cache.getCoverage(wallet)), range);
+        for (const e of await guard(cache.getWalletSignatures(wallet, range))) signatures.set(e.signature, e.blockTime);
       }
-      addScan(walletScan, "Wallet history");
-      progress("signatures", 0, 0);
+      stats.rangesFetched = gaps;
+
+      if (gaps.length > 0) {
+        progress("signatures", 0, 0);
+        try {
+          for (const gap of gaps) {
+            const base = signatures.size;
+            const scan = await guard(
+              scanSignatures(adapter, wallet, gap, limits, signal, (found) => progress("signatures", 0, 0, base + found)),
+            );
+            addScan(scan, "Wallet history");
+          }
+        } catch (err) {
+          if (err instanceof Cancelled) throw err;
+          error = `Could not load wallet history: ${(err as Error).message}`;
+          throw err;
+        }
+        progress("signatures", 0, 0);
+      }
 
       await guard(fetchMissing());
 
-      // Currently owned token accounts, plus any this wallet owned in the loaded
-      // transactions (covers accounts closed since).
-      const owned = new Set<string>();
-      for (const programId of TOKEN_PROGRAMS) {
-        try {
-          for (const ta of await guard(adapter.getTokenAccountsByOwner(wallet, programId, signal))) owned.add(ta.address);
-        } catch (err) {
-          if (err instanceof Cancelled) throw err;
-          complete = false;
-          warnings.push(`Could not list token accounts for ${programId}: ${(err as Error).message}`);
+      if (gaps.length > 0) {
+        // Currently owned token accounts, plus any this wallet owned in the loaded
+        // transactions (covers accounts closed since).
+        const owned = new Set<string>();
+        for (const programId of TOKEN_PROGRAMS) {
+          try {
+            for (const ta of await guard(adapter.getTokenAccountsByOwner(wallet, programId, signal))) owned.add(ta.address);
+          } catch (err) {
+            if (err instanceof Cancelled) throw err;
+            complete = false;
+            warnings.push(`Could not list token accounts for ${programId}: ${(err as Error).message}`);
+          }
         }
-      }
-      for (const signature of signatures.keys()) {
-        for (const change of transactions.get(signature)?.tokenChanges ?? []) {
-          if (change.owner === wallet) owned.add(change.account);
+        for (const signature of signatures.keys()) {
+          for (const change of transactions.get(signature)?.tokenChanges ?? []) {
+            if (change.owner === wallet) owned.add(change.account);
+          }
         }
-      }
 
-      tokenAccounts.push(...owned);
-      progress("token_accounts", 0, tokenAccounts.length);
-      for (const [i, account] of tokenAccounts.entries()) {
-        try {
-          addScan(await guard(scanSignatures(adapter, account, range, limits, signal)), `Token account ${account}`);
-        } catch (err) {
-          if (err instanceof Cancelled) throw err;
-          complete = false;
-          warnings.push(`Token account ${account}: history unavailable (${(err as Error).message}).`);
+        tokenAccounts.push(...owned);
+        progress("token_accounts", 0, tokenAccounts.length);
+        for (const [i, account] of tokenAccounts.entries()) {
+          try {
+            for (const gap of gaps) {
+              addScan(await guard(scanSignatures(adapter, account, gap, limits, signal)), `Token account ${account}`);
+            }
+          } catch (err) {
+            if (err instanceof Cancelled) throw err;
+            complete = false;
+            warnings.push(`Token account ${account}: history unavailable (${(err as Error).message}).`);
+          }
+          progress("token_accounts", i + 1, tokenAccounts.length);
         }
-        progress("token_accounts", i + 1, tokenAccounts.length);
-      }
 
-      await guard(fetchMissing());
+        await guard(fetchMissing());
+      }
     } catch (err) {
       complete = false;
       if (err instanceof Cancelled) {
@@ -280,6 +354,20 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
       warnings.push(`${errored.length} transaction request(s) failed (${failed.get(errored[0])}).`);
     }
 
+    if (cache) {
+      if (newEntries.length > 0) await write((c) => c.putWalletSignatures(wallet, newEntries));
+      if (gaps.length > 0) {
+        await write(async (c) => {
+          let coverage = await c.getCoverage(wallet);
+          for (const gap of gaps) {
+            const finalized = clampToFinalized(gap, startedAt);
+            if (finalized) coverage = recordCoverage(coverage, wallet, finalized, complete, startedAt);
+          }
+          if (coverage) await c.putCoverage(coverage);
+        });
+      }
+    }
+
     const ordered = [...signatures].sort(([, a], [, b]) => b - a).map(([s]) => s);
     const timestamps = ordered
       .map((s) => transactions.get(s)?.timestamp)
@@ -297,10 +385,15 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
         transactionCount: ordered.filter((s) => transactions.has(s)).length,
         warnings,
       },
+      stats,
       error,
     });
 
     if (cancelled) break;
+  }
+
+  if (cacheWriteError) {
+    for (const w of results) w.coverage.warnings.push(`Results were not fully saved locally: ${cacheWriteError}`);
   }
 
   return { transactions, wallets: results, cancelled };
