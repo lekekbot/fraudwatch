@@ -150,7 +150,7 @@ export function IngestionPanel({ c, rpc }: { c: FraudWatchCase; rpc: RpcSettings
                 <WalletCoverage key={w.wallet} w={w} c={c} />
               ))}
             </ul>
-            {walletStates && <WalletStateView c={c} states={walletStates.states} assets={walletStates.assets} />}
+            {walletStates && <WalletStateView c={c} states={walletStates.states} assets={walletStates.assets} transactions={state.result.transactions} />}
           </>
         )}
       </CardContent>
