@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { RawParsedTransaction } from "@/lib/rpc/generic-adapter";
-import { canonicalize } from "@/lib/solana/canonical";
+import { type CanonicalInstruction, type CanonicalTransaction, canonicalize } from "@/lib/solana/canonical";
+import { ASSOCIATED_TOKEN_PROGRAM, COMPUTE_BUDGET_PROGRAM, STAKE_PROGRAM, SYSTEM_PROGRAM, TOKEN_PROGRAM } from "@/lib/solana/programs";
 import { loadFixture } from "@/test/fixture-rpc";
 import { reconstructWalletState } from "./reconstruct";
-import { summarizeEffect } from "./summarize";
+import { classifyInstructions, describeAction, summarizeEffect } from "./summarize";
 
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
@@ -42,5 +43,78 @@ describe("summarizeEffect", () => {
     expect(rows.some((r) => r.s.kind === "SWAP")).toBe(true);
     const swap = rows.find((r) => r.s.kind === "SWAP")!;
     expect(new Set([...swap.s.outflows, ...swap.s.inflows].map((c) => c.assetId)).size).toBeGreaterThanOrEqual(2);
+  });
+});
+
+const ix = (programId: string, type: string | null = null, program: string | null = null): CanonicalInstruction => ({
+  programId,
+  program,
+  type,
+  info: null,
+  accounts: [],
+  data: null,
+  outerIndex: null,
+  stackHeight: null,
+});
+
+const tx = (instructions: CanonicalInstruction[], inner: CanonicalInstruction[] = []): CanonicalTransaction => ({
+  signature: "sig",
+  slot: 1,
+  transactionIndex: null,
+  timestamp: null,
+  success: true,
+  feeLamports: "5000",
+  accounts: [{ address: "Payer", signer: true, writable: true, source: "transaction" }],
+  nativeChanges: [],
+  tokenChanges: [],
+  instructions,
+  innerInstructions: inner,
+  raw: null,
+});
+
+const BUDGET = ix(COMPUTE_BUDGET_PROGRAM);
+const UNKNOWN = "HobbakUnknownProgram1111111111111111111111";
+
+describe("classifyInstructions", () => {
+  it("never falls back to a catch-all: an unknown program is a PROGRAM call naming it", () => {
+    const r = classifyInstructions(tx([BUDGET, ix(UNKNOWN)]));
+    expect(r.kind).toBe("PROGRAM");
+    expect(r.action?.programId).toBe(UNKNOWN);
+    expect(describeAction(r.action)).toBe("Hobb…1111");
+  });
+
+  it("looks past account setup to the program that was called", () => {
+    const r = classifyInstructions(tx([BUDGET, ix(ASSOCIATED_TOKEN_PROGRAM, "create"), ix(UNKNOWN)]));
+    expect(r).toMatchObject({ kind: "PROGRAM", action: { programId: UNKNOWN } });
+  });
+
+  it("types pure setup as ACCOUNT", () => {
+    const r = classifyInstructions(
+      tx([ix(ASSOCIATED_TOKEN_PROGRAM, "createIdempotent", "spl-associated-token-account"), ix(SYSTEM_PROGRAM, "createAccount", "system")]),
+    );
+    expect(r.kind).toBe("ACCOUNT");
+    expect(describeAction(r.action)).toBe("spl-associated-token-account · createIdempotent");
+  });
+
+  it("flags token approvals anywhere in the transaction, even inner", () => {
+    const r = classifyInstructions(tx([ix(UNKNOWN)], [ix(TOKEN_PROGRAM, "approve", "spl-token")]));
+    expect(r.kind).toBe("APPROVAL");
+    expect(describeAction(r.action)).toBe("spl-token · approve");
+  });
+
+  it("types stake program activity as STAKE", () => {
+    expect(classifyInstructions(tx([ix(SYSTEM_PROGRAM, "createAccountWithSeed"), ix(STAKE_PROGRAM, "delegate", "stake")])).kind).toBe("STAKE");
+  });
+});
+
+describe("summarizeEffect actor", () => {
+  const effect = { wallet: "W", signature: "sig", slot: 1, timestamp: null, success: true, assetChanges: [], feeLamports: "0" };
+
+  it("names the fee payer when someone else sent the transaction", () => {
+    expect(summarizeEffect(effect, tx([ix(UNKNOWN)]))).toMatchObject({ kind: "PROGRAM", actor: "Payer" });
+  });
+
+  it("leaves actor empty when the wallet paid", () => {
+    expect(summarizeEffect({ ...effect, wallet: "Payer" }, tx([ix(UNKNOWN)])).actor).toBeNull();
   });
 });

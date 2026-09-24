@@ -11,9 +11,11 @@ const KINDS: { kind: EffectKind; label: string; dot: string }[] = [
   { kind: "SEND", label: "Send", dot: "bg-destructive" },
   { kind: "RECEIVE", label: "Receive", dot: "bg-[oklch(0.72_0.16_155)]" },
   { kind: "SWAP", label: "Swap", dot: "bg-[oklch(0.7_0.14_250)]" },
-  { kind: "FEE", label: "Fee only", dot: "bg-muted-foreground" },
+  { kind: "APPROVAL", label: "Approval", dot: "bg-[oklch(0.8_0.15_80)]" },
+  { kind: "STAKE", label: "Stake", dot: "bg-muted-foreground" },
+  { kind: "ACCOUNT", label: "Account setup", dot: "bg-muted-foreground" },
+  { kind: "PROGRAM", label: "Program call", dot: "bg-muted-foreground" },
   { kind: "FAILED", label: "Failed", dot: "border border-destructive" },
-  { kind: "OTHER", label: "Other", dot: "bg-muted-foreground" },
 ];
 
 function Toggle({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {

@@ -1,13 +1,33 @@
 import { NATIVE_SOL } from "@/lib/assets/assets";
-import type { CanonicalTransaction } from "@/lib/solana/canonical";
+import { shortenAddress } from "@/lib/solana/address";
+import type { CanonicalInstruction, CanonicalTransaction } from "@/lib/solana/canonical";
+import {
+  ASSOCIATED_TOKEN_PROGRAM,
+  COMPUTE_BUDGET_PROGRAM,
+  MEMO_PROGRAMS,
+  STAKE_PROGRAM,
+  SYSTEM_PROGRAM,
+  TOKEN_PROGRAMS,
+} from "@/lib/solana/programs";
 import type { AssetChange, WalletTransactionEffect } from "./reconstruct";
 
 /**
  * A plain-language reading of what one transaction did to one wallet, from its
- * balance changes alone. Protocol-aware labels (Sprint 06) refine this; they
- * never replace the observed deltas.
+ * balance changes, or from its instructions when none of the wallet's value
+ * moved. Protocol-aware labels (Sprint 06) refine this; they never replace the
+ * observed deltas.
  */
-export type EffectKind = "SEND" | "RECEIVE" | "SWAP" | "FEE" | "FAILED" | "OTHER";
+/**
+ * SEND / RECEIVE / SWAP come from the wallet's balance changes. A transaction
+ * that moved none of the wallet's value is typed by what it did instead:
+ * APPROVAL (token delegate or authority change), STAKE, ACCOUNT (token
+ * account setup or close), or PROGRAM (a call to any other program). There is
+ * deliberately no catch-all "other".
+ */
+export type EffectKind = "SEND" | "RECEIVE" | "SWAP" | "APPROVAL" | "STAKE" | "ACCOUNT" | "PROGRAM" | "FAILED";
+
+/** The instruction that best describes a transaction. */
+export type TxAction = { programId: string; program: string | null; instruction: string | null };
 
 export type ValueChange = { assetId: string; delta: string };
 
@@ -25,6 +45,9 @@ export type EffectSummary = {
   outflows: ValueChange[];
   inflows: ValueChange[];
   counterparties: Counterparty[];
+  action: TxAction | null;
+  /** Fee payer when it isn't the wallet: someone else sent this transaction. */
+  actor: string | null;
 };
 
 const ZERO = BigInt(0);
@@ -73,10 +96,45 @@ function counterpartiesFor(wallet: string, tx: CanonicalTransaction, changes: Va
     .map(({ address, assetId, delta }) => ({ address, assetId, delta }));
 }
 
+const INFRASTRUCTURE = new Set<string>([COMPUTE_BUDGET_PROGRAM, ...MEMO_PROGRAMS]);
+const TOKEN = new Set<string>(TOKEN_PROGRAMS);
+const APPROVALS = new Set(["approve", "approveChecked", "revoke", "setAuthority"]);
+const SYSTEM_SETUP = new Set(["createAccount", "createAccountWithSeed", "allocate", "allocateWithSeed", "assign", "assignWithSeed"]);
+const TOKEN_SETUP = new Set(["initializeAccount", "initializeAccount2", "initializeAccount3", "initializeImmutableOwner", "closeAccount", "syncNative", "getAccountDataSize"]);
+
+const isSetup = (ix: CanonicalInstruction) =>
+  ix.programId === ASSOCIATED_TOKEN_PROGRAM ||
+  (ix.programId === SYSTEM_PROGRAM && SYSTEM_SETUP.has(ix.type ?? "")) ||
+  (TOKEN.has(ix.programId) && TOKEN_SETUP.has(ix.type ?? ""));
+
+const toAction = (ix: CanonicalInstruction): TxAction => ({ programId: ix.programId, program: ix.program, instruction: ix.type });
+
+/** Types a transaction that moved none of the wallet's value, from its instructions. */
+export function classifyInstructions(tx: CanonicalTransaction | undefined): { kind: EffectKind; action: TxAction | null } {
+  if (!tx) return { kind: "PROGRAM", action: null };
+  const every = [...tx.instructions, ...tx.innerInstructions];
+  const approval = every.find((ix) => TOKEN.has(ix.programId) && APPROVALS.has(ix.type ?? ""));
+  if (approval) return { kind: "APPROVAL", action: toAction(approval) };
+  const stake = every.find((ix) => ix.programId === STAKE_PROGRAM);
+  if (stake) return { kind: "STAKE", action: toAction(stake) };
+  const outer = tx.instructions.filter((ix) => !INFRASTRUCTURE.has(ix.programId));
+  const main = outer.find((ix) => !isSetup(ix));
+  if (!main) return { kind: outer.length > 0 ? "ACCOUNT" : "PROGRAM", action: outer[0] ? toAction(outer[0]) : null };
+  return { kind: "PROGRAM", action: toAction(main) };
+}
+
+/** "spl-token · approve", or a shortened program ID when the RPC couldn't name it. */
+export function describeAction(action: TxAction | null): string {
+  if (!action) return "Unknown program";
+  const program = action.program ?? shortenAddress(action.programId, 4);
+  return action.instruction ? `${program} · ${action.instruction}` : program;
+}
+
 export function summarizeEffect(effect: WalletTransactionEffect, tx: CanonicalTransaction | undefined): EffectSummary {
   const changes = valueChanges(effect);
   const outflows = changes.filter((c) => c.delta.startsWith("-"));
   const inflows = changes.filter((c) => !c.delta.startsWith("-"));
+  const classified = classifyInstructions(tx);
   const kind: EffectKind = !effect.success
     ? "FAILED"
     : outflows.length > 0 && inflows.length > 0
@@ -85,8 +143,14 @@ export function summarizeEffect(effect: WalletTransactionEffect, tx: CanonicalTr
         ? "SEND"
         : inflows.length > 0
           ? "RECEIVE"
-          : effect.feeLamports !== "0"
-            ? "FEE"
-            : "OTHER";
-  return { kind, outflows, inflows, counterparties: tx ? counterpartiesFor(effect.wallet, tx, changes) : [] };
+          : classified.kind;
+  const feePayer = tx?.accounts[0]?.address;
+  return {
+    kind,
+    outflows,
+    inflows,
+    counterparties: tx ? counterpartiesFor(effect.wallet, tx, changes) : [],
+    action: classified.action,
+    actor: feePayer && feePayer !== effect.wallet ? feePayer : null,
+  };
 }

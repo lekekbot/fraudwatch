@@ -12,7 +12,7 @@ import { formatLamports } from "@/lib/solana/amount";
 import { shortenAddress } from "@/lib/solana/address";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import type { WalletState, WalletTransactionEffect } from "@/lib/state/reconstruct";
-import type { EffectSummary } from "@/lib/state/summarize";
+import { describeAction, type EffectSummary } from "@/lib/state/summarize";
 import { type Assets, assetLabel, formatAssetAmount, formatUtc } from "../asset-format";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -126,6 +126,26 @@ export function TransactionDetails({
         <dd>{effect.success ? "Success" : <span className="text-destructive">Failed</span>}</dd>
         <dt className="text-muted-foreground">Slot</dt>
         <dd className="tabular-nums">{effect.slot.toLocaleString()}</dd>
+        <dt className="text-muted-foreground">Action</dt>
+        <dd className="min-w-0 truncate font-mono text-xs" title={summary.action?.programId}>
+          {describeAction(summary.action)}
+        </dd>
+        {summary.actor && (
+          <>
+            <dt className="text-muted-foreground">Sent by</dt>
+            <dd className="flex min-w-0 items-center gap-1">
+              <a
+                href={`https://solscan.io/account/${summary.actor}`}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="truncate font-mono text-xs underline-offset-4 hover:underline"
+              >
+                {shortenAddress(summary.actor, 6)}
+              </a>
+              <span className="text-xs text-muted-foreground">(not this wallet)</span>
+            </dd>
+          </>
+        )}
         <dt className="text-muted-foreground">Protocol</dt>
         <dd className="text-muted-foreground">Not identified yet</dd>
         <dt className="text-muted-foreground">Fee paid</dt>

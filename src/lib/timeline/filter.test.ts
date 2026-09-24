@@ -7,18 +7,20 @@ const summary = (kind: EffectSummary["kind"], outflows: string[] = [], inflows: 
   outflows: outflows.map((assetId) => ({ assetId, delta: "-1" })),
   inflows: inflows.map((assetId) => ({ assetId, delta: "1" })),
   counterparties: [],
+  action: null,
+  actor: null,
 });
 
 describe("passesFilter", () => {
   it("shows everything with the empty filter", () => {
     expect(isFilterActive(EMPTY_FILTER)).toBe(false);
-    expect(passesFilter("a", summary("OTHER"), EMPTY_FILTER)).toBe(true);
+    expect(passesFilter("a", summary("PROGRAM"), EMPTY_FILTER)).toBe(true);
   });
 
   it("hides by kind and by signature", () => {
-    const f = { ...EMPTY_FILTER, hiddenKinds: new Set(["FEE" as const]), hiddenSignatures: new Set(["b"]) };
+    const f = { ...EMPTY_FILTER, hiddenKinds: new Set(["ACCOUNT" as const]), hiddenSignatures: new Set(["b"]) };
     expect(isFilterActive(f)).toBe(true);
-    expect(passesFilter("a", summary("FEE"), f)).toBe(false);
+    expect(passesFilter("a", summary("ACCOUNT"), f)).toBe(false);
     expect(passesFilter("b", summary("SEND", ["SOL"]), f)).toBe(false);
     expect(passesFilter("c", summary("SEND", ["SOL"]), f)).toBe(true);
   });
@@ -28,7 +30,7 @@ describe("passesFilter", () => {
     expect(passesFilter("a", summary("RECEIVE", [], ["SPAM"]), f)).toBe(false);
     expect(passesFilter("b", summary("SWAP", ["SPAM"], ["USDC"]), f)).toBe(true);
     // Nothing moved: the asset filter doesn't apply.
-    expect(passesFilter("c", summary("FEE"), f)).toBe(true);
+    expect(passesFilter("c", summary("PROGRAM"), f)).toBe(true);
   });
 });
 

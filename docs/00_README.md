@@ -114,6 +114,7 @@ Do not use force-directed positioning for the main graph.
 | 03 | IndexedDB transaction/cache layer |
 | 04 | Wallet asset-state reconstruction |
 | 05 | Single-wallet chronological mapper |
+| 05A | Full-screen workspace and transaction filters |
 | 06 | Observed counterparties, labels, tags, protocol JSON |
 | 07 | Dynamic secondary-wallet mapping |
 | 08 | Multi-wallet chronological graph |

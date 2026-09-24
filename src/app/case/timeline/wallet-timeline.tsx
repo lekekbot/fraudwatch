@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import { shortenAddress } from "@/lib/solana/address";
 import type { WalletState } from "@/lib/state/reconstruct";
-import { type EffectSummary, summarizeEffect } from "@/lib/state/summarize";
+import { describeAction, type EffectSummary, summarizeEffect } from "@/lib/state/summarize";
 import { eventAtOrAfter, eventTimes, type SpacingMode, stepEvent } from "@/lib/timeline/layout";
 import { type Assets, assetLabel, formatAssetAmount } from "../asset-format";
 import { SidePanel } from "../panel";
@@ -27,7 +27,7 @@ function headline(summary: EffectSummary, state: WalletState, assets: Assets): s
   if (summary.kind === "SWAP") return `${show(summary.outflows[0])} → ${show(summary.inflows[0])}`;
   const main = summary.kind === "RECEIVE" ? summary.inflows[0] : summary.outflows[0];
   if (main) return show(main);
-  return summary.kind === "FAILED" ? "No balance change" : "Fee only";
+  return summary.kind === "FAILED" ? "No balance change" : describeAction(summary.action);
 }
 
 export function WalletTimeline({
@@ -77,7 +77,16 @@ export function WalletTimeline({
           signature: e.signature,
           time: times[i],
           kind: s.kind,
-          lines: [cardDate(times[i]), s.kind, headline(s, state, assets), cp ? `${arrow} ${labels[cp.address] ?? shortenAddress(cp.address, 3)}` : ""],
+          lines: [
+            cardDate(times[i]),
+            s.kind,
+            headline(s, state, assets),
+            cp
+              ? `${arrow} ${labels[cp.address] ?? shortenAddress(cp.address, 3)}`
+              : s.actor
+                ? `by ${labels[s.actor] ?? shortenAddress(s.actor, 3)}`
+                : "",
+          ],
         };
       }),
     [state, summaries, times, assets, labels],

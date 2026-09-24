@@ -62,7 +62,7 @@ const PILL_H = 32;
 
 type Hit = { x0: number; y0: number; x1: number; y1: number; first: number; last: number };
 
-type Palette = Record<"fg" | "muted" | "border" | "card" | "bg" | "send" | "receive" | "swap" | "fee" | "failed", string>;
+type Palette = Record<"fg" | "muted" | "border" | "card" | "bg" | "send" | "receive" | "swap" | "approval" | "neutral" | "failed", string>;
 
 function readPalette(el: HTMLElement): Palette {
   const css = getComputedStyle(el);
@@ -76,13 +76,24 @@ function readPalette(el: HTMLElement): Palette {
     send: v("--destructive", "#e5484d"),
     receive: "oklch(0.72 0.16 155)",
     swap: "oklch(0.7 0.14 250)",
-    fee: v("--muted-foreground", "#999"),
+    approval: "oklch(0.8 0.15 80)",
+    neutral: v("--muted-foreground", "#999"),
     failed: v("--destructive", "#e5484d"),
   };
 }
 
 const kindColor = (p: Palette, kind: EffectKind) =>
-  kind === "SEND" ? p.send : kind === "RECEIVE" ? p.receive : kind === "SWAP" ? p.swap : kind === "FAILED" ? p.failed : p.fee;
+  kind === "SEND"
+    ? p.send
+    : kind === "RECEIVE"
+      ? p.receive
+      : kind === "SWAP"
+        ? p.swap
+        : kind === "APPROVAL"
+          ? p.approval
+          : kind === "FAILED"
+            ? p.failed
+            : p.neutral;
 
 const dayFormat = utcFormat("%-d %b");
 
