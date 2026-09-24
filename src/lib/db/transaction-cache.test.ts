@@ -5,6 +5,7 @@ import { createCase } from "@/lib/case/model";
 import type { CaseRange } from "@/lib/case/range";
 import { type IngestionCache, ingestWallets } from "@/lib/ingest/ingest";
 import { createGenericAdapter } from "@/lib/rpc/generic-adapter";
+import { PARSER_VERSION } from "@/lib/solana/canonical";
 import { type Fixture, loadFixture, type ReplayLog, replayFetch } from "@/test/fixture-rpc";
 import { deleteCase, saveCase } from "./cases";
 import { FraudWatchDB } from "./db";
@@ -67,7 +68,7 @@ describe("transaction cache", () => {
     const indexed = Object.values(fixture.manifest.expected.signaturesByWallet).flat().length;
     expect(await db.wallet_transactions.count()).toBe(indexed);
     const [shared] = fixture.manifest.expected.sharedSignatures;
-    expect(await db.transactions.get(`solana:${shared.signature}`)).toMatchObject({ signature: shared.signature, parserVersion: 1 });
+    expect(await db.transactions.get(`solana:${shared.signature}`)).toMatchObject({ signature: shared.signature, parserVersion: PARSER_VERSION });
   });
 
   it("fetches only the uncovered part of a wider range", async () => {
@@ -142,7 +143,7 @@ describe("derived cache invalidation", () => {
       expect(again.log).toEqual([]);
       expect(again.result.transactions.size).toBe(5);
       expect(await reopened.transactions.count()).toBe(5);
-      expect((await reopened.meta.get("derived:parser"))!.value).toBe(1);
+      expect((await reopened.meta.get("derived:parser"))!.value).toBe(PARSER_VERSION);
     } finally {
       reopened.close();
     }

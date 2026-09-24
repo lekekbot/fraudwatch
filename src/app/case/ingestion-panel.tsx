@@ -1,18 +1,17 @@
 "use client";
 
-import { DownloadIcon, ExternalLinkIcon, SquareIcon } from "lucide-react";
+import { DownloadIcon, SquareIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useIngestion } from "@/hooks/use-ingestion";
+import { useWalletStates } from "@/hooks/use-wallet-states";
 import type { FraudWatchCase } from "@/lib/case/model";
-import type { IngestionProgress, IngestionResult, WalletIngestion } from "@/lib/ingest/ingest";
+import type { IngestionProgress, WalletIngestion } from "@/lib/ingest/ingest";
 import type { RpcSettings } from "@/lib/rpc/settings";
-import { formatLamports } from "@/lib/solana/amount";
 import { shortenAddress } from "@/lib/solana/address";
-
-const MAX_ROWS = 200;
+import { WalletStateView } from "./wallet-state-view";
 
 function walletName(c: FraudWatchCase, address: string) {
   return c.labels[address] ?? shortenAddress(address, 6);
@@ -86,69 +85,9 @@ function WalletCoverage({ w, c }: { w: WalletIngestion; c: FraudWatchCase }) {
   );
 }
 
-function TransactionList({ result, c }: { result: IngestionResult; c: FraudWatchCase }) {
-  const walletsBySignature = new Map<string, string[]>();
-  for (const w of result.wallets) {
-    for (const s of w.signatures) walletsBySignature.set(s, [...(walletsBySignature.get(s) ?? []), w.wallet]);
-  }
-  const rows = [...result.transactions.values()].sort((a, b) => b.slot - a.slot);
-  if (rows.length === 0) return <p className="text-sm text-muted-foreground">No transactions in this range.</p>;
-
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="text-left text-xs text-muted-foreground">
-            <tr>
-              <th className="py-2 pr-4 font-medium">Time (UTC)</th>
-              <th className="py-2 pr-4 font-medium">Signature</th>
-              <th className="py-2 pr-4 font-medium">Status</th>
-              <th className="py-2 pr-4 font-medium">Fee</th>
-              <th className="py-2 pr-4 font-medium">Token changes</th>
-              <th className="py-2 font-medium">Mapped wallets</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {rows.slice(0, MAX_ROWS).map((tx) => (
-              <tr key={tx.signature}>
-                <td className="py-2 pr-4 whitespace-nowrap tabular-nums">
-                  {tx.timestamp ? tx.timestamp.slice(0, 19).replace("T", " ") : "—"}
-                </td>
-                <td className="py-2 pr-4">
-                  <a
-                    href={`https://solscan.io/tx/${tx.signature}`}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    className="inline-flex items-center gap-1 font-mono underline-offset-4 hover:underline"
-                  >
-                    {shortenAddress(tx.signature, 6)}
-                    <ExternalLinkIcon className="size-3" />
-                  </a>
-                </td>
-                <td className="py-2 pr-4">
-                  {tx.success ? "Success" : <span className="text-destructive">Failed</span>}
-                </td>
-                <td className="py-2 pr-4 whitespace-nowrap tabular-nums">{formatLamports(tx.feeLamports)}</td>
-                <td className="py-2 pr-4 tabular-nums">{tx.tokenChanges.filter((t) => t.delta !== "0").length}</td>
-                <td className="py-2 font-mono text-xs">
-                  {(walletsBySignature.get(tx.signature) ?? []).map((w) => walletName(c, w)).join(", ")}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {rows.length > MAX_ROWS && (
-        <p className="text-xs text-muted-foreground">
-          Showing the newest {MAX_ROWS} of {rows.length.toLocaleString()} transactions.
-        </p>
-      )}
-    </div>
-  );
-}
-
 export function IngestionPanel({ c, rpc }: { c: FraudWatchCase; rpc: RpcSettings | undefined }) {
   const { state, start, cancel, wallets } = useIngestion(c);
+  const walletStates = useWalletStates(state.status === "done" ? state.result : null, c.range, rpc?.url);
   const running = state.status === "running";
 
   return (
@@ -211,7 +150,7 @@ export function IngestionPanel({ c, rpc }: { c: FraudWatchCase; rpc: RpcSettings
                 <WalletCoverage key={w.wallet} w={w} c={c} />
               ))}
             </ul>
-            <TransactionList result={state.result} c={c} />
+            {walletStates && <WalletStateView c={c} states={walletStates.states} assets={walletStates.assets} />}
           </>
         )}
       </CardContent>
