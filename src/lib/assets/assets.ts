@@ -1,4 +1,4 @@
-import { address, getAddressEncoder, getProgramDerivedAddress } from "@solana/kit";
+import { address, getAddressDecoder, getAddressEncoder, getProgramDerivedAddress } from "@solana/kit";
 import type { SolanaRpcAdapter } from "@/lib/rpc/generic-adapter";
 import { SOL_DECIMALS } from "@/lib/solana/amount";
 
@@ -23,8 +23,13 @@ export type AssetMetadata = {
    * couldn't be read. Absent on records saved before NFT detection, which are refetched.
    */
   nft?: boolean | null;
+  /** Metaplex creators with a royalty share: who a secondary sale's royalty goes to. Absent until read. */
+  royaltyRecipients?: string[];
+  /** Royalty in basis points (500 = 5%), from Metaplex metadata. */
+  royaltyBps?: number;
   logo?: string;
-  source: "builtin" | "token-2022" | "metaplex" | "none";
+  /** bubblegum: a compressed NFT named from its mint instruction; das: named by the RPC's getAsset. */
+  source: "builtin" | "token-2022" | "metaplex" | "bubblegum" | "das" | "none";
   fetchedAt?: string;
 };
 
@@ -56,8 +61,20 @@ type ParsedMint = {
   };
 };
 
-/** Metaplex metadata account: key u8, update authority, mint, then borsh strings name, symbol, uri. */
-export function decodeMetaplexMetadata(bytes: Uint8Array): { name: string; symbol: string } | null {
+export type MetaplexMetadata = {
+  name: string;
+  symbol: string;
+  /** Present when the account is long enough to hold them. */
+  royaltyBps?: number;
+  creators?: { address: string; verified: boolean; share: number }[];
+};
+
+/**
+ * Metaplex metadata account: key u8, update authority, mint, borsh strings
+ * name, symbol, uri, then seller_fee_basis_points u16 and Option<Vec<Creator>>
+ * (address, verified u8, share u8).
+ */
+export function decodeMetaplexMetadata(bytes: Uint8Array): MetaplexMetadata | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let offset = 1 + 32 + 32;
   const readString = (): string | null => {
@@ -72,7 +89,24 @@ export function decodeMetaplexMetadata(bytes: Uint8Array): { name: string; symbo
   };
   const name = readString();
   const symbol = readString();
-  return name === null || symbol === null ? null : { name, symbol };
+  if (name === null || symbol === null) return null;
+  const uri = readString();
+  if (uri === null || offset + 3 > bytes.length) return { name, symbol };
+  const royaltyBps = view.getUint16(offset, true);
+  offset += 2;
+  const hasCreators = bytes[offset++] === 1;
+  if (!hasCreators) return { name, symbol, royaltyBps, creators: [] };
+  if (offset + 4 > bytes.length) return { name, symbol, royaltyBps };
+  const count = view.getUint32(offset, true);
+  offset += 4;
+  if (count > 5 || offset + count * 34 > bytes.length) return { name, symbol, royaltyBps };
+  const decoder = getAddressDecoder();
+  const creators = [];
+  for (let i = 0; i < count; i++) {
+    creators.push({ address: decoder.decode(bytes.subarray(offset, offset + 32)), verified: bytes[offset + 32] === 1, share: bytes[offset + 33] });
+    offset += 34;
+  }
+  return { name, symbol, royaltyBps, creators };
 }
 
 function base64ToBytes(value: string): Uint8Array {
@@ -131,8 +165,31 @@ export async function fetchAssetMetadata(
   if (metadata?.owner === METAPLEX_METADATA_PROGRAM && Array.isArray(metadata.data) && typeof metadata.data[0] === "string") {
     const decoded = decodeMetaplexMetadata(base64ToBytes(metadata.data[0]));
     if (decoded && (decoded.symbol || decoded.name)) {
-      return { id: mint, symbol: decoded.symbol || null, name: decoded.name || null, decimals, nft, source: "metaplex", fetchedAt };
+      const royalty =
+        decoded.creators === undefined
+          ? {}
+          : { royaltyBps: decoded.royaltyBps, royaltyRecipients: decoded.creators.filter((c) => c.share > 0).map((c) => c.address) };
+      return { id: mint, symbol: decoded.symbol || null, name: decoded.name || null, decimals, nft, ...royalty, source: "metaplex", fetchedAt };
     }
   }
   return { id: mint, symbol: null, name: null, decimals, nft, source: "none", fetchedAt };
+}
+
+/**
+ * Names a compressed NFT: from its mint instruction when a loaded transaction
+ * minted it, otherwise through the RPC's DAS `getAsset` where supported.
+ * Compressed NFTs are NFTs by construction.
+ */
+export async function fetchCompressedAssetMetadata(
+  adapter: Pick<SolanaRpcAdapter, "getAsset">,
+  assetId: string,
+  mintedName: string | undefined,
+  signal: AbortSignal,
+  now = new Date(),
+): Promise<AssetMetadata> {
+  const base = { id: assetId, decimals: 0, nft: true, fetchedAt: now.toISOString() };
+  if (mintedName) return { ...base, name: mintedName, symbol: null, source: "bubblegum" };
+  const asset = await adapter.getAsset(assetId, signal);
+  if (asset && (asset.name || asset.symbol)) return { ...base, name: asset.name, symbol: asset.symbol, source: "das" };
+  return { ...base, name: null, symbol: null, source: "none" };
 }

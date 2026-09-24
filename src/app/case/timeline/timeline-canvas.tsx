@@ -90,6 +90,7 @@ const KIND_COLOR: Partial<Record<EffectKind, keyof Palette>> = {
   NFT_BUY: "nft",
   NFT_SELL: "nft",
   NFT_MINT: "nft",
+  NFT_SWAP: "nft",
   NFT_TRANSFER: "nft",
   APPROVAL: "approval",
   FAILED: "failed",

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { type AssetMetadata, fetchAssetMetadata, nftCandidates } from "@/lib/assets/assets";
+import { type AssetMetadata, fetchAssetMetadata, fetchCompressedAssetMetadata, nftCandidates } from "@/lib/assets/assets";
+import { cnftMoves } from "@/lib/solana/bubblegum";
 import type { CaseRange } from "@/lib/case/range";
 import { getDb } from "@/lib/db/db";
 import { getAssetMetadata, getWalletState, saveAssetMetadata } from "@/lib/db/wallet-states";
@@ -57,9 +58,15 @@ export function useWalletStates(
 
       // Every asset the wallets held, plus possible NFTs anywhere in their transactions:
       // a seller never holds an escrowed listing, but its sale still needs the NFT check.
+      // Compressed NFTs have no mint account; they're named separately, from their mint instruction when loaded.
+      const compressed = new Map<string, string | undefined>();
+      for (const tx of result.transactions.values()) {
+        for (const move of cnftMoves(tx)) if (!compressed.has(move.assetId) || move.name) compressed.set(move.assetId, move.name);
+      }
       const ids = [
         ...states.flatMap((s) => [...s.opening, ...s.closing].map((a) => a.assetId)),
         ...nftCandidates([...result.transactions.values()].flatMap((tx) => tx.tokenChanges)),
+        ...compressed.keys(),
       ];
       const { known, toFetch } = db ? await getAssetMetadata(db, ids) : { known: new Map<string, AssetMetadata>(), toFetch: [] };
       if (!active) return;
@@ -70,7 +77,11 @@ export function useWalletStates(
       const fetched: AssetMetadata[] = [];
       await mapPool(toFetch, 2, async (mint) => {
         try {
-          fetched.push(await fetchAssetMetadata(adapter, mint, controller.signal));
+          fetched.push(
+            compressed.has(mint)
+              ? await fetchCompressedAssetMetadata(adapter, mint, compressed.get(mint), controller.signal)
+              : await fetchAssetMetadata(adapter, mint, controller.signal),
+          );
         } catch {
           // Leave it unnamed; it's retried next time.
         }

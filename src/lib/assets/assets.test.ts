@@ -3,7 +3,15 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createGenericAdapter } from "@/lib/rpc/generic-adapter";
 import { type Fixture, replayFetch } from "@/test/fixture-rpc";
-import { builtinAsset, decodeMetaplexMetadata, fetchAssetMetadata, metaplexMetadataAddress, NATIVE_SOL, nftCandidates } from "./assets";
+import {
+  builtinAsset,
+  decodeMetaplexMetadata,
+  fetchAssetMetadata,
+  fetchCompressedAssetMetadata,
+  metaplexMetadataAddress,
+  NATIVE_SOL,
+  nftCandidates,
+} from "./assets";
 
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDG = "2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH";
@@ -73,6 +81,34 @@ describe("asset metadata", () => {
     expect((await fetchAssetMetadata(mintWith(6, "1"), USDC, signal, NOW)).nft).toBe(false);
   });
 
+  it("names a compressed NFT from its mint, then DAS getAsset, and still marks it an NFT without either", async () => {
+    const das = (result: unknown) => ({ getAsset: async () => result as { name: string | null; symbol: string | null } | null });
+    expect(await fetchCompressedAssetMetadata(das(null), "asset", "Minted Name", signal, NOW)).toMatchObject({ name: "Minted Name", nft: true, source: "bubblegum" });
+    expect(await fetchCompressedAssetMetadata(das({ name: "From DAS", symbol: "D" }), "asset", undefined, signal, NOW)).toMatchObject({
+      name: "From DAS",
+      nft: true,
+      source: "das",
+    });
+    // Provider without DAS: the adapter resolves null; the asset stays unnamed but is still an NFT.
+    expect(await fetchCompressedAssetMetadata(das(null), "asset", undefined, signal, NOW)).toMatchObject({ name: null, nft: true, source: "none" });
+  });
+
+  it("asks the RPC for DAS getAsset with named params and treats an unsupported method as no name", async () => {
+    const bodies: unknown[] = [];
+    const reply = (body: unknown) =>
+      createGenericAdapter("https://rpc.example.com", {
+        maxRetries: 0,
+        fetchImpl: (async (_url: RequestInfo | URL, init?: RequestInit) => {
+          bodies.push(JSON.parse(String(init?.body)));
+          return new Response(JSON.stringify(body));
+        }) as typeof fetch,
+      });
+    const named = await reply({ jsonrpc: "2.0", id: 1, result: { content: { metadata: { name: "cNFT #1", symbol: "C" } } } }).getAsset("asset", signal);
+    expect(named).toEqual({ name: "cNFT #1", symbol: "C" });
+    expect(bodies[0]).toMatchObject({ method: "getAsset", params: { id: "asset" } });
+    expect(await reply({ jsonrpc: "2.0", id: 1, error: { code: -32601, message: "Method not found" } }).getAsset("asset", signal)).toBeNull();
+  });
+
   it("only flags 0-decimal, one-unit moves as NFT candidates", () => {
     expect([
       ...nftCandidates([
@@ -81,6 +117,16 @@ describe("asset metadata", () => {
         { mint: "usdc", decimals: 6, delta: "1" },
       ]),
     ]).toEqual(["nft"]);
+  });
+
+  it("reads a real NFT's royalty and creators from its Metaplex metadata account", () => {
+    const account = JSON.parse(readFileSync(join(process.cwd(), "fixtures/solana/nft-sale/metadata-account.json"), "utf8")) as { data: string };
+    const decoded = decodeMetaplexMetadata(Uint8Array.from(atob(account.data), (c) => c.charCodeAt(0)))!;
+    expect(decoded.name).toBe("SMB Gen3 #86");
+    expect(decoded.royaltyBps).toBe(500);
+    // Three creators; only the one with a share receives royalties.
+    expect(decoded.creators!.map((c) => c.share)).toEqual([0, 0, 100]);
+    expect(decoded.creators![2].address.startsWith("HqqiyJ")).toBe(true);
   });
 
   it("strips Metaplex NUL padding and rejects truncated data", () => {

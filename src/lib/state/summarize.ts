@@ -1,6 +1,7 @@
 import { NATIVE_SOL } from "@/lib/assets/assets";
 import { registry } from "@/lib/protocols/registry";
 import { shortenAddress } from "@/lib/solana/address";
+import { cnftMoves } from "@/lib/solana/bubblegum";
 import type { CanonicalInstruction, CanonicalTransaction } from "@/lib/solana/canonical";
 import {
   ASSOCIATED_TOKEN_PROGRAM,
@@ -32,6 +33,7 @@ export type EffectKind =
   | "NFT_BUY"
   | "NFT_SELL"
   | "NFT_MINT"
+  | "NFT_SWAP"
   | "NFT_TRANSFER"
   | "APPROVAL"
   | "STAKE"
@@ -44,16 +46,34 @@ export type EffectKind =
  * as an NFT is checked on-chain per mint (see `AssetMetadata.nft`).
  */
 export type NftTrade = {
-  mint: string;
-  /** What this wallet paid (buy, mint) or received (sale); null for a transfer. */
+  /** NFTs this wallet received and gave up; more than one is a bundle, both sides a swap. */
+  received: string[];
+  sent: string[];
+  /** Value this wallet paid (buy, mint) or received (sale) alongside; null for a plain transfer or swap. */
   payment: ValueChange | null;
-  /** The other side: seller for a buy, buyer for a sale, sender/recipient for a transfer. */
+  /** The other side: seller for a buy, buyer for a sale, counterparty for a transfer or swap. */
   party: string | null;
-  /** Everyone else paid in the payment asset: marketplace fees, royalties, rent. Largest first. */
-  others: { address: string; amount: string }[];
+  /** Everyone else paid in the payment asset, largest first, with what they most likely are. */
+  others: { address: string; amount: string; role: RecipientRole }[];
   /** Marketplace program, when the registry knows one in the transaction. */
   marketplace: string | null;
 };
+
+/**
+ * royalty: a creator with a royalty share in a traded NFT's metadata.
+ * rent: an account created in this transaction. marketplace_fee: a registry
+ * fee account. unidentified: anyone else (often a marketplace fee the
+ * registry doesn't list).
+ */
+export type RecipientRole = "royalty" | "rent" | "marketplace_fee" | "unidentified";
+
+/** What's known about NFTs, from on-chain metadata; see `AssetMetadata`. */
+export type NftCatalog = {
+  isNft: (mint: string) => boolean;
+  royaltyRecipients: (mint: string) => readonly string[];
+};
+
+export const NO_NFTS: NftCatalog = { isNft: () => false, royaltyRecipients: () => [] };
 
 /** The instruction that best describes a transaction. */
 export type TxAction = { programId: string; program: string | null; instruction: string | null };
@@ -77,7 +97,7 @@ export type EffectSummary = {
   action: TxAction | null;
   /** Fee payer when it isn't the wallet: someone else sent this transaction. */
   actor: string | null;
-  /** Set for NFT_BUY / NFT_SELL / NFT_MINT / NFT_TRANSFER. */
+  /** Set for every NFT_ kind. */
   nft?: NftTrade;
 };
 
@@ -188,64 +208,96 @@ function nftTrade(
   tx: CanonicalTransaction | undefined,
   changes: ValueChange[],
   counterparties: Counterparty[],
-  isNft: (mint: string) => boolean,
+  nfts: NftCatalog,
 ): { kind: EffectKind; nft: NftTrade } | null {
-  const nftIn = changes.find((c) => !c.delta.startsWith("-") && isNft(c.assetId));
-  const nftOut = changes.find((c) => c.delta.startsWith("-") && isNft(c.assetId));
-  const valueIn = changes.find((c) => !c.delta.startsWith("-") && !isNft(c.assetId));
-  const valueOut = changes.find((c) => c.delta.startsWith("-") && !isNft(c.assetId));
+  // Compressed NFTs have no token balances; their moves come from Bubblegum's leaf events.
+  const moves = tx ? cnftMoves(tx) : [];
+  const cnftsIn = moves.filter((m) => m.to === effect.wallet && m.from !== effect.wallet);
+  const cnftsOut = moves.filter((m) => m.from === effect.wallet && m.to !== effect.wallet);
+  const received = [
+    ...changes.filter((c) => !c.delta.startsWith("-") && nfts.isNft(c.assetId)).map((c) => c.assetId),
+    ...cnftsIn.map((m) => m.assetId),
+  ];
+  const sent = [
+    ...changes.filter((c) => c.delta.startsWith("-") && nfts.isNft(c.assetId)).map((c) => c.assetId),
+    ...cnftsOut.map((m) => m.assetId),
+  ];
+  const valueIn = changes.find((c) => !c.delta.startsWith("-") && !nfts.isNft(c.assetId));
+  const valueOut = changes.find((c) => c.delta.startsWith("-") && !nfts.isNft(c.assetId));
   const every = tx ? [...tx.instructions, ...tx.innerInstructions] : [];
   const marketplace = every.find((ix) => registry.lookup(ix.programId)?.category === "nft_marketplace")?.programId ?? null;
   // Payers lose what this wallet gains; payees gain what it loses. Counterparties are sorted by size.
   const payer = (assetId: string) => counterparties.find((c) => c.assetId === assetId && c.delta.startsWith("-"))?.address ?? null;
   const payee = (assetId: string) => counterparties.find((c) => c.assetId === assetId && !c.delta.startsWith("-"))?.address ?? null;
-  const others = (payment: ValueChange, exclude: (string | null)[]) =>
-    tx
-      ? recipients(tx, payment.assetId)
-          .filter((r) => r.address !== effect.wallet && !exclude.includes(r.address))
-          .map((r) => ({ address: r.address, amount: r.amount.toString() }))
-      : [];
-  const trade = (kind: EffectKind, mint: string, payment: ValueChange | null, party: string | null) => ({
-    kind,
-    nft: { mint, payment, party, others: payment ? others(payment, [party]) : [], marketplace },
-  });
 
-  if (nftIn) {
-    const minted = every.some((ix) => MINT_TYPES.has(ix.type ?? "") && (ix.info as { mint?: string } | null)?.mint === nftIn.assetId);
-    if (minted) return trade("NFT_MINT", nftIn.assetId, valueOut ?? null, valueOut ? payee(valueOut.assetId) : null);
-    if (valueOut) return trade("NFT_BUY", nftIn.assetId, valueOut, payee(valueOut.assetId));
-    return trade("NFT_TRANSFER", nftIn.assetId, null, payer(nftIn.assetId));
+  const trade = (kind: EffectKind, nftsIn: string[], nftsOut: string[], payment: ValueChange | null, party: string | null) => {
+    const royalty = new Set([...nftsIn, ...nftsOut].flatMap((m) => nfts.royaltyRecipients(m)));
+    const created = new Set(tx?.nativeChanges.filter((n) => n.pre === "0").map((n) => n.account) ?? []);
+    const role = (address: string): RecipientRole =>
+      royalty.has(address)
+        ? "royalty"
+        : created.has(address)
+          ? "rent"
+          : registry.lookup(address)?.role === "fee_account"
+            ? "marketplace_fee"
+            : "unidentified";
+    const others =
+      payment && tx
+        ? recipients(tx, payment.assetId)
+            .filter((r) => r.address !== effect.wallet && r.address !== party)
+            .map((r) => ({ address: r.address, amount: r.amount.toString(), role: role(r.address) }))
+        : [];
+    return { kind, nft: { received: nftsIn, sent: nftsOut, payment, party, others, marketplace } };
+  };
+
+  // The other side of a cNFT move, which balance changes can't show.
+  const cnftFrom = cnftsIn[0]?.from ?? null;
+  const cnftTo = cnftsOut[0]?.to ?? null;
+  if (received.length > 0 && sent.length > 0) {
+    const payment = valueOut ?? valueIn ?? null;
+    return trade("NFT_SWAP", received, sent, payment, payee(sent[0]) ?? payer(received[0]) ?? cnftTo ?? cnftFrom);
   }
-  if (nftOut) {
-    if (valueIn) return trade("NFT_SELL", nftOut.assetId, valueIn, payer(valueIn.assetId));
-    return trade("NFT_TRANSFER", nftOut.assetId, null, payee(nftOut.assetId));
+  if (received.length > 0) {
+    const minted =
+      cnftsIn.some((m) => m.kind === "mint") ||
+      received.some((mint) => every.some((ix) => MINT_TYPES.has(ix.type ?? "") && (ix.info as { mint?: string } | null)?.mint === mint));
+    if (minted) return trade("NFT_MINT", received, [], valueOut ?? null, valueOut ? payee(valueOut.assetId) : null);
+    if (valueOut) return trade("NFT_BUY", received, [], valueOut, payee(valueOut.assetId) ?? cnftFrom);
+    return trade("NFT_TRANSFER", received, [], null, payer(received[0]) ?? cnftFrom);
+  }
+  if (sent.length > 0) {
+    if (valueIn) return trade("NFT_SELL", [], sent, valueIn, payer(valueIn.assetId) ?? cnftTo);
+    return trade("NFT_TRANSFER", [], sent, null, payee(sent[0]) ?? cnftTo);
   }
   // A listing held in marketplace escrow never sits in the seller's wallet: it's a sale when the
-  // address that paid this wallet received an NFT in the same transaction.
+  // address that paid this wallet received NFTs in the same transaction.
   if (valueIn && !valueOut && tx) {
     const payers = new Set(counterparties.filter((c) => c.assetId === valueIn.assetId && c.delta.startsWith("-")).map((c) => c.address));
-    const bought = tx.tokenChanges.find((t) => t.delta === "1" && t.owner && payers.has(t.owner) && isNft(t.mint));
-    if (bought) return trade("NFT_SELL", bought.mint, valueIn, bought.owner);
+    const bought = [
+      ...tx.tokenChanges.filter((t) => t.delta === "1" && t.owner && payers.has(t.owner) && nfts.isNft(t.mint)).map((t) => ({ id: t.mint, owner: t.owner! })),
+      ...moves.filter((m) => payers.has(m.to)).map((m) => ({ id: m.assetId, owner: m.to })),
+    ];
+    if (bought.length > 0) return trade("NFT_SELL", [], [...new Set(bought.map((b) => b.id))], valueIn, bought[0].owner);
   }
   return null;
 }
 
 /**
- * `isNft` says whether a mint is an NFT (checked on-chain; see
- * `AssetMetadata.nft`). Without it, NFT trades read as plain sends, receives
- * and swaps.
+ * `nfts` says which mints are NFTs and who their royalties go to (checked
+ * on-chain; see `AssetMetadata`). Without it, NFT trades read as plain sends,
+ * receives and swaps.
  */
 export function summarizeEffect(
   effect: WalletTransactionEffect,
   tx: CanonicalTransaction | undefined,
-  isNft: (mint: string) => boolean = () => false,
+  nfts: NftCatalog = NO_NFTS,
 ): EffectSummary {
   const changes = valueChanges(effect);
   const outflows = changes.filter((c) => c.delta.startsWith("-"));
   const inflows = changes.filter((c) => !c.delta.startsWith("-"));
   const classified = classifyInstructions(tx);
   const counterparties = tx ? counterpartiesFor(effect.wallet, tx, changes) : [];
-  const nft = effect.success ? nftTrade(effect, tx, changes, counterparties, isNft) : null;
+  const nft = effect.success ? nftTrade(effect, tx, changes, counterparties, nfts) : null;
   const kind: EffectKind = !effect.success
     ? "FAILED"
     : nft

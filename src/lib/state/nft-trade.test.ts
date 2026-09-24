@@ -4,7 +4,8 @@ import { describe, expect, it } from "vitest";
 import type { RawParsedTransaction } from "@/lib/rpc/generic-adapter";
 import { canonicalize } from "@/lib/solana/canonical";
 import { reconstructWalletState } from "./reconstruct";
-import { summarizeEffect } from "./summarize";
+import { decodeMetaplexMetadata } from "@/lib/assets/assets";
+import { NO_NFTS, type NftCatalog, summarizeEffect } from "./summarize";
 
 /** A real Tensor purchase of an SMB Gen3 NFT, recorded from mainnet (2026-08-29 14:30:55 UTC). */
 const fixture = JSON.parse(readFileSync(join(process.cwd(), "fixtures/solana/nft-sale/transaction.json"), "utf8")) as {
@@ -17,11 +18,18 @@ const fixture = JSON.parse(readFileSync(join(process.cwd(), "fixtures/solana/nft
 };
 const TENSOR = "TCMPhJdwDryooaGtiocG1u3xcYbRpiJzb283XfCZsDp";
 const tx = canonicalize(fixture.response);
-const isNft = (mint: string) => mint === fixture.mint;
+const metadata = JSON.parse(readFileSync(join(process.cwd(), "fixtures/solana/nft-sale/metadata-account.json"), "utf8")) as { data: string };
+const creators = decodeMetaplexMetadata(Uint8Array.from(atob(metadata.data), (c) => c.charCodeAt(0)))!.creators!;
+const royaltyRecipients = creators.filter((c) => c.share > 0).map((c) => c.address);
+const catalog: NftCatalog = {
+  isNft: (mint) => mint === fixture.mint,
+  royaltyRecipients: (mint) => (mint === fixture.mint ? royaltyRecipients : []),
+};
+const only = (mints: string[]): NftCatalog => ({ isNft: (m) => mints.includes(m), royaltyRecipients: () => [] });
 
-function summaryFor(wallet: string, nftCheck = isNft) {
+function summaryFor(wallet: string, nfts = catalog) {
   const [effect] = reconstructWalletState(wallet, [tx], { historyComplete: true }).effects;
-  return summarizeEffect(effect, tx, nftCheck);
+  return summarizeEffect(effect, tx, nfts);
 }
 
 describe("NFT trades on a real Tensor sale", () => {
@@ -33,14 +41,21 @@ describe("NFT trades on a real Tensor sale", () => {
     const s = summaryFor(fixture.buyer);
     expect(s.kind).toBe("NFT_BUY");
     expect(s.nft).toMatchObject({
-      mint: fixture.mint,
+      received: [fixture.mint],
+      sent: [],
       // 3.99322428 SOL left the wallet; 0.000085 of that was the network fee, not the price.
       payment: { assetId: "SOL", delta: "-3993139280" },
       party: fixture.seller,
       marketplace: TENSOR,
     });
-    // Fees and royalties: everyone else paid in SOL, excluding the seller and token-account rent.
-    expect(s.nft!.others[0].amount).toBe("186500000");
+    // Everyone else paid in SOL, excluding the seller and token-account rent, each with its likely role.
+    expect(s.nft!.others.map((o) => [o.amount, o.role])).toEqual([
+      ["186500000", "royalty"], // 5% to the creator in the NFT's metadata
+      ["37300000", "unidentified"], // 1% each: marketplace fees the registry doesn't list
+      ["37300000", "unidentified"],
+      ["1447680", "rent"], // an account created by this transaction
+    ]);
+    expect(s.nft!.others[0].address).toBe(royaltyRecipients[0]);
     expect(s.nft!.others.every((o) => o.address !== fixture.seller && o.address !== fixture.buyer)).toBe(true);
   });
 
@@ -49,7 +64,8 @@ describe("NFT trades on a real Tensor sale", () => {
     expect(s.inflows.map((c) => c.assetId)).toEqual(["SOL"]);
     expect(s.kind).toBe("NFT_SELL");
     expect(s.nft).toMatchObject({
-      mint: fixture.mint,
+      received: [],
+      sent: [fixture.mint],
       payment: { assetId: "SOL", delta: "3735136480" },
       party: fixture.buyer,
       marketplace: TENSOR,
@@ -57,8 +73,8 @@ describe("NFT trades on a real Tensor sale", () => {
   });
 
   it("falls back to plain send/receive when the mint isn't known to be an NFT", () => {
-    expect(summaryFor(fixture.buyer, () => false).kind).toBe("SWAP");
-    expect(summaryFor(fixture.seller, () => false).kind).toBe("RECEIVE");
+    expect(summaryFor(fixture.buyer, NO_NFTS).kind).toBe("SWAP");
+    expect(summaryFor(fixture.seller, NO_NFTS).kind).toBe("RECEIVE");
   });
 });
 
@@ -98,7 +114,7 @@ describe("NFT mints and transfers", () => {
         { programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", program: "spl-token", type: "mintTo", info: { mint: NFT }, accounts: [], data: null, outerIndex: null, stackHeight: null },
       ],
     };
-    const s = summarizeEffect(effect([{ assetId: "SOL", delta: "-1000005000" }, { assetId: NFT, delta: "1" }]), mintTx, (m) => m === NFT);
+    const s = summarizeEffect(effect([{ assetId: "SOL", delta: "-1000005000" }, { assetId: NFT, delta: "1" }]), mintTx, only([NFT]));
     expect(s.kind).toBe("NFT_MINT");
     expect(s.nft).toMatchObject({ payment: { assetId: "SOL", delta: "-1000000000" }, party: "Creator" });
   });
@@ -113,8 +129,48 @@ describe("NFT mints and transfers", () => {
       ],
       instructions: [],
     };
-    const s = summarizeEffect(effect([{ assetId: "SOL", delta: "-5000" }, { assetId: NFT, delta: "-1" }]), giftTx, (m) => m === NFT);
+    const s = summarizeEffect(effect([{ assetId: "SOL", delta: "-5000" }, { assetId: NFT, delta: "-1" }]), giftTx, only([NFT]));
     expect(s.kind).toBe("NFT_TRANSFER");
     expect(s.nft).toMatchObject({ payment: null, party: "Friend" });
+  });
+
+  it("reads several NFTs bought together as one NFT_BUY bundle", () => {
+    const bundleTx = {
+      ...base,
+      nativeChanges: [
+        { account: W, pre: "10000000000", post: "7999995000", delta: "-2000005000" },
+        { account: "Seller", pre: "1", post: "2000000001", delta: "2000000000" },
+      ],
+      tokenChanges: ["N1", "N2"].map((mint) => ({ account: `ata-${mint}`, owner: W, mint, programId: null, decimals: 0, pre: "0", post: "1", delta: "1" })),
+      instructions: [],
+    };
+    const s = summarizeEffect(
+      effect([{ assetId: "SOL", delta: "-2000005000" }, { assetId: "N1", delta: "1" }, { assetId: "N2", delta: "1" }]),
+      bundleTx,
+      only(["N1", "N2"]),
+    );
+    expect(s.kind).toBe("NFT_BUY");
+    expect(s.nft).toMatchObject({ received: ["N1", "N2"], sent: [], party: "Seller", payment: { delta: "-2000000000" } });
+  });
+
+  it("reads an NFT traded for another NFT as NFT_SWAP", () => {
+    const swapTx = {
+      ...base,
+      nativeChanges: [{ account: W, pre: "10000", post: "5000", delta: "-5000" }],
+      tokenChanges: [
+        { account: "a1", owner: W, mint: "Mine", programId: null, decimals: 0, pre: "1", post: "0", delta: "-1" },
+        { account: "a2", owner: "Them", mint: "Mine", programId: null, decimals: 0, pre: "0", post: "1", delta: "1" },
+        { account: "a3", owner: "Them", mint: "Theirs", programId: null, decimals: 0, pre: "1", post: "0", delta: "-1" },
+        { account: "a4", owner: W, mint: "Theirs", programId: null, decimals: 0, pre: "0", post: "1", delta: "1" },
+      ],
+      instructions: [],
+    };
+    const s = summarizeEffect(
+      effect([{ assetId: "SOL", delta: "-5000" }, { assetId: "Mine", delta: "-1" }, { assetId: "Theirs", delta: "1" }]),
+      swapTx,
+      only(["Mine", "Theirs"]),
+    );
+    expect(s.kind).toBe("NFT_SWAP");
+    expect(s.nft).toMatchObject({ received: ["Theirs"], sent: ["Mine"], payment: null, party: "Them" });
   });
 });

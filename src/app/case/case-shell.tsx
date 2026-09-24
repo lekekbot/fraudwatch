@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link2Icon, PanelLeftIcon, PanelRightIcon, ShieldIcon, WalletIcon } from "lucide-react";
 import { toast } from "sonner";
 import { RpcStatusBadge } from "@/components/rpc-status-badge";
@@ -27,7 +27,7 @@ import { registry } from "@/lib/protocols/registry";
 import { buildMapSearch } from "@/lib/routing/map-params";
 import type { RpcSettings } from "@/lib/rpc/settings";
 import { collectCounterparties } from "@/lib/state/counterparties";
-import { summarizeEffect } from "@/lib/state/summarize";
+import { type NftCatalog, summarizeEffect } from "@/lib/state/summarize";
 import { EMPTY_FILTER, passesFilter, toggled } from "@/lib/timeline/filter";
 import { cn } from "@/lib/utils";
 import { AddressPanel } from "./address-panel";
@@ -133,12 +133,15 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
 
   const walletState = walletStates?.states.find((s) => s.wallet === selectedWallet);
   const transactions = state.status === "done" ? state.result.transactions : undefined;
-  // A mint is an NFT when its on-chain mint account says so (0 decimals, supply 1); see AssetMetadata.nft.
+  // What's known about NFTs on-chain (AssetMetadata.nft: 0 decimals, supply 1; royalty recipients from Metaplex).
   const assets = walletStates?.assets;
-  const isNft = useCallback((mint: string) => assets?.get(mint)?.nft === true, [assets]);
+  const nfts = useMemo<NftCatalog>(
+    () => ({ isNft: (m) => assets?.get(m)?.nft === true, royaltyRecipients: (m) => assets?.get(m)?.royaltyRecipients ?? [] }),
+    [assets],
+  );
   const summaries = useMemo(
-    () => (walletState && transactions ? walletState.effects.map((e) => summarizeEffect(e, transactions.get(e.signature), isNft)) : []),
-    [walletState, transactions, isNft],
+    () => (walletState && transactions ? walletState.effects.map((e) => summarizeEffect(e, transactions.get(e.signature), nfts)) : []),
+    [walletState, transactions, nfts],
   );
   // Only the views are filtered; the wallet state panel keeps the full history.
   const visible = useMemo(() => {
@@ -182,12 +185,12 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     // Counterparties of a wallet, from its reconstructed effects.
     const counterpartiesOf = (wallet: string) => {
       const s = walletStates.states.find((x) => x.wallet === wallet);
-      return s ? collectCounterparties(wallet, s.effects.map((e) => summarizeEffect(e, result.transactions.get(e.signature), isNft))).map((r) => r.address) : [];
+      return s ? collectCounterparties(wallet, s.effects.map((e) => summarizeEffect(e, result.transactions.get(e.signature), nfts))).map((r) => r.address) : [];
     };
     const mapped = c.mappedWallets.map((m) => m.address);
     const known = new Set([...mapped, ...mapped.filter((m) => m !== w.wallet).flatMap(counterpartiesOf)]);
     return mappingSummary(w, shared, counterpartiesOf(w.wallet), known);
-  }, [justMapped, result, walletStates, shared, c.mappedWallets, isNft]);
+  }, [justMapped, result, walletStates, shared, c.mappedWallets, nfts]);
 
   async function confirmMap(address: string, choice: MapWalletChoice) {
     setMapBusy(true);

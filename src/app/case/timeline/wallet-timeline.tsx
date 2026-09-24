@@ -9,7 +9,7 @@ import type { Names } from "@/lib/labels/labels";
 import type { WalletState } from "@/lib/state/reconstruct";
 import { describeAction, type EffectSummary } from "@/lib/state/summarize";
 import { eventAtOrAfter, eventTimes, type SpacingMode, stepEvent } from "@/lib/timeline/layout";
-import { type Assets, assetLabel, formatAssetAmount } from "../asset-format";
+import { type Assets, assetLabel, formatAssetAmount, nftLabel } from "../asset-format";
 import { SidePanel } from "../panel";
 import { type TimelineHandle, type TimelineItem, TimelineCanvas } from "./timeline-canvas";
 import { TimelineMinimap } from "./timeline-minimap";
@@ -25,10 +25,11 @@ function headline(summary: EffectSummary, state: WalletState, assets: Assets, na
   const show = (c: { assetId: string; delta: string }) =>
     `${formatAssetAmount(c.delta, c.assetId, state, assets, true)} ${assetLabel(c.assetId, assets)}`;
   if (summary.nft) {
-    const { mint, payment } = summary.nft;
+    const { received, sent, payment } = summary.nft;
+    if (received.length > 0 && sent.length > 0) return `${nftLabel(sent, assets)} → ${nftLabel(received, assets)}`;
     const price = payment && `${formatAssetAmount(payment.delta.replace("-", ""), payment.assetId, state, assets)} ${assetLabel(payment.assetId, assets)}`;
     // The NFT's name goes on the type line (see items), leaving the price room on a narrow card.
-    return price ?? assetLabel(mint, assets);
+    return price ?? nftLabel(received.length > 0 ? received : sent, assets);
   }
   if (summary.kind === "SWAP") return `${show(summary.outflows[0])} → ${show(summary.inflows[0])}`;
   const main = summary.kind === "RECEIVE" ? summary.inflows[0] : summary.outflows[0];
@@ -95,11 +96,13 @@ export function WalletTimeline({
           kind: s.kind,
           lines: [
             cardDate(times[i]),
-            s.nft && s.nft.payment ? `${s.kind.replace("_", " ")} · ${assetLabel(s.nft.mint, assets)}` : s.kind.replace("_", " "),
+            s.nft && s.nft.payment && !(s.nft.received.length > 0 && s.nft.sent.length > 0)
+              ? `${s.kind.replace("_", " ")} · ${nftLabel(s.nft.received.length > 0 ? s.nft.received : s.nft.sent, assets)}`
+              : s.kind.replace("_", " "),
             headline(s, state, assets, names),
             s.nft?.party
               ? // Buyers and receivers get the NFT from the other party; sellers and senders give it to them.
-                `${s.kind === "NFT_BUY" || s.kind === "NFT_MINT" || (s.kind === "NFT_TRANSFER" && s.inflows.some((c) => c.assetId === s.nft!.mint)) ? "←" : "→"} ${names.of(s.nft.party, 3)}`
+                `${s.nft.received.length > 0 && s.nft.sent.length > 0 ? "⇄" : s.nft.received.length > 0 ? "←" : "→"} ${names.of(s.nft.party, 3)}`
               : cp
                 ? `${arrow} ${names.of(cp.address, 3)}`
                 : s.actor

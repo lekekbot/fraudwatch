@@ -14,6 +14,7 @@ const KINDS: { kind: EffectKind; label: string; dot: string }[] = [
   { kind: "NFT_BUY", label: "NFT buy", dot: "bg-[oklch(0.72_0.16_310)]" },
   { kind: "NFT_SELL", label: "NFT sale", dot: "bg-[oklch(0.72_0.16_310)]" },
   { kind: "NFT_MINT", label: "NFT mint", dot: "bg-[oklch(0.72_0.16_310)]" },
+  { kind: "NFT_SWAP", label: "NFT swap", dot: "bg-[oklch(0.72_0.16_310)]" },
   { kind: "NFT_TRANSFER", label: "NFT transfer", dot: "bg-[oklch(0.72_0.16_310)]" },
   { kind: "APPROVAL", label: "Approval", dot: "bg-[oklch(0.8_0.15_80)]" },
   { kind: "STAKE", label: "Stake", dot: "bg-muted-foreground" },

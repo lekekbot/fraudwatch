@@ -25,12 +25,28 @@
 
 **Goal:** Show an NFT purchase or sale as what it is, not as a plain SOL transfer.
 
-## Not covered
+## Follow-ups (done 2026-09-24)
 
-- **Compressed NFTs** (Bubblegum) have no token balances, so they stay "Program call · Bubblegum" until there's a decoder.
-- **Which recipient is the fee and which is the royalty** isn't known without per-marketplace decoding. Recipients are listed by amount.
-- **Bundles** (several NFTs in one transaction) are reported by their first NFT.
-- **NFT-for-NFT swaps** read as NFT transfers.
+- **Compressed NFTs** (`src/lib/solana/bubblegum.ts`, tested against a recorded mainnet v1-tree transfer and v2-tree mint):
+  - Bubblegum instructions are matched by their Anchor discriminators (transfer, transfer_v2, mint_v1, mint_to_collection_v1, mint_v2).
+  - Each is paired with the leaf-schema event it logs through SPL Noop or MPL Noop, which gives the asset id and the new owner. The layout was checked by locating known owner addresses in the event bytes, and the asset id was checked to equal the PDA of ("asset", tree, nonce) on both transactions.
+  - The previous owner is `accounts[1]` for a v1 transfer, and the signer among its accounts for v2.
+  - cNFT moves feed the same classification, so compressed buys, sales, mints, transfers and escrow sales read like token NFTs.
+  - Names come from the mint instruction's metadata when a loaded transaction minted it, otherwise from the RPC's DAS `getAsset` (Helius and others). Providers without DAS show the shortened asset id.
+- **Royalty vs fee vs rent:** Metaplex metadata is now decoded through the creators list (`decodeMetaplexMetadata`: royalty basis points, creators with verified flag and share). Each other recipient gets a role:
+  - **royalty:** a creator with a share in a traded NFT.
+  - **rent:** an account created in this transaction.
+  - **marketplace fee:** a registry `fee_account`.
+  - **unidentified:** anyone else.
+  - On the real Tensor sale: 0.1865 SOL = 5% royalty to the single creator with a 100% share (500 bps, matching exactly), 2 × 0.0373 SOL (1% each) unidentified, 0.00144768 SOL rent. Pre-follow-up NFT metadata is refetched once to read creators.
+- **Bundles:** `NftTrade` now lists every NFT `received` and `sent`. Cards say "3 NFTs"; details list each.
+- **NFT-for-NFT swaps:** new `NFT_SWAP` kind (NFTs both ways, optionally with value alongside); cards read "A → B".
+
+## Still open
+
+- **Tensor and Magic Eden fee accounts aren't in the registry,** so their fees show as "unidentified". Add their fee accounts (verified on-chain) with role `fee_account` to label them.
+- **cNFTs don't appear in wallet state** (opening/closing balances) or the "Assets moved" filter, because they have no token balances. They show in the trade details and cards.
+- **v2 cNFT transfers** infer the previous owner from the signer; a delegate-signed transfer would name the delegate.
 
 ## Acceptance criteria
 
@@ -39,3 +55,5 @@
 - [x] The seller's side reads as NFT SELL, including escrowed listings.
 - [x] Mints and plain NFT transfers are distinguished.
 - [x] Tokens that aren't NFTs are unaffected.
+- [x] Compressed NFTs, bundles and NFT-for-NFT swaps are recognised.
+- [x] Royalties are identified from the NFT's on-chain creators.

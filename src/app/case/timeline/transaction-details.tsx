@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { ChevronLeftIcon, ChevronRightIcon, CopyIcon, ExternalLinkIcon, EyeOffIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -13,8 +13,15 @@ import { enrichTransaction, protocolsUsed } from "@/lib/protocols/registry";
 import { formatLamports } from "@/lib/solana/amount";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import type { WalletState, WalletTransactionEffect } from "@/lib/state/reconstruct";
-import { describeAction, type EffectSummary } from "@/lib/state/summarize";
+import { describeAction, type EffectSummary, type RecipientRole } from "@/lib/state/summarize";
 import { type Assets, assetLabel, formatAssetAmount, formatUtc } from "../asset-format";
+
+const ROLE_TEXT: Record<RecipientRole, string> = {
+  royalty: "Royalty",
+  rent: "Rent (new account)",
+  marketplace_fee: "Marketplace fee",
+  unidentified: "Unidentified",
+};
 
 /** An address that opens in the inspector, where it can be labelled. */
 function AddressButton({ address, names, onSelect }: { address: string; names: Names; onSelect: (address: string) => void }) {
@@ -189,10 +196,26 @@ export function TransactionDetails({
       {summary.nft && (
         <Section title="NFT trade">
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-            <dt className="text-muted-foreground">NFT</dt>
-            <dd className="min-w-0 truncate" title={summary.nft.mint}>
-              {assetLabel(summary.nft.mint, assets)}
-            </dd>
+            {(
+              [
+                ["Received", summary.nft.received],
+                ["Sent", summary.nft.sent],
+              ] as const
+            ).map(
+              ([label, mints]) =>
+                mints.length > 0 && (
+                  <Fragment key={label}>
+                    <dt className="text-muted-foreground">{label}</dt>
+                    <dd className="flex min-w-0 flex-col">
+                      {mints.map((m) => (
+                        <span key={m} className="truncate" title={m}>
+                          {assetLabel(m, assets)}
+                        </span>
+                      ))}
+                    </dd>
+                  </Fragment>
+                ),
+            )}
             {summary.nft.payment && (
               <>
                 <dt className="text-muted-foreground">
@@ -223,13 +246,16 @@ export function TransactionDetails({
           {summary.nft.payment && summary.nft.others.length > 0 && (
             <>
               <p className="pt-1 text-xs text-muted-foreground">
-                Also paid in {assetLabel(summary.nft.payment.assetId, assets)}: marketplace fees, royalties and rent, most
-                likely. Only the amounts are certain.
+                Also paid in {assetLabel(summary.nft.payment.assetId, assets)}. Royalty: a creator in the NFT&apos;s
+                metadata. Rent: an account created here. Unidentified: often a marketplace fee.
               </p>
               <ul className="flex flex-col gap-1">
                 {summary.nft.others.slice(0, 6).map((o) => (
                   <li key={o.address} className="flex items-center justify-between gap-2">
-                    <AddressButton address={o.address} names={names} onSelect={onSelectAddress} />
+                    <span className="flex min-w-0 flex-col">
+                      <AddressButton address={o.address} names={names} onSelect={onSelectAddress} />
+                      <span className="text-[10px] text-muted-foreground uppercase">{ROLE_TEXT[o.role]}</span>
+                    </span>
                     <span className="text-xs whitespace-nowrap tabular-nums text-muted-foreground">
                       {format(o.amount, summary.nft!.payment!.assetId)} {assetLabel(summary.nft!.payment!.assetId, assets)}
                     </span>
