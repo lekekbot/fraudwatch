@@ -16,6 +16,7 @@ import { getDb } from "@/lib/db/db";
 import { getRpcSettings } from "@/lib/db/rpc-settings";
 import { buildMapSearch } from "@/lib/routing/map-params";
 import { shortenAddress } from "@/lib/solana/address";
+import { DeleteCaseButton } from "./delete-case-button";
 import { IngestionPanel } from "./ingestion-panel";
 
 export function CaseShell() {
@@ -129,6 +130,10 @@ export function CaseShell() {
           <span className="text-xs text-muted-foreground">Contains only the wallet and dates. Never labels or RPC settings.</span>
         </CardContent>
       </Card>
+
+      <div className="flex justify-end">
+        <DeleteCaseButton id={c.id} name={c.name} />
+      </div>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ShieldIcon } from "lucide-react";
+import { DatabaseIcon, ShieldIcon } from "lucide-react";
 import { RpcStatusBadge } from "@/components/rpc-status-badge";
 
 export function AppHeader() {
@@ -10,7 +10,16 @@ export function AppHeader() {
           <ShieldIcon className="size-5" aria-hidden />
           FraudWatch
         </Link>
-        <RpcStatusBadge />
+        <div className="flex items-center gap-3">
+          <Link
+            href="/settings/storage/"
+            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+          >
+            <DatabaseIcon className="size-4" aria-hidden />
+            Storage
+          </Link>
+          <RpcStatusBadge />
+        </div>
       </div>
     </header>
   );

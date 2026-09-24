@@ -55,8 +55,15 @@ function WalletCoverage({ w, c }: { w: WalletIngestion; c: FraudWatchCase }) {
         <span className="font-mono text-sm">{walletName(c, w.wallet)}</span>
         {coverage.complete ? <Badge variant="secondary">Complete</Badge> : <Badge variant="destructive">Partial history</Badge>}
         <span className="text-xs text-muted-foreground">
-          {coverage.transactionCount.toLocaleString()} of {coverage.signatureCount.toLocaleString()} transactions ·{" "}
-          {w.tokenAccounts.length} token account{w.tokenAccounts.length === 1 ? "" : "s"} searched
+          {coverage.transactionCount.toLocaleString()} of {coverage.signatureCount.toLocaleString()} transactions
+          {w.stats.fetchedTransactions > 0 && <> · {w.stats.fetchedTransactions.toLocaleString()} fetched</>}
+          {w.stats.cachedTransactions > 0 && <> · {w.stats.cachedTransactions.toLocaleString()} from local cache</>}
+          {w.tokenAccounts.length > 0 && (
+            <>
+              {" "}
+              · {w.tokenAccounts.length} token account{w.tokenAccounts.length === 1 ? "" : "s"} searched
+            </>
+          )}
           {coverage.oldestLoaded && coverage.newestLoaded && (
             <>
               {" "}
@@ -141,8 +148,7 @@ function TransactionList({ result, c }: { result: IngestionResult; c: FraudWatch
 }
 
 export function IngestionPanel({ c, rpc }: { c: FraudWatchCase; rpc: RpcSettings | undefined }) {
-  const { state, start, cancel } = useIngestion();
-  const wallets = c.mappedWallets.map((w) => w.address);
+  const { state, start, cancel, wallets } = useIngestion(c);
   const running = state.status === "running";
 
   return (
@@ -151,7 +157,7 @@ export function IngestionPanel({ c, rpc }: { c: FraudWatchCase; rpc: RpcSettings
         <CardTitle>Transactions</CardTitle>
         <CardDescription>
           Loads each mapped wallet&apos;s history for the case range from your RPC, including activity that only touches
-          its token accounts. Results are not cached yet, so reloading the page clears them.
+          its token accounts. Results are cached in this browser; later loads only fetch what isn&apos;t cached yet.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
@@ -162,10 +168,16 @@ export function IngestionPanel({ c, rpc }: { c: FraudWatchCase; rpc: RpcSettings
               Cancel
             </Button>
           ) : (
-            <Button size="sm" disabled={!rpc} onClick={() => rpc && start(rpc.url, wallets, c.range)}>
+            <Button size="sm" disabled={!rpc} onClick={() => rpc && start(rpc.url)}>
               <DownloadIcon />
-              {state.status === "idle" ? "Load transactions" : "Reload transactions"}
+              {state.status === "done" ? "Load missing history" : "Load transactions"}
             </Button>
+          )}
+          {state.status === "done" && state.lastLoadedAt && (
+            <span className="text-xs text-muted-foreground">
+              {state.source === "cache" ? "From local cache · " : ""}last loaded{" "}
+              {state.lastLoadedAt.slice(0, 16).replace("T", " ")} UTC
+            </span>
           )}
           {rpc?.providerType === "enhanced" && (
             <span className="text-xs text-muted-foreground">Enhanced provider APIs are not used yet; loading with standard RPC.</span>
