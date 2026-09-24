@@ -15,12 +15,12 @@ Terms used across the architecture and sprint docs. When code names differ, the 
   - **PRIMARY:** the wallet the case was opened for. Its full history within the case range is loaded.
   - **MAPPED:** a wallet the user explicitly promoted with "Map wallet". Its full history is loaded for its own range (`rangeMode`: `case`, `first_interaction`, or `custom`).
   - **OBSERVED:** a counterparty seen in a mapped wallet's transactions. It is shown but its history is **not** fetched.
-  - **INFRASTRUCTURE:** programs, protocol vaults and system/token accounts. They are identified (often via the protocol registry) but never treated as wallets to map.
+  - **INFRASTRUCTURE:** programs, protocol vaults and system/token accounts. They are identified (often via the protocol registry) but never treated as wallets to map. Any program a loaded transaction invokes counts, even one the registry doesn't list.
 - **Counterparty:** any address on the other side of a mapped wallet's transaction.
 - **Shallow:** the default for counterparties. You see the transactions they share with mapped wallets and nothing else.
 - **Mapping / map wallet:** the user action that turns OBSERVED into MAPPED. Addresses revealed by a newly mapped wallet stay OBSERVED; nothing expands recursively.
 - **Mapped wallet config** (`MappedWalletConfig`): the stored record of a mapped wallet: address, role, where it was added from, and range mode.
-- **Label / tag:** user-supplied notes on an address, stored locally in the case. A label is one name; tags are a list.
+- **Label / tag:** user-supplied notes on an address, stored locally per case (`AddressLabel` in the `address_labels` table). A label has one name, an optional note and a list of tags. A label's name overrides the registry label on screen only.
 
 ## Transactions
 

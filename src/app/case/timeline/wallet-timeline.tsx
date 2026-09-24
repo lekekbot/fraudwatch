@@ -5,9 +5,9 @@ import { ChevronLeftIcon, ChevronRightIcon, CircleHelpIcon, MaximizeIcon, MinusI
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
-import { shortenAddress } from "@/lib/solana/address";
+import type { Names } from "@/lib/labels/labels";
 import type { WalletState } from "@/lib/state/reconstruct";
-import { type EffectSummary, summarizeEffect } from "@/lib/state/summarize";
+import { describeAction, type EffectSummary, summarizeEffect } from "@/lib/state/summarize";
 import { eventAtOrAfter, eventTimes, type SpacingMode, stepEvent } from "@/lib/timeline/layout";
 import { type Assets, assetLabel, formatAssetAmount } from "../asset-format";
 import { SidePanel } from "../panel";
@@ -21,13 +21,13 @@ const cardDate = (ms: number) => {
   return `${date} · ${d.toISOString().slice(11, 16)}`;
 };
 
-function headline(summary: EffectSummary, state: WalletState, assets: Assets): string {
+function headline(summary: EffectSummary, state: WalletState, assets: Assets, names: Names): string {
   const show = (c: { assetId: string; delta: string }) =>
     `${formatAssetAmount(c.delta, c.assetId, state, assets, true)} ${assetLabel(c.assetId, assets)}`;
   if (summary.kind === "SWAP") return `${show(summary.outflows[0])} → ${show(summary.inflows[0])}`;
   const main = summary.kind === "RECEIVE" ? summary.inflows[0] : summary.outflows[0];
   if (main) return show(main);
-  return summary.kind === "FAILED" ? "No balance change" : "Fee only";
+  return summary.kind === "FAILED" ? "No balance change" : describeAction(summary.action, summary.action ? names.known(summary.action.programId) : undefined);
 }
 
 export function WalletTimeline({
@@ -35,29 +35,37 @@ export function WalletTimeline({
   transactions,
   range,
   assets,
-  labels,
+  names,
   inspector,
+  addressPanel,
   inspectorOpen,
   emptyMessage = "No transactions to map in this range.",
+  initialSignature,
   onHide,
+  onSelectAddress,
 }: {
   state: WalletState;
   transactions: Map<string, CanonicalTransaction>;
   range: { start: string; end: string };
   assets: Assets;
-  labels: Record<string, string>;
+  names: Names;
   /** Right-panel content while no transaction is selected. */
   inspector: React.ReactNode;
+  /** An address opened from the details; shown over them until dismissed. */
+  addressPanel: React.ReactNode;
+  onSelectAddress: (address: string) => void;
   /** Selecting a transaction opens the right panel even when it's hidden. */
   inspectorOpen: boolean;
   emptyMessage?: string;
+  /** Open on this transaction, selected and centred (e.g. "Show on timeline" from the graph). */
+  initialSignature?: string;
   /** Leaves a transaction off the map. */
   onHide: (signature: string) => void;
 }) {
   const timeline = useRef<TimelineHandle>(null);
   const [mode, setMode] = useState<SpacingMode>("time");
   // Tracked by signature so the selection survives filtering.
-  const [selectedSignature, setSelectedSignature] = useState<string | null>(null);
+  const [selectedSignature, setSelectedSignature] = useState<string | null>(initialSignature ?? null);
   const [view, setView] = useState<{ start: number; end: number } | null>(null);
   const [jumpDate, setJumpDate] = useState("");
 
@@ -77,10 +85,15 @@ export function WalletTimeline({
           signature: e.signature,
           time: times[i],
           kind: s.kind,
-          lines: [cardDate(times[i]), s.kind, headline(s, state, assets), cp ? `${arrow} ${labels[cp.address] ?? shortenAddress(cp.address, 3)}` : ""],
+          lines: [
+            cardDate(times[i]),
+            s.kind,
+            headline(s, state, assets, names),
+            cp ? `${arrow} ${names.of(cp.address, 3)}` : s.actor ? `by ${names.of(s.actor, 3)}` : "",
+          ],
         };
       }),
-    [state, summaries, times, assets, labels],
+    [state, summaries, times, assets, names],
   );
   const selectedIndex = selectedSignature === null ? -1 : items.findIndex((i) => i.signature === selectedSignature);
   const selected = selectedIndex === -1 ? null : selectedIndex;
@@ -106,13 +119,22 @@ export function WalletTimeline({
     timeline.current?.centerOn(pending.current);
     pending.current = null;
   }, [mode]);
+
+  // Opened on a transaction: it starts selected; centre it once the canvas (a child, so its effects ran first) is set up.
+  useEffect(() => {
+    if (selected !== null && initialSignature) timeline.current?.centerOn(selected);
+    // Once, on mount: later selection belongs to the user.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const step = (direction: 1 | -1) => select(stepEvent(items.length, selected, direction));
 
   const current = selected !== null ? state.effects[selected] : null;
 
-  const panel = (inspectorOpen || current) && (
+  const panel = (inspectorOpen || current || addressPanel) && (
     <SidePanel side="right" label="Inspector">
-      {current && selected !== null ? (
+      {addressPanel ? (
+        addressPanel
+      ) : current && selected !== null ? (
         <TransactionDetails
           effect={current}
           summary={summaries[selected]}
@@ -129,6 +151,8 @@ export function WalletTimeline({
             setSelectedSignature(next?.signature ?? null);
             onHide(current.signature);
           }}
+          names={names}
+          onSelectAddress={onSelectAddress}
         />
       ) : (
         inspector

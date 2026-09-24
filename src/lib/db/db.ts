@@ -3,6 +3,7 @@ import type { AssetMetadata } from "@/lib/assets/assets";
 import type { CachedCoverage } from "@/lib/cache/coverage";
 import type { FraudWatchCase } from "@/lib/case/model";
 import type { IngestionCoverage } from "@/lib/ingest/ingest";
+import type { AddressLabel } from "@/lib/labels/labels";
 import type { RawParsedTransaction } from "@/lib/rpc/generic-adapter";
 import type { RpcSettings } from "@/lib/rpc/settings";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
@@ -60,7 +61,8 @@ export type MetaRecord = { key: string; value: unknown };
  * v1 (Sprint 01): cases, rpc_settings.
  * v2 (Sprint 03): transaction cache.
  * v3 (Sprint 04): wallet_states, token_metadata.
- * Later sprints add protocol_cache and ui_state in their own version blocks.
+ * v4 (Sprint 06): address_labels; case labels/tags move out of the case record.
+ * Later sprints add ui_state in its own version block.
  */
 export class FraudWatchDB extends Dexie {
   cases!: EntityTable<FraudWatchCase, "id">;
@@ -73,6 +75,7 @@ export class FraudWatchDB extends Dexie {
   meta!: EntityTable<MetaRecord, "key">;
   wallet_states!: EntityTable<WalletStateRecord, "key">;
   token_metadata!: EntityTable<AssetMetadata, "id">;
+  address_labels!: Dexie.Table<AddressLabel, [string, string]>;
 
   constructor(name = DB_NAME) {
     super(name);
@@ -92,6 +95,30 @@ export class FraudWatchDB extends Dexie {
       wallet_states: "key, wallet",
       token_metadata: "id",
     });
+    this.version(4)
+      .stores({ address_labels: "[caseId+address], caseId" })
+      .upgrade(async (tx) => {
+        // Sprint 01 cases carried `labels`/`tags` maps; move any entries into the new table.
+        type V1Case = FraudWatchCase & { labels?: Record<string, string>; tags?: Record<string, string[]> };
+        const cases: V1Case[] = await tx.table("cases").toArray();
+        const labels = cases.flatMap((c) =>
+          [...new Set([...Object.keys(c.labels ?? {}), ...Object.keys(c.tags ?? {})])].map((address) => ({
+            caseId: c.id,
+            address,
+            name: c.labels?.[address] ?? "",
+            tags: c.tags?.[address] ?? [],
+          })),
+        );
+        await tx.table("address_labels").bulkPut(labels);
+        await tx
+          .table("cases")
+          .toCollection()
+          .modify((c: V1Case) => {
+            delete c.labels;
+            delete c.tags;
+            c.version = 2;
+          });
+      });
   }
 }
 

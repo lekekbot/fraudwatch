@@ -50,6 +50,8 @@ transaction type
 
 ## Filters
 
+Sprint 05A already added single-wallet filters by transaction type, by asset moved and individual hiding (`src/lib/timeline/filter.ts`). Extend those to the multi-wallet graph rather than starting over.
+
 - mapped wallet;
 - observed address;
 - token/mint;

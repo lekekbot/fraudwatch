@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { CopyIcon, ExternalLinkIcon, Link2Icon, PanelLeftIcon, PanelRightIcon, ShieldIcon, WalletIcon } from "lucide-react";
+import { Link2Icon, PanelLeftIcon, PanelRightIcon, ShieldIcon, WalletIcon } from "lucide-react";
 import { toast } from "sonner";
 import { RpcStatusBadge } from "@/components/rpc-status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -12,22 +12,32 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { useIngestion } from "@/hooks/use-ingestion";
 import { useLocalQuery } from "@/hooks/use-local-db";
 import { useWalletStates } from "@/hooks/use-wallet-states";
+import { addressState } from "@/lib/case/address-state";
+import { buildWalletGraph, type GraphEdge } from "@/lib/graph/build";
 import type { FraudWatchCase } from "@/lib/case/model";
 import { formatRange } from "@/lib/case/range";
+import { getAddressLabels } from "@/lib/db/address-labels";
 import { getCase, touchCase } from "@/lib/db/cases";
 import { getDb } from "@/lib/db/db";
 import { getRpcSettings } from "@/lib/db/rpc-settings";
+import { createNames } from "@/lib/labels/labels";
+import { registry } from "@/lib/protocols/registry";
 import { buildMapSearch } from "@/lib/routing/map-params";
 import type { RpcSettings } from "@/lib/rpc/settings";
-import { shortenAddress } from "@/lib/solana/address";
+import { collectCounterparties } from "@/lib/state/counterparties";
 import { summarizeEffect } from "@/lib/state/summarize";
 import { EMPTY_FILTER, passesFilter, toggled } from "@/lib/timeline/filter";
 import { cn } from "@/lib/utils";
+import { AddressPanel } from "./address-panel";
+import { CounterpartyList } from "./counterparty-list";
 import { DeleteCaseButton } from "./delete-case-button";
 import { FilterPanel } from "./filter-panel";
+import { EdgePanel } from "./graph/edge-panel";
+import { WalletGraph } from "./graph/wallet-graph";
 import { IngestionPanel } from "./ingestion-panel";
 import { PanelSection, SidePanel } from "./panel";
 import { WalletTimeline } from "./timeline/wallet-timeline";
+import { assetLabel, formatAssetAmount } from "./asset-format";
 import { WalletStateSummary, WalletStateTable } from "./wallet-state-view";
 
 async function copy(text: string, what: string) {
@@ -86,9 +96,19 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   const walletStates = useWalletStates(state.status === "done" ? state.result : null, c.range, rpc?.url);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
-  const [view, setView] = useState<"timeline" | "table">("timeline");
+  const [view, setView] = useState<"timeline" | "graph" | "table">("timeline");
+  const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
+  /** Transaction to open the timeline on, from the graph's "Show on timeline". */
+  const [focusSignature, setFocusSignature] = useState<string | undefined>(undefined);
   const [selectedWallet, setSelectedWallet] = useState(c.primaryWallet);
   const [filter, setFilter] = useState(EMPTY_FILTER);
+  /** An address opened in the inspector (counterparty, sender, program); shown over transaction details. */
+  const [selectedAddress, setSelectedAddress] = useState<string | null>(null);
+  const labelRows = useLocalQuery((db) => getAddressLabels(db, c.id), [c.id]);
+  const names = useMemo(
+    () => createNames(new Map((labelRows.status === "ready" ? labelRows.data : []).map((l) => [l.address, l])), registry),
+    [labelRows],
+  );
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -108,37 +128,49 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     () => (walletState && transactions ? walletState.effects.map((e) => summarizeEffect(e, transactions.get(e.signature))) : []),
     [walletState, transactions],
   );
-  // Only the map and table are filtered; the wallet state panel keeps the full history.
-  const visibleState = useMemo(
-    () => walletState && { ...walletState, effects: walletState.effects.filter((e, i) => passesFilter(e.signature, summaries[i], filter)) },
-    [walletState, summaries, filter],
+  // Only the views are filtered; the wallet state panel keeps the full history.
+  const visible = useMemo(() => {
+    if (!walletState) return undefined;
+    const keep = walletState.effects.map((e, i) => passesFilter(e.signature, summaries[i], filter));
+    return {
+      state: { ...walletState, effects: walletState.effects.filter((_, i) => keep[i]) },
+      summaries: summaries.filter((_, i) => keep[i]),
+    };
+  }, [walletState, summaries, filter]);
+  const visibleState = visible?.state;
+  const graph = useMemo(
+    () => (view === "graph" && visible ? buildWalletGraph(selectedWallet, visible.state.effects, visible.summaries) : null),
+    [view, visible, selectedWallet],
+  );
+  // Every program the loaded transactions invoked; unknown programs are still infrastructure.
+  const programs = useMemo(() => {
+    const ids = new Set<string>();
+    for (const tx of transactions?.values() ?? []) for (const ix of [...tx.instructions, ...tx.innerInstructions]) ids.add(ix.programId);
+    return ids;
+  }, [transactions]);
+  const counterparties = useMemo(
+    () => collectCounterparties(selectedWallet, summaries).map((r) => ({ ...r, state: addressState(r.address, c, registry, programs) })),
+    [selectedWallet, summaries, c, programs],
   );
   const shareSearch = buildMapSearch({ wallet: c.primaryWallet, range: c.range });
 
+  const panelFor = (address: string, onBack?: () => void) => (
+    <AddressPanel
+      key={address}
+      caseId={c.id}
+      address={address}
+      state={addressState(address, c, registry, programs)}
+      label={names.label(address)}
+      entry={registry.lookup(address)}
+      transactionCount={address === selectedWallet ? undefined : counterparties.find((r) => r.address === address)?.count}
+      onBack={onBack}
+    />
+  );
+  const addressPanel = selectedAddress && panelFor(selectedAddress, () => setSelectedAddress(null));
+
   const walletInspector = (
     <>
-      <PanelSection
-        title="Wallet"
-        action={
-          <span className="flex">
-            <Button variant="ghost" size="icon-xs" aria-label="Copy address" onClick={() => copy(selectedWallet, "Address")}>
-              <CopyIcon />
-            </Button>
-            <a
-              href={`https://solscan.io/account/${selectedWallet}`}
-              target="_blank"
-              rel="noreferrer noopener"
-              aria-label="Open in explorer"
-              className={buttonVariants({ variant: "ghost", size: "icon-xs" })}
-            >
-              <ExternalLinkIcon />
-            </a>
-          </span>
-        }
-      >
-        {c.labels[selectedWallet] && <p className="text-sm font-medium">{c.labels[selectedWallet]}</p>}
-        <p className="font-mono text-xs break-all text-muted-foreground">{selectedWallet}</p>
-      </PanelSection>
+      {panelFor(selectedWallet)}
       {walletState && walletStates && (
         <PanelSection title="Wallet state">
           <WalletStateSummary state={walletState} assets={walletStates.assets} />
@@ -147,18 +179,70 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     </>
   );
 
+  const edge = graph?.edges.find((e) => e.id === selectedEdge);
+  const describeEdge = (e: GraphEdge) => {
+    const n = `${e.signatures.length.toLocaleString()} tx`;
+    if (e.kind !== "flow" || !walletState || !walletStates) return e.kind === "program" ? `${n} · program call` : `${n} · sent`;
+    const [top, ...rest] = e.totals;
+    const amount = top ? ` · ${formatAssetAmount(top.amount, top.assetId, walletState, walletStates.assets)} ${assetLabel(top.assetId, walletStates.assets)}` : "";
+    return `${n}${amount}${rest.length > 0 ? ` +${rest.length} more` : ""}`;
+  };
+
   let center: React.ReactNode;
-  if (state.status === "done" && walletStates && walletState && visibleState) {
+  if (state.status === "done" && walletStates && walletState && visible && visibleState) {
     center =
-      view === "timeline" ? (
+      view === "graph" && graph ? (
+        <>
+          <WalletGraph
+            graph={graph}
+            wallet={selectedWallet}
+            names={names}
+            stateOf={(address) => addressState(address, c, registry, programs)}
+            selectedNode={selectedAddress}
+            selectedEdge={selectedEdge}
+            onSelectNode={setSelectedAddress}
+            onSelectEdge={setSelectedEdge}
+            describeEdge={describeEdge}
+          />
+          {(rightOpen || addressPanel || edge) && (
+            <SidePanel side="right" label="Inspector">
+              {addressPanel ||
+                (edge ? (
+                  <EdgePanel
+                    key={edge.id}
+                    edge={edge}
+                    names={names}
+                    state={walletState}
+                    assets={walletStates.assets}
+                    rows={visible.state.effects
+                      .map((effect, i) => ({ effect, summary: visible.summaries[i] }))
+                      .filter((r) => edge.signatures.includes(r.effect.signature))}
+                    onSelectAddress={setSelectedAddress}
+                    onShowOnTimeline={(signature) => {
+                      setFocusSignature(signature);
+                      setSelectedEdge(null);
+                      setView("timeline");
+                    }}
+                    onClose={() => setSelectedEdge(null)}
+                  />
+                ) : (
+                  walletInspector
+                ))}
+            </SidePanel>
+          )}
+        </>
+      ) : view === "timeline" ? (
         <WalletTimeline
           key={walletState.wallet}
+          initialSignature={focusSignature}
           state={visibleState}
           transactions={state.result.transactions}
           range={c.range}
           assets={walletStates.assets}
-          labels={c.labels}
+          names={names}
           inspector={walletInspector}
+          addressPanel={addressPanel}
+          onSelectAddress={setSelectedAddress}
           inspectorOpen={rightOpen}
           emptyMessage={walletState.effects.length > 0 ? "No transactions match the filters." : undefined}
           onHide={(signature) => setFilter((f) => ({ ...f, hiddenSignatures: toggled(f.hiddenSignatures, signature) }))}
@@ -168,9 +252,9 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
           <div className="min-w-0 flex-1 overflow-auto p-4">
             <WalletStateTable state={visibleState} assets={walletStates.assets} />
           </div>
-          {rightOpen && (
+          {(rightOpen || addressPanel) && (
             <SidePanel side="right" label="Inspector">
-              {walletInspector}
+              {addressPanel || walletInspector}
             </SidePanel>
           )}
         </>
@@ -196,9 +280,9 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
             </Button>
           )}
         </div>
-        {rightOpen && (
+        {(rightOpen || addressPanel) && (
           <SidePanel side="right" label="Inspector">
-            {walletInspector}
+            {addressPanel || walletInspector}
           </SidePanel>
         )}
       </>
@@ -228,9 +312,18 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
 
         {walletState && (
           <div className="absolute left-1/2 flex -translate-x-1/2 rounded-lg border p-0.5" role="group" aria-label="View">
-            {(["timeline", "table"] as const).map((v) => (
-              <Button key={v} size="xs" variant={view === v ? "secondary" : "ghost"} aria-pressed={view === v} onClick={() => setView(v)}>
-                {v === "timeline" ? "Timeline" : "Table"}
+            {(["timeline", "graph", "table"] as const).map((v) => (
+              <Button
+                key={v}
+                size="xs"
+                variant={view === v ? "secondary" : "ghost"}
+                aria-pressed={view === v}
+                onClick={() => {
+                  setView(v);
+                  setFocusSignature(undefined);
+                }}
+              >
+                {v === "timeline" ? "Timeline" : v === "graph" ? "Graph" : "Table"}
               </Button>
             ))}
           </div>
@@ -287,15 +380,19 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                       <button
                         type="button"
                         aria-current={w.address === selectedWallet}
-                        onClick={() => setSelectedWallet(w.address)}
+                        onClick={() => {
+                          setSelectedWallet(w.address);
+                          setSelectedAddress(null);
+                          setSelectedEdge(null);
+                        }}
                         className={cn(
                           "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm",
                           w.address === selectedWallet ? "bg-muted" : "hover:bg-muted/50",
                         )}
                       >
                         <WalletIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                        <span className="min-w-0 flex-1 truncate font-mono text-xs">
-                          {c.labels[w.address] ?? shortenAddress(w.address, 4)}
+                        <span className={cn("min-w-0 flex-1 truncate text-xs", !names.known(w.address) && "font-mono")}>
+                          {names.of(w.address)}
                         </span>
                         {flagged && <span className="text-destructive" title="State mismatch or partial history">•</span>}
                         {w.role === "primary" && <Badge variant="secondary">primary</Badge>}
@@ -317,7 +414,10 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                 onChange={setFilter}
               />
             )}
-            <IngestionPanel c={c} rpc={rpc} ingestion={ingestion} />
+            {walletState && (
+              <CounterpartyList rows={counterparties} names={names} selected={selectedAddress} onSelect={setSelectedAddress} />
+            )}
+            <IngestionPanel names={names} rpc={rpc} ingestion={ingestion} />
             <div className="mt-auto p-2">
               <DeleteCaseButton id={c.id} name={c.name} />
             </div>
