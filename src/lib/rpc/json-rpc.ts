@@ -52,7 +52,7 @@ function isRetryable(err: RpcRequestError): boolean {
 export async function rpcCall<T>(
   url: string,
   method: string,
-  params: unknown[],
+  params: unknown[] | Record<string, unknown>,
   signal: AbortSignal,
   options: JsonRpcOptions = {},
 ): Promise<T> {
@@ -71,7 +71,7 @@ export async function rpcCall<T>(
 async function rpcCallOnce<T>(
   url: string,
   method: string,
-  params: unknown[],
+  params: unknown[] | Record<string, unknown>,
   signal: AbortSignal,
   fetchImpl: typeof fetch,
 ): Promise<T> {

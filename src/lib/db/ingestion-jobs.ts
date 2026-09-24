@@ -33,6 +33,8 @@ export async function readCachedIngestion(
   caseId: string,
   wallets: string[],
   range: CaseRange,
+  /** Per-wallet ranges for mapped wallets that start later; `range` otherwise. */
+  ranges: Record<string, CaseRange> = {},
 ): Promise<CachedIngestion | null> {
   const job = await db.ingestion_jobs.get(caseId);
   const lastJob = job && sameRange(job.range, range) ? job : undefined;
@@ -41,9 +43,10 @@ export async function readCachedIngestion(
   let anything = false;
 
   for (const wallet of wallets) {
+    const walletRange = ranges[wallet] ?? range;
     const coverage = await db.coverage.get(wallet);
-    const gaps = missingRanges(coverage, range);
-    const entries = (await getWalletSignatures(db, wallet, range)).sort((a, b) => b.blockTime - a.blockTime);
+    const gaps = missingRanges(coverage, walletRange);
+    const entries = (await getWalletSignatures(db, wallet, walletRange)).sort((a, b) => b.blockTime - a.blockTime);
     const signatures = entries.map((e) => e.signature);
     const cached = await getCachedTransactions(db, signatures);
     for (const [s, tx] of cached) transactions.set(s, tx);

@@ -57,6 +57,30 @@ describe("ingestWallets against recorded mainnet fixtures", () => {
     }
   });
 
+  it("counts a transaction already loaded for another wallet as reused, not fetched", async () => {
+    const fixture = loadFixture("a-to-b-to-c");
+    const result = await run(fixture);
+    for (const w of result.wallets) {
+      expect(w.stats.cachedTransactions + w.stats.fetchedTransactions, w.wallet).toBe(w.signatures.length);
+    }
+    const later = result.wallets.slice(1);
+    expect(later.some((w) => w.stats.cachedTransactions > 0)).toBe(true);
+  });
+
+  it("loads a mapped wallet only from its own start when given per-wallet ranges", async () => {
+    const fixture = loadFixture("a-to-b-to-c");
+    const b = fixture.manifest.wallets[1].address;
+    const all = await run(fixture);
+    const full = all.wallets.find((w) => w.wallet === b)!.signatures;
+    expect(full.length).toBeGreaterThan(1);
+    // Start just after B's oldest transaction: that one drops out, the newer ones stay.
+    const time = (s: string) => Date.parse(all.transactions.get(s)!.timestamp!);
+    const oldest = full.at(-1)!;
+    const ranges = { [b]: { start: new Date(time(oldest) + 1000).toISOString(), end: fixture.manifest.range.end } };
+    const narrowed = (await run(fixture, { ranges })).wallets.find((w) => w.wallet === b)!;
+    expect(narrowed.signatures).toEqual(full.filter((s) => time(s) > time(oldest)));
+  });
+
   it("orders each wallet's signatures newest first", async () => {
     const fixture = loadFixture("a-to-b-to-c");
     const result = await run(fixture);

@@ -13,6 +13,7 @@ export type MappedWalletConfig = {
 
   rangeMode: "case" | "first_interaction" | "custom";
 
+  /** Where this wallet's history starts, for `first_interaction` (resolved when mapped) and `custom`. See `walletRange`. */
   customStart?: string;
 };
 

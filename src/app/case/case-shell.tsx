@@ -13,11 +13,13 @@ import { useIngestion } from "@/hooks/use-ingestion";
 import { useLocalQuery } from "@/hooks/use-local-db";
 import { useWalletStates } from "@/hooks/use-wallet-states";
 import { addressState } from "@/lib/case/address-state";
+import { firstInteraction, mapWallet, unmapWallet, walletRange, walletRanges } from "@/lib/case/wallet-range";
+import { mappingSummary, sharedTransactions } from "@/lib/ingest/intersections";
 import { buildWalletGraph, type GraphEdge } from "@/lib/graph/build";
 import type { FraudWatchCase } from "@/lib/case/model";
 import { formatRange } from "@/lib/case/range";
 import { getAddressLabels } from "@/lib/db/address-labels";
-import { getCase, touchCase } from "@/lib/db/cases";
+import { getCase, saveCase, touchCase } from "@/lib/db/cases";
 import { getDb } from "@/lib/db/db";
 import { getRpcSettings } from "@/lib/db/rpc-settings";
 import { createNames } from "@/lib/labels/labels";
@@ -25,13 +27,14 @@ import { registry } from "@/lib/protocols/registry";
 import { buildMapSearch } from "@/lib/routing/map-params";
 import type { RpcSettings } from "@/lib/rpc/settings";
 import { collectCounterparties } from "@/lib/state/counterparties";
-import { summarizeEffect } from "@/lib/state/summarize";
+import { type NftCatalog, summarizeEffect } from "@/lib/state/summarize";
 import { EMPTY_FILTER, passesFilter, toggled } from "@/lib/timeline/filter";
 import { cn } from "@/lib/utils";
 import { AddressPanel } from "./address-panel";
 import { CounterpartyList } from "./counterparty-list";
 import { DeleteCaseButton } from "./delete-case-button";
 import { FilterPanel } from "./filter-panel";
+import { type MapWalletChoice, MapWalletDialog } from "./map-wallet-dialog";
 import { EdgePanel } from "./graph/edge-panel";
 import { WalletGraph } from "./graph/wallet-graph";
 import { IngestionPanel } from "./ingestion-panel";
@@ -93,7 +96,7 @@ export function CaseShell() {
 function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettings | undefined; rpcKnown: boolean }) {
   const ingestion = useIngestion(c);
   const { state } = ingestion;
-  const walletStates = useWalletStates(state.status === "done" ? state.result : null, c.range, rpc?.url);
+  const walletStates = useWalletStates(state.status === "done" ? state.result : null, c.range, rpc?.url, walletRanges(c));
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [view, setView] = useState<"timeline" | "graph" | "table">("timeline");
@@ -102,6 +105,12 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   const [focusSignature, setFocusSignature] = useState<string | undefined>(undefined);
   const [selectedWallet, setSelectedWallet] = useState(c.primaryWallet);
   const [filter, setFilter] = useState(EMPTY_FILTER);
+  /** Observed address the Map wallet dialog is open for. */
+  const [mapTarget, setMapTarget] = useState<string | null>(null);
+  const [mapError, setMapError] = useState<string | null>(null);
+  const [mapBusy, setMapBusy] = useState(false);
+  /** Most recently mapped wallet, whose loading summary is shown until dismissed. */
+  const [justMapped, setJustMapped] = useState<string | null>(null);
   /** An address opened in the inspector (counterparty, sender, program); shown over transaction details. */
   const [selectedAddress, setSelectedAddress] = useState<string | null>(null);
   const labelRows = useLocalQuery((db) => getAddressLabels(db, c.id), [c.id]);
@@ -124,9 +133,15 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
 
   const walletState = walletStates?.states.find((s) => s.wallet === selectedWallet);
   const transactions = state.status === "done" ? state.result.transactions : undefined;
+  // What's known about NFTs on-chain (AssetMetadata.nft: 0 decimals, supply 1; royalty recipients from Metaplex).
+  const assets = walletStates?.assets;
+  const nfts = useMemo<NftCatalog>(
+    () => ({ isNft: (m) => assets?.get(m)?.nft === true, royaltyRecipients: (m) => assets?.get(m)?.royaltyRecipients ?? [] }),
+    [assets],
+  );
   const summaries = useMemo(
-    () => (walletState && transactions ? walletState.effects.map((e) => summarizeEffect(e, transactions.get(e.signature))) : []),
-    [walletState, transactions],
+    () => (walletState && transactions ? walletState.effects.map((e) => summarizeEffect(e, transactions.get(e.signature), nfts)) : []),
+    [walletState, transactions, nfts],
   );
   // Only the views are filtered; the wallet state panel keeps the full history.
   const visible = useMemo(() => {
@@ -154,6 +169,74 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   );
   const shareSearch = buildMapSearch({ wallet: c.primaryWallet, range: c.range });
 
+  const result = state.status === "done" ? state.result : null;
+  // Transactions each mapped wallet shares with every other mapped wallet.
+  const shared = useMemo(() => (result ? sharedTransactions(result.wallets) : new Map<string, Map<string, string[]>>()), [result]);
+  const sharedWith = useMemo(() => {
+    const bySignature = new Map<string, string[]>();
+    for (const [other, signatures] of shared.get(selectedWallet) ?? []) {
+      for (const s of signatures) bySignature.set(s, [...(bySignature.get(s) ?? []), other]);
+    }
+    return bySignature;
+  }, [shared, selectedWallet]);
+  const summary = useMemo(() => {
+    const w = justMapped ? result?.wallets.find((x) => x.wallet === justMapped) : undefined;
+    if (!w || !result || !walletStates) return null;
+    // Counterparties of a wallet, from its reconstructed effects.
+    const counterpartiesOf = (wallet: string) => {
+      const s = walletStates.states.find((x) => x.wallet === wallet);
+      return s ? collectCounterparties(wallet, s.effects.map((e) => summarizeEffect(e, result.transactions.get(e.signature), nfts))).map((r) => r.address) : [];
+    };
+    const mapped = c.mappedWallets.map((m) => m.address);
+    const known = new Set([...mapped, ...mapped.filter((m) => m !== w.wallet).flatMap(counterpartiesOf)]);
+    return mappingSummary(w, shared, counterpartiesOf(w.wallet), known);
+  }, [justMapped, result, walletStates, shared, c.mappedWallets, nfts]);
+
+  async function confirmMap(address: string, choice: MapWalletChoice) {
+    setMapBusy(true);
+    setMapError(null);
+    try {
+      const first = result ? firstInteraction(address, result.transactions.values()) : null;
+      const next = mapWallet(c, {
+        address,
+        ...choice,
+        addedFromWallet: selectedWallet,
+        addedFromTransaction: choice.rangeMode === "first_interaction" ? first?.signature : undefined,
+      });
+      await saveCase(getDb(), next);
+      setMapTarget(null);
+      setSelectedAddress(null);
+      setSelectedEdge(null);
+      setSelectedWallet(address);
+      setJustMapped(address);
+      if (rpc) void ingestion.start(rpc.url, next);
+    } catch (err) {
+      setMapError(err instanceof Error ? err.message : "Could not map this wallet.");
+    } finally {
+      setMapBusy(false);
+    }
+  }
+
+  async function unmap(address: string) {
+    try {
+      await saveCase(getDb(), unmapWallet(c, address));
+      if (selectedWallet === address) setSelectedWallet(c.primaryWallet);
+      if (justMapped === address) setJustMapped(null);
+      setSelectedAddress(null);
+      toast.success(`${names.of(address)} removed from the map. Its label and cached transactions are kept.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not remove this wallet.");
+    }
+  }
+
+  const rangeText = (address: string) => {
+    const w = c.mappedWallets.find((m) => m.address === address);
+    if (!w) return "";
+    const r = walletRange(c, w);
+    const how = w.rangeMode === "first_interaction" ? " (first interaction)" : w.rangeMode === "custom" ? " (custom start)" : "";
+    return `from ${r.start.slice(0, 16).replace("T", " ")} UTC${how} to the case end`;
+  };
+
   const panelFor = (address: string, onBack?: () => void) => (
     <AddressPanel
       key={address}
@@ -164,6 +247,15 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
       entry={registry.lookup(address)}
       transactionCount={address === selectedWallet ? undefined : counterparties.find((r) => r.address === address)?.count}
       onBack={onBack}
+      onMap={() => {
+        setMapError(null);
+        setMapTarget(address);
+      }}
+      mapped={
+        c.mappedWallets.some((m) => m.address === address && m.role === "mapped")
+          ? { rangeText: rangeText(address), onUnmap: () => void unmap(address) }
+          : undefined
+      }
     />
   );
   const addressPanel = selectedAddress && panelFor(selectedAddress, () => setSelectedAddress(null));
@@ -236,8 +328,9 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
           key={walletState.wallet}
           initialSignature={focusSignature}
           state={visibleState}
+          summaries={visible.summaries}
           transactions={state.result.transactions}
-          range={c.range}
+          range={walletRange(c, c.mappedWallets.find((w) => w.address === selectedWallet) ?? c.mappedWallets[0])}
           assets={walletStates.assets}
           names={names}
           inspector={walletInspector}
@@ -246,6 +339,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
           inspectorOpen={rightOpen}
           emptyMessage={walletState.effects.length > 0 ? "No transactions match the filters." : undefined}
           onHide={(signature) => setFilter((f) => ({ ...f, hiddenSignatures: toggled(f.hiddenSignatures, signature) }))}
+          sharedWith={(signature) => sharedWith.get(signature) ?? []}
         />
       ) : (
         <>
@@ -395,7 +489,15 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                           {names.of(w.address)}
                         </span>
                         {flagged && <span className="text-destructive" title="State mismatch or partial history">•</span>}
-                        {w.role === "primary" && <Badge variant="secondary">primary</Badge>}
+                        {w.role === "primary" ? (
+                          <Badge variant="secondary">primary</Badge>
+                        ) : (
+                          w.rangeMode !== "case" && (
+                            <span className="text-[10px] text-muted-foreground" title={rangeText(w.address)}>
+                              from {walletRange(c, w).start.slice(5, 10)}
+                            </span>
+                          )
+                        )}
                       </button>
                     </li>
                   );
@@ -417,6 +519,44 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
             {walletState && (
               <CounterpartyList rows={counterparties} names={names} selected={selectedAddress} onSelect={setSelectedAddress} />
             )}
+            {justMapped && (
+              <PanelSection
+                title={`Mapping ${names.of(justMapped)}`}
+                action={
+                  <Button variant="ghost" size="xs" onClick={() => setJustMapped(null)}>
+                    Dismiss
+                  </Button>
+                }
+              >
+                {state.status === "running" ? (
+                  <p className="text-xs text-muted-foreground">Loading its history…</p>
+                ) : summary ? (
+                  <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5 text-xs">
+                    <dt className="text-muted-foreground">Transactions in range</dt>
+                    <dd className="text-right tabular-nums">{summary.inRange.toLocaleString()}</dd>
+                    <dt className="text-muted-foreground">Already cached</dt>
+                    <dd className="text-right tabular-nums">{summary.cached.toLocaleString()}</dd>
+                    <dt className="text-muted-foreground">Fetched</dt>
+                    <dd className="text-right tabular-nums">{summary.fetched.toLocaleString()}</dd>
+                    <dt className="col-span-2 pt-1.5 text-muted-foreground">Shared with mapped wallets</dt>
+                    {summary.shared.length === 0 ? (
+                      <dd className="col-span-2">None in the loaded range.</dd>
+                    ) : (
+                      summary.shared.map((s) => (
+                        <div key={s.wallet} className="col-span-2 flex justify-between gap-2">
+                          <dt className="truncate">{names.of(s.wallet)}</dt>
+                          <dd className="tabular-nums">{s.count.toLocaleString()} tx</dd>
+                        </div>
+                      ))
+                    )}
+                    <dt className="pt-1.5 text-muted-foreground">New observed addresses</dt>
+                    <dd className="pt-1.5 text-right tabular-nums">{summary.newObserved.toLocaleString()}</dd>
+                  </dl>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Load its history to see what it shares with the map.</p>
+                )}
+              </PanelSection>
+            )}
             <IngestionPanel names={names} rpc={rpc} ingestion={ingestion} />
             <div className="mt-auto p-2">
               <DeleteCaseButton id={c.id} name={c.name} />
@@ -425,6 +565,18 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
         )}
         {center}
       </div>
+      {mapTarget && (
+        <MapWalletDialog
+          name={names.of(mapTarget)}
+          first={result ? firstInteraction(mapTarget, result.transactions.values()) : null}
+          caseRange={c.range}
+          hasRpc={Boolean(rpc)}
+          busy={mapBusy}
+          error={mapError}
+          onConfirm={(choice) => void confirmMap(mapTarget, choice)}
+          onCancel={() => setMapTarget(null)}
+        />
+      )}
     </div>
   );
 }

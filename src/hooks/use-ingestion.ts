@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FraudWatchCase } from "@/lib/case/model";
+import { walletRanges } from "@/lib/case/wallet-range";
 import { getDb } from "@/lib/db/db";
 import { readCachedIngestion, saveIngestionJob } from "@/lib/db/ingestion-jobs";
 import { createDbIngestionCache } from "@/lib/db/transaction-cache";
@@ -22,18 +23,23 @@ export type IngestionState =
 export function useIngestion(c: FraudWatchCase) {
   const [state, setState] = useState<IngestionState>({ status: "idle" });
   const controller = useRef<AbortController | null>(null);
+  /** Bumped when a load starts or ends, so a slower cached read never replaces a newer result. */
+  const generation = useRef(0);
+  const running = useRef(false);
   const wallets = c.mappedWallets.map((w) => w.address);
-  const key = JSON.stringify([c.id, wallets, c.range]);
+  const key = JSON.stringify([c.id, wallets, c.range, walletRanges(c)]);
 
   useEffect(() => () => controller.current?.abort(), []);
 
   useEffect(() => {
     let active = true;
-    const [caseId, caseWallets, range] = JSON.parse(key) as [string, string[], FraudWatchCase["range"]];
+    const [caseId, caseWallets, range, ranges] = JSON.parse(key) as [string, string[], FraudWatchCase["range"], Record<string, FraudWatchCase["range"]>];
+    const startedAt = generation.current;
     (async () => {
       try {
-        const cached = await readCachedIngestion(getDb(), caseId, caseWallets, range);
-        if (active && cached && controller.current === null) {
+        const cached = await readCachedIngestion(getDb(), caseId, caseWallets, range, ranges);
+        // Re-read on every config change (e.g. a wallet was unmapped), unless a load is running or finished meanwhile.
+        if (active && cached && !running.current && generation.current === startedAt) {
           setState({ status: "done", result: cached.result, source: "cache", lastLoadedAt: cached.lastLoadedAt });
         }
       } catch {
@@ -45,11 +51,14 @@ export function useIngestion(c: FraudWatchCase) {
     };
   }, [key]);
 
+  /** Loads every mapped wallet. Pass `config` to load a case just saved (e.g. with a newly mapped wallet) before it re-renders. */
   const start = useCallback(
-    async (rpcUrl: string) => {
+    async (rpcUrl: string, config: FraudWatchCase = c) => {
       controller.current?.abort();
       const current = new AbortController();
       controller.current = current;
+      running.current = true;
+      generation.current++;
       setState({ status: "running", progress: null });
 
       let db: ReturnType<typeof getDb> | null = null;
@@ -62,8 +71,9 @@ export function useIngestion(c: FraudWatchCase) {
       try {
         const result = await ingestWallets({
           adapter: createGenericAdapter(rpcUrl),
-          wallets,
-          range: c.range,
+          wallets: config.mappedWallets.map((w) => w.address),
+          range: config.range,
+          ranges: walletRanges(config),
           signal: current.signal,
           cache: db ? createDbIngestionCache(db) : undefined,
           onProgress: (progress) => {
@@ -71,7 +81,7 @@ export function useIngestion(c: FraudWatchCase) {
           },
         });
         const finishedAt = new Date();
-        if (db) await saveIngestionJob(db, c.id, c.range, result, finishedAt).catch(() => {});
+        if (db) await saveIngestionJob(db, config.id, config.range, result, finishedAt).catch(() => {});
         if (controller.current === current) {
           setState({ status: "done", result, source: "rpc", lastLoadedAt: finishedAt.toISOString() });
         }
@@ -79,9 +89,14 @@ export function useIngestion(c: FraudWatchCase) {
         if (controller.current === current) {
           setState({ status: "error", error: err instanceof Error ? err.message : "Loading failed." });
         }
+      } finally {
+        if (controller.current === current) {
+          running.current = false;
+          generation.current++;
+        }
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` captures the case's id, wallets, and range.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` captures the case's id, wallets, and ranges.
     [key],
   );
 

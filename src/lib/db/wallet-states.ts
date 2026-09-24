@@ -71,6 +71,10 @@ export async function getAssetMetadata(
     if (record) known.set(id, record);
     const stale =
       !record ||
+      // Saved before NFT detection (Sprint 07B): refetch once to learn whether it's an NFT.
+      record.nft === undefined ||
+      // An NFT saved before royalty recipients were read (Sprint 07B follow-up).
+      (record.nft === true && record.source === "metaplex" && record.royaltyRecipients === undefined) ||
       (record.source === "none" && now.getTime() - Date.parse(record.fetchedAt ?? "") > MISSING_METADATA_RETRY_MS);
     if (stale && id !== NATIVE_SOL) toFetch.push(id);
   });

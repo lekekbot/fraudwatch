@@ -21,3 +21,8 @@ export function formatUtc(timestamp: string | number | null): string {
   if (timestamp === null) return "—";
   return new Date(timestamp).toISOString().slice(0, 19).replace("T", " ");
 }
+
+/** One NFT's name, or "3 NFTs" for a bundle. */
+export function nftLabel(mints: readonly string[], assets: Assets): string {
+  return mints.length === 1 ? assetLabel(mints[0], assets) : `${mints.length} NFTs`;
+}

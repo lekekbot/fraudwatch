@@ -102,7 +102,7 @@ export function EdgePanel({
               <span className="min-w-0 flex-1">
                 <span className="block text-xs tabular-nums">{formatUtc(effect.timestamp)}</span>
                 <Badge variant="outline" className="mt-0.5 text-[10px]">
-                  {summary.kind}
+                  {summary.kind.replace("_", " ")}
                 </Badge>
               </span>
               <Button

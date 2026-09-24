@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { ChevronLeftIcon, ChevronRightIcon, CopyIcon, ExternalLinkIcon, EyeOffIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -13,8 +13,15 @@ import { enrichTransaction, protocolsUsed } from "@/lib/protocols/registry";
 import { formatLamports } from "@/lib/solana/amount";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import type { WalletState, WalletTransactionEffect } from "@/lib/state/reconstruct";
-import { describeAction, type EffectSummary } from "@/lib/state/summarize";
+import { describeAction, type EffectSummary, type RecipientRole } from "@/lib/state/summarize";
 import { type Assets, assetLabel, formatAssetAmount, formatUtc } from "../asset-format";
+
+const ROLE_TEXT: Record<RecipientRole, string> = {
+  royalty: "Royalty",
+  rent: "Rent (new account)",
+  marketplace_fee: "Marketplace fee",
+  unidentified: "Unidentified",
+};
 
 /** An address that opens in the inspector, where it can be labelled. */
 function AddressButton({ address, names, onSelect }: { address: string; names: Names; onSelect: (address: string) => void }) {
@@ -86,6 +93,7 @@ export function TransactionDetails({
   onHide,
   names,
   onSelectAddress,
+  sharedWith,
 }: {
   effect: WalletTransactionEffect;
   summary: EffectSummary;
@@ -99,6 +107,8 @@ export function TransactionDetails({
   onHide: () => void;
   names: Names;
   onSelectAddress: (address: string) => void;
+  /** Other mapped wallets that also have this transaction. */
+  sharedWith: string[];
 }) {
   const enrichment = tx ? enrichTransaction(tx) : null;
   const protocols = enrichment ? protocolsUsed(enrichment) : [];
@@ -108,7 +118,7 @@ export function TransactionDetails({
     <section className="flex min-w-0 flex-col gap-4 p-3" aria-label="Transaction details">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <Badge variant={summary.kind === "FAILED" ? "destructive" : "secondary"}>{summary.kind}</Badge>
+          <Badge variant={summary.kind === "FAILED" ? "destructive" : "secondary"}>{summary.kind.replace("_", " ")}</Badge>
           <span className="text-xs text-muted-foreground tabular-nums">
             {position.index + 1} / {position.count}
           </span>
@@ -161,6 +171,16 @@ export function TransactionDetails({
             </dd>
           </>
         )}
+        {sharedWith.length > 0 && (
+          <>
+            <dt className="text-muted-foreground">Shared with</dt>
+            <dd className="flex min-w-0 flex-wrap gap-x-2">
+              {sharedWith.map((w) => (
+                <AddressButton key={w} address={w} names={names} onSelect={onSelectAddress} />
+              ))}
+            </dd>
+          </>
+        )}
         <dt className="text-muted-foreground">Protocol</dt>
         <dd className="min-w-0">
           {protocols.length > 0 ? (
@@ -172,6 +192,80 @@ export function TransactionDetails({
         <dt className="text-muted-foreground">Fee paid</dt>
         <dd className="tabular-nums">{effect.feeLamports === "0" ? "None (another account paid)" : formatLamports(effect.feeLamports)}</dd>
       </dl>
+
+      {summary.nft && (
+        <Section title="NFT trade">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+            {(
+              [
+                ["Received", summary.nft.received],
+                ["Sent", summary.nft.sent],
+              ] as const
+            ).map(
+              ([label, mints]) =>
+                mints.length > 0 && (
+                  <Fragment key={label}>
+                    <dt className="text-muted-foreground">{label}</dt>
+                    <dd className="flex min-w-0 flex-col">
+                      {mints.map((m) => (
+                        <span key={m} className="truncate" title={m}>
+                          {assetLabel(m, assets)}
+                        </span>
+                      ))}
+                    </dd>
+                  </Fragment>
+                ),
+            )}
+            {summary.nft.payment && (
+              <>
+                <dt className="text-muted-foreground">
+                  {summary.kind === "NFT_SELL" ? "Received" : summary.kind === "NFT_MINT" ? "Mint price" : "Paid"}
+                </dt>
+                <dd className="tabular-nums">
+                  {format(summary.nft.payment.delta.replace("-", ""), summary.nft.payment.assetId)} {assetLabel(summary.nft.payment.assetId, assets)}
+                </dd>
+              </>
+            )}
+            {summary.nft.party && (
+              <>
+                <dt className="text-muted-foreground">
+                  {summary.kind === "NFT_BUY" ? "Seller" : summary.kind === "NFT_SELL" ? "Buyer" : summary.kind === "NFT_MINT" ? "Paid to" : "Other side"}
+                </dt>
+                <dd className="min-w-0">
+                  <AddressButton address={summary.nft.party} names={names} onSelect={onSelectAddress} />
+                </dd>
+              </>
+            )}
+            {summary.nft.marketplace && (
+              <>
+                <dt className="text-muted-foreground">Marketplace</dt>
+                <dd className="min-w-0 truncate">{names.of(summary.nft.marketplace)}</dd>
+              </>
+            )}
+          </dl>
+          {summary.nft.payment && summary.nft.others.length > 0 && (
+            <>
+              <p className="pt-1 text-xs text-muted-foreground">
+                Also paid in {assetLabel(summary.nft.payment.assetId, assets)}. Royalty: a creator in the NFT&apos;s
+                metadata. Rent: an account created here. Unidentified: often a marketplace fee.
+              </p>
+              <ul className="flex flex-col gap-1">
+                {summary.nft.others.slice(0, 6).map((o) => (
+                  <li key={o.address} className="flex items-center justify-between gap-2">
+                    <span className="flex min-w-0 flex-col">
+                      <AddressButton address={o.address} names={names} onSelect={onSelectAddress} />
+                      <span className="text-[10px] text-muted-foreground uppercase">{ROLE_TEXT[o.role]}</span>
+                    </span>
+                    <span className="text-xs whitespace-nowrap tabular-nums text-muted-foreground">
+                      {format(o.amount, summary.nft!.payment!.assetId)} {assetLabel(summary.nft!.payment!.assetId, assets)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </Section>
+      )}
 
       <Section title="Wallet before · change · after">
         {effect.assetChanges.length === 0 ? (

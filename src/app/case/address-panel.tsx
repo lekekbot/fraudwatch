@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowLeftIcon, CopyIcon, ExternalLinkIcon, GitBranchPlusIcon, XIcon } from "lucide-react";
+import { ArrowLeftIcon, CopyIcon, ExternalLinkIcon, GitBranchPlusIcon, UnlinkIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -42,6 +42,8 @@ export function AddressPanel({
   entry,
   transactionCount,
   onBack,
+  onMap,
+  mapped,
 }: {
   caseId: string;
   address: string;
@@ -51,6 +53,10 @@ export function AddressPanel({
   /** Transactions of the selected wallet that involve this address. */
   transactionCount?: number;
   onBack?: () => void;
+  /** Starts mapping an observed wallet. */
+  onMap?: () => void;
+  /** For a mapped (non-primary) wallet: where its history starts, and removing it. */
+  mapped?: { rangeText: string; onUnmap: () => void };
 }) {
   const [name, setName] = useState(label?.name ?? "");
   const [note, setNote] = useState(label?.note ?? "");
@@ -121,11 +127,26 @@ export function AddressPanel({
             In {transactionCount.toLocaleString()} of this wallet&apos;s transactions.
           </p>
         )}
-        {state === "OBSERVED" && (
-          <Button variant="outline" size="sm" disabled title="Mapping observed wallets arrives in Sprint 07">
+        {state === "OBSERVED" && onMap && (
+          <Button variant="outline" size="sm" onClick={onMap}>
             <GitBranchPlusIcon />
-            Map wallet (Sprint 07)
+            Map wallet
           </Button>
+        )}
+        {mapped && (
+          <>
+            <p className="text-xs text-muted-foreground">History loaded {mapped.rangeText}.</p>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="self-start text-muted-foreground"
+              title="Removes it from the case. Its label and cached transactions stay."
+              onClick={mapped.onUnmap}
+            >
+              <UnlinkIcon />
+              Remove from map
+            </Button>
+          </>
         )}
       </PanelSection>
 

@@ -79,6 +79,12 @@ export type SolanaRpcAdapter = {
   getBalance(address: string, signal: AbortSignal): Promise<number>;
   getTokenAccountBalance(address: string, signal: AbortSignal): Promise<{ amount: string; decimals: number }>;
   getLatestBlockhash(signal: AbortSignal): Promise<{ blockhash: string; slot: number }>;
+  /**
+   * Digital Asset Standard `getAsset` (not a standard Solana RPC method; Helius
+   * and some others provide it). Used only to name compressed NFTs; resolves
+   * null when the provider doesn't support it.
+   */
+  getAsset(id: string, signal: AbortSignal): Promise<{ name: string | null; symbol: string | null } | null>;
 };
 
 type ParsedTokenAccount = {
@@ -93,10 +99,22 @@ type ParsedTokenAccount = {
 
 export function createGenericAdapter(url: string, options: JsonRpcOptions = {}): SolanaRpcAdapter {
   const opts: JsonRpcOptions = { maxRetries: 4, ...options };
-  const call = <T>(method: string, params: unknown[], signal: AbortSignal) => rpcCall<T>(url, method, params, signal, opts);
+  const call = <T>(method: string, params: unknown[] | Record<string, unknown>, signal: AbortSignal) =>
+    rpcCall<T>(url, method, params, signal, opts);
 
   return {
     kind: "generic",
+
+    async getAsset(id, signal) {
+      try {
+        const asset = await call<{ content?: { metadata?: { name?: string; symbol?: string } } } | null>("getAsset", { id }, signal);
+        const metadata = asset?.content?.metadata;
+        return metadata ? { name: metadata.name || null, symbol: metadata.symbol || null } : null;
+      } catch (err) {
+        if (signal.aborted) throw err;
+        return null;
+      }
+    },
 
     getSignaturesForAddress(address, { before }, signal) {
       const config: Record<string, unknown> = { limit: SIGNATURE_PAGE_LIMIT, commitment: COMMITMENT };
