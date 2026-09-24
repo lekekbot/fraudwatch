@@ -16,6 +16,7 @@ import { getDb } from "@/lib/db/db";
 import { getRpcSettings } from "@/lib/db/rpc-settings";
 import { buildMapSearch } from "@/lib/routing/map-params";
 import { shortenAddress } from "@/lib/solana/address";
+import { IngestionPanel } from "./ingestion-panel";
 
 export function CaseShell() {
   const id = useSearchParams().get("id") ?? "";
@@ -113,10 +114,12 @@ export function CaseShell() {
         </CardContent>
       </Card>
 
+      <IngestionPanel c={c} rpc={rpc.status === "ready" ? rpc.data : undefined} />
+
       <Card>
         <CardHeader>
           <CardTitle>Timeline</CardTitle>
-          <CardDescription>Transaction loading and the chronological map arrive in the next sprints.</CardDescription>
+          <CardDescription>The chronological map arrives in a later sprint.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => copy(`${window.location.origin}/map/?${shareSearch}`, "Startup link")}>
