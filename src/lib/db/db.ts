@@ -1,10 +1,12 @@
 import Dexie, { type EntityTable } from "dexie";
+import type { AssetMetadata } from "@/lib/assets/assets";
 import type { CachedCoverage } from "@/lib/cache/coverage";
 import type { FraudWatchCase } from "@/lib/case/model";
 import type { IngestionCoverage } from "@/lib/ingest/ingest";
 import type { RawParsedTransaction } from "@/lib/rpc/generic-adapter";
 import type { RpcSettings } from "@/lib/rpc/settings";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
+import type { WalletState } from "@/lib/state/reconstruct";
 
 export const DB_NAME = "fraudwatch";
 
@@ -32,6 +34,23 @@ export type IngestionJobRecord = {
   wallets: Array<{ wallet: string; coverage: IngestionCoverage; error?: string }>;
 };
 
+/**
+ * A wallet's reconstructed state for one range. Reused only while the
+ * reconstruction and parser versions and the exact source transactions match.
+ */
+export type WalletStateRecord = {
+  key: string;
+  wallet: string;
+  range: { start: string; end: string };
+  reconstructionVersion: number;
+  parserVersion: number;
+  /** Sorted signatures of the transactions the state was built from. */
+  sourceSignatures: string[];
+  historyComplete: boolean;
+  computedAt: string;
+  state: WalletState;
+};
+
 /** Version of each derived cache when it was last written; see `derived.ts`. */
 export type MetaRecord = { key: string; value: unknown };
 
@@ -39,8 +58,9 @@ export type MetaRecord = { key: string; value: unknown };
  * Local-only persistence.
  *
  * v1 (Sprint 01): cases, rpc_settings.
- * v2 (Sprint 03): transaction cache. Later sprints add wallet_states,
- * token_metadata, protocol_cache, and ui_state in their own version blocks.
+ * v2 (Sprint 03): transaction cache.
+ * v3 (Sprint 04): wallet_states, token_metadata.
+ * Later sprints add protocol_cache and ui_state in their own version blocks.
  */
 export class FraudWatchDB extends Dexie {
   cases!: EntityTable<FraudWatchCase, "id">;
@@ -51,6 +71,8 @@ export class FraudWatchDB extends Dexie {
   coverage!: EntityTable<CachedCoverage, "wallet">;
   ingestion_jobs!: EntityTable<IngestionJobRecord, "caseId">;
   meta!: EntityTable<MetaRecord, "key">;
+  wallet_states!: EntityTable<WalletStateRecord, "key">;
+  token_metadata!: EntityTable<AssetMetadata, "id">;
 
   constructor(name = DB_NAME) {
     super(name);
@@ -65,6 +87,10 @@ export class FraudWatchDB extends Dexie {
       coverage: "wallet",
       ingestion_jobs: "caseId",
       meta: "key",
+    });
+    this.version(3).stores({
+      wallet_states: "key, wallet",
+      token_metadata: "id",
     });
   }
 }

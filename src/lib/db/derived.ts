@@ -1,4 +1,5 @@
 import { PARSER_VERSION } from "@/lib/solana/canonical";
+import { RECONSTRUCTION_VERSION } from "@/lib/state/reconstruct";
 import type { FraudWatchDB } from "./db";
 
 /**
@@ -6,8 +7,7 @@ import type { FraudWatchDB } from "./db";
  * version differs from the one recorded in `meta`, the cache is cleared and
  * rebuilt on demand. Raw transactions are never in this list.
  *
- * Later sprints register theirs here: wallet-state reconstruction (Sprint 04)
- * and protocol annotations keyed to the registry version (Sprint 06).
+ * Protocol annotations keyed to the registry version register here in Sprint 06.
  */
 export type DerivedCache = {
   name: string;
@@ -18,6 +18,7 @@ export type DerivedCache = {
 export const DERIVED_CACHES: DerivedCache[] = [
   // Parsed transactions are re-derived from raw_transactions, so no refetch is needed.
   { name: "parser", version: PARSER_VERSION, clear: (db) => db.transactions.clear() },
+  { name: "reconstruction", version: RECONSTRUCTION_VERSION, clear: (db) => db.wallet_states.clear() },
 ];
 
 const metaKey = (name: string) => `derived:${name}`;

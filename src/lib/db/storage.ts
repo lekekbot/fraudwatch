@@ -30,9 +30,19 @@ export async function getStorageEstimate(): Promise<{ usageBytes: number; quotaB
 export async function clearTransactionCache(db: FraudWatchDB): Promise<void> {
   await db.transaction(
     "rw",
-    [db.transactions, db.raw_transactions, db.wallet_transactions, db.coverage, db.ingestion_jobs],
+    [
+      db.transactions,
+      db.raw_transactions,
+      db.wallet_transactions,
+      db.coverage,
+      db.ingestion_jobs,
+      db.wallet_states,
+      db.token_metadata,
+    ],
     async () => {
       await Promise.all([
+        db.wallet_states.clear(),
+        db.token_metadata.clear(),
         db.transactions.clear(),
         db.raw_transactions.clear(),
         db.wallet_transactions.clear(),
