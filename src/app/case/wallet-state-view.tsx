@@ -1,17 +1,12 @@
 "use client";
 
-import { useState } from "react";
 import { ExternalLinkIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import type { FraudWatchCase } from "@/lib/case/model";
 import { formatLamports } from "@/lib/solana/amount";
 import { shortenAddress } from "@/lib/solana/address";
-import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import type { AssetState, WalletState, WalletTransactionEffect } from "@/lib/state/reconstruct";
 import { type Assets, assetLabel, formatAssetAmount, formatUtc } from "./asset-format";
-import { WalletTimeline } from "./timeline/wallet-timeline";
 
 const MAX_ROWS = 200;
 
@@ -68,9 +63,9 @@ function StateTable({ title, rows, status, state, assets }: {
   );
 }
 
-function WalletStateSummary({ state, assets }: { state: WalletState; assets: Assets }) {
+export function WalletStateSummary({ state, assets }: { state: WalletState; assets: Assets }) {
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       {state.mismatches.length > 0 && (
         <Alert variant="destructive">
           <AlertTitle>STATE_MISMATCH — {state.mismatches.length} balance(s) don&apos;t chain</AlertTitle>
@@ -92,10 +87,8 @@ function WalletStateSummary({ state, assets }: { state: WalletState; assets: Ass
         </Alert>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <StateTable title="Opening state" rows={state.opening} status={state.openingStatus} state={state} assets={assets} />
-        <StateTable title="Closing state" rows={state.closing} status={state.closingStatus} state={state} assets={assets} />
-      </div>
+      <StateTable title="Opening state" rows={state.opening} status={state.openingStatus} state={state} assets={assets} />
+      <StateTable title="Closing state" rows={state.closing} status={state.closingStatus} state={state} assets={assets} />
       <ul className="list-disc pl-5 text-xs text-muted-foreground">
         {state.partialReasons.map((r) => (
           <li key={r}>{r}</li>
@@ -106,7 +99,7 @@ function WalletStateSummary({ state, assets }: { state: WalletState; assets: Ass
   );
 }
 
-function WalletStateTable({ state, assets }: { state: WalletState; assets: Assets }) {
+export function WalletStateTable({ state, assets }: { state: WalletState; assets: Assets }) {
   const effects = state.effects.slice(0, MAX_ROWS);
   return (
     <div className="flex flex-col gap-4">
@@ -169,51 +162,6 @@ function WalletStateTable({ state, assets }: { state: WalletState; assets: Asset
             </p>
           )}
         </div>
-      )}
-    </div>
-  );
-}
-
-export function WalletStateView({
-  c,
-  states,
-  assets,
-  transactions,
-}: {
-  c: FraudWatchCase;
-  states: WalletState[];
-  assets: Assets;
-  transactions: Map<string, CanonicalTransaction>;
-}) {
-  const [selected, setSelected] = useState(0);
-  const [view, setView] = useState<"timeline" | "table">("timeline");
-  const state = states[Math.min(selected, states.length - 1)];
-  if (!state) return null;
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-sm font-medium">Wallet state</h3>
-        {states.length > 1 &&
-          states.map((s, i) => (
-            <Button key={s.wallet} size="xs" variant={s === state ? "secondary" : "ghost"} onClick={() => setSelected(i)}>
-              <span className="font-mono">{c.labels[s.wallet] ?? shortenAddress(s.wallet, 4)}</span>
-              {(s.mismatches.length > 0 || s.openingStatus !== "OBSERVED") && <span className="text-destructive">•</span>}
-            </Button>
-          ))}
-      </div>
-      <WalletStateSummary state={state} assets={assets} />
-      <div className="flex rounded-md border p-0.5 self-start" role="group" aria-label="View">
-        {(["timeline", "table"] as const).map((v) => (
-          <Button key={v} size="xs" variant={view === v ? "secondary" : "ghost"} aria-pressed={view === v} onClick={() => setView(v)}>
-            {v === "timeline" ? "Timeline" : "Table"}
-          </Button>
-        ))}
-      </div>
-      {view === "timeline" ? (
-        <WalletTimeline key={state.wallet} state={state} transactions={transactions} range={c.range} assets={assets} labels={c.labels} />
-      ) : (
-        <WalletStateTable state={state} assets={assets} />
       )}
     </div>
   );

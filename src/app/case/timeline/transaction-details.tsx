@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronLeftIcon, ChevronRightIcon, CopyIcon, ExternalLinkIcon, XIcon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, CopyIcon, ExternalLinkIcon, EyeOffIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -67,6 +67,7 @@ export function TransactionDetails({
   onPrevious,
   onNext,
   onClose,
+  onHide,
 }: {
   effect: WalletTransactionEffect;
   summary: EffectSummary;
@@ -77,11 +78,12 @@ export function TransactionDetails({
   onPrevious: () => void;
   onNext: () => void;
   onClose: () => void;
+  onHide: () => void;
 }) {
   const format = (value: string, assetId: string, signed = false) => formatAssetAmount(value, assetId, state, assets, signed);
 
   return (
-    <aside className="flex min-w-0 flex-col gap-4 rounded-lg border p-3" aria-label="Transaction details">
+    <section className="flex min-w-0 flex-col gap-4 p-3" aria-label="Transaction details">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Badge variant={summary.kind === "FAILED" ? "destructive" : "secondary"}>{summary.kind}</Badge>
@@ -95,6 +97,9 @@ export function TransactionDetails({
           </Button>
           <Button variant="ghost" size="icon-sm" aria-label="Next transaction" onClick={onNext}>
             <ChevronRightIcon />
+          </Button>
+          <Button variant="ghost" size="icon-sm" aria-label="Hide from map" title="Hide from map" onClick={onHide}>
+            <EyeOffIcon />
           </Button>
           <Button variant="ghost" size="icon-sm" aria-label="Close details" onClick={onClose}>
             <XIcon />
@@ -199,6 +204,6 @@ export function TransactionDetails({
         <ExternalLinkIcon />
         Open in explorer
       </a>
-    </aside>
+    </section>
   );
 }
