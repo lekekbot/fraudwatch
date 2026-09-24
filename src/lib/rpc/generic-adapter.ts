@@ -31,6 +31,7 @@ export type TokenAccountInfo = {
 export type RawParsedTransaction = {
   slot: number;
   blockTime: number | null;
+  transactionIndex?: number;
   version?: number | "legacy";
   meta: RawTransactionMeta | null;
   transaction: {

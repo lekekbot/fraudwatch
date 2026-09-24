@@ -4,7 +4,7 @@ import type { RawInstruction, RawParsedTransaction, RawTokenBalance } from "@/li
  * Bump when `canonicalize` output changes. Cached canonical transactions from an
  * older version are re-derived from the stored raw response, not refetched.
  */
-export const PARSER_VERSION = 1;
+export const PARSER_VERSION = 2;
 
 /**
  * Provider-independent transaction shape. Amounts are integer strings in base
@@ -13,6 +13,8 @@ export const PARSER_VERSION = 1;
 export type CanonicalTransaction = {
   signature: string;
   slot: number;
+  /** Position within the slot, when the RPC reports it; orders transactions that share a slot. */
+  transactionIndex: number | null;
   timestamp: string | null;
   success: boolean;
 
@@ -145,6 +147,7 @@ export function canonicalize(raw: RawParsedTransaction): CanonicalTransaction {
   return {
     signature,
     slot: raw.slot,
+    transactionIndex: typeof raw.transactionIndex === "number" ? raw.transactionIndex : null,
     timestamp: raw.blockTime == null ? null : new Date(raw.blockTime * 1000).toISOString(),
     success: meta.err == null,
     feeLamports: String(meta.fee),
