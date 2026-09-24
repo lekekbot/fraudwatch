@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeftIcon, ChevronRightIcon, MaximizeIcon, MinusIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, CircleHelpIcon, MaximizeIcon, MinusIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
@@ -10,6 +10,7 @@ import type { WalletState } from "@/lib/state/reconstruct";
 import { type EffectSummary, summarizeEffect } from "@/lib/state/summarize";
 import { eventAtOrAfter, eventTimes, type SpacingMode, stepEvent } from "@/lib/timeline/layout";
 import { type Assets, assetLabel, formatAssetAmount } from "../asset-format";
+import { SidePanel } from "../panel";
 import { type TimelineHandle, type TimelineItem, TimelineCanvas } from "./timeline-canvas";
 import { TimelineMinimap } from "./timeline-minimap";
 import { TransactionDetails } from "./transaction-details";
@@ -35,16 +36,28 @@ export function WalletTimeline({
   range,
   assets,
   labels,
+  inspector,
+  inspectorOpen,
+  emptyMessage = "No transactions to map in this range.",
+  onHide,
 }: {
   state: WalletState;
   transactions: Map<string, CanonicalTransaction>;
   range: { start: string; end: string };
   assets: Assets;
   labels: Record<string, string>;
+  /** Right-panel content while no transaction is selected. */
+  inspector: React.ReactNode;
+  /** Selecting a transaction opens the right panel even when it's hidden. */
+  inspectorOpen: boolean;
+  emptyMessage?: string;
+  /** Leaves a transaction off the map. */
+  onHide: (signature: string) => void;
 }) {
   const timeline = useRef<TimelineHandle>(null);
   const [mode, setMode] = useState<SpacingMode>("time");
-  const [selected, setSelected] = useState<number | null>(null);
+  // Tracked by signature so the selection survives filtering.
+  const [selectedSignature, setSelectedSignature] = useState<string | null>(null);
   const [view, setView] = useState<{ start: number; end: number } | null>(null);
   const [jumpDate, setJumpDate] = useState("");
 
@@ -69,6 +82,9 @@ export function WalletTimeline({
       }),
     [state, summaries, times, assets, labels],
   );
+  const selectedIndex = selectedSignature === null ? -1 : items.findIndex((i) => i.signature === selectedSignature);
+  const selected = selectedIndex === -1 ? null : selectedIndex;
+  const setSelected = (index: number | null) => setSelectedSignature(index === null ? null : (items[index]?.signature ?? null));
 
   // Selection to centre once the canvas has switched spacing mode.
   const pending = useRef<number | null>(null);
@@ -92,107 +108,149 @@ export function WalletTimeline({
   }, [mode]);
   const step = (direction: 1 | -1) => select(stepEvent(items.length, selected, direction));
 
-  if (items.length === 0) return <p className="text-sm text-muted-foreground">No transactions to map in this range.</p>;
-
   const current = selected !== null ? state.effects[selected] : null;
 
-  return (
-    <div
-      className="flex flex-col gap-3 outline-none"
-      tabIndex={0}
-      onKeyDown={(event) => {
-        if ((event.target as HTMLElement).tagName === "INPUT") return;
-        if (event.key === "ArrowRight") step(1);
-        else if (event.key === "ArrowLeft") step(-1);
-        else if (event.key === "Escape") setSelected(null);
-        else return;
-        event.preventDefault();
-      }}
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex rounded-md border p-0.5" role="group" aria-label="Spacing">
-          {(["time", "event"] as const).map((m) => (
-            <Button key={m} size="xs" variant={mode === m ? "secondary" : "ghost"} onClick={() => setMode(m)} aria-pressed={mode === m}>
-              {m === "time" ? "Time spacing" : "Event spacing"}
-            </Button>
-          ))}
-        </div>
-        <div className="flex gap-1">
-          <Button variant="outline" size="icon-sm" aria-label="Zoom out" onClick={() => timeline.current?.zoomBy(1 / 1.6)}>
-            <MinusIcon />
-          </Button>
-          <Button variant="outline" size="icon-sm" aria-label="Zoom in" onClick={() => timeline.current?.zoomBy(1.6)}>
-            <PlusIcon />
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => timeline.current?.fit()}>
-            <MaximizeIcon />
-            Fit range
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setSelected(null);
-              setMode("time");
-              timeline.current?.fit();
-            }}
-          >
-            <RotateCcwIcon />
-            Reset
-          </Button>
-        </div>
-        <div className="flex gap-1">
-          <Button variant="outline" size="icon-sm" aria-label="Previous transaction" onClick={() => step(-1)}>
-            <ChevronLeftIcon />
-          </Button>
-          <Button variant="outline" size="icon-sm" aria-label="Next transaction" onClick={() => step(1)}>
-            <ChevronRightIcon />
-          </Button>
-        </div>
-        <form
-          className="flex items-center gap-1"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const ms = Date.parse(`${jumpDate}T00:00:00Z`);
-            if (Number.isNaN(ms)) return;
-            select(eventAtOrAfter(times, ms));
+  const panel = (inspectorOpen || current) && (
+    <SidePanel side="right" label="Inspector">
+      {current && selected !== null ? (
+        <TransactionDetails
+          effect={current}
+          summary={summaries[selected]}
+          tx={transactions.get(current.signature)}
+          state={state}
+          assets={assets}
+          position={{ index: selected, count: items.length }}
+          onPrevious={() => step(-1)}
+          onNext={() => step(1)}
+          onClose={() => setSelected(null)}
+          onHide={() => {
+            // Move on to a neighbour so stepping through the timeline isn't interrupted.
+            const next = items[selected + 1] ?? items[selected - 1];
+            setSelectedSignature(next?.signature ?? null);
+            onHide(current.signature);
           }}
-        >
-          <Input
-            type="date"
-            aria-label="Jump to date (UTC)"
-            className="h-7 w-36 text-xs"
-            value={jumpDate}
-            min={range.start.slice(0, 10)}
-            max={range.end.slice(0, 10)}
-            onChange={(event) => setJumpDate(event.target.value)}
-          />
-          <Button type="submit" variant="outline" size="sm" disabled={!jumpDate}>
-            Jump
-          </Button>
-        </form>
-      </div>
+        />
+      ) : (
+        inspector
+      )}
+    </SidePanel>
+  );
 
-      <div className={current ? "grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]" : ""}>
-        <div className="flex min-w-0 flex-col gap-2">
-          <div className="overflow-hidden rounded-lg border">
-            <TimelineCanvas
-              ref={timeline}
-              items={items}
-              range={bounds}
-              mode={mode}
-              selected={selected}
-              onSelect={select}
-              onNeedsEventSpacing={(index) => {
-                pending.current = index;
-                setSelected(index);
-                setMode("event");
-              }}
-              onViewChange={(start, end) =>
-                setView((v) => (v && Math.abs(v.start - start) < 1 && Math.abs(v.end - end) < 1 ? v : { start, end }))
-              }
-            />
+  if (items.length === 0) {
+    return (
+      <>
+        <div className="flex min-w-0 flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
+          {emptyMessage}
+        </div>
+        {panel}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div
+        className="flex min-w-0 flex-1 flex-col outline-none"
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if ((event.target as HTMLElement).tagName === "INPUT") return;
+          if (event.key === "ArrowRight") step(1);
+          else if (event.key === "ArrowLeft") step(-1);
+          else if (event.key === "Escape") setSelected(null);
+          else return;
+          event.preventDefault();
+        }}
+      >
+        <div className="relative min-h-0 flex-1 overflow-hidden">
+          <TimelineCanvas
+            ref={timeline}
+            items={items}
+            range={bounds}
+            mode={mode}
+            selected={selected}
+            onSelect={select}
+            onNeedsEventSpacing={(index) => {
+              pending.current = index;
+              setSelected(index);
+              setMode("event");
+            }}
+            onViewChange={(start, end) =>
+              setView((v) => (v && Math.abs(v.start - start) < 1 && Math.abs(v.end - end) < 1 ? v : { start, end }))
+            }
+          />
+          {/* Floating toolbar over the canvas. */}
+          <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-3">
+            <div className="pointer-events-auto flex flex-wrap items-center gap-1 rounded-xl border bg-popover/95 p-1 shadow-lg backdrop-blur">
+              <div className="flex" role="group" aria-label="Spacing">
+                {(["time", "event"] as const).map((m) => (
+                  <Button key={m} size="xs" variant={mode === m ? "secondary" : "ghost"} onClick={() => setMode(m)} aria-pressed={mode === m}>
+                    {m === "time" ? "Time" : "Events"}
+                  </Button>
+                ))}
+              </div>
+              <Divider />
+              <Button variant="ghost" size="icon-sm" aria-label="Zoom out" title="Zoom out" onClick={() => timeline.current?.zoomBy(1 / 1.6)}>
+                <MinusIcon />
+              </Button>
+              <Button variant="ghost" size="icon-sm" aria-label="Zoom in" title="Zoom in" onClick={() => timeline.current?.zoomBy(1.6)}>
+                <PlusIcon />
+              </Button>
+              <Button variant="ghost" size="icon-sm" aria-label="Fit range" title="Fit range" onClick={() => timeline.current?.fit()}>
+                <MaximizeIcon />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Reset"
+                title="Reset"
+                onClick={() => {
+                  setSelected(null);
+                  setMode("time");
+                  timeline.current?.fit();
+                }}
+              >
+                <RotateCcwIcon />
+              </Button>
+              <Divider />
+              <Button variant="ghost" size="icon-sm" aria-label="Previous transaction" title="Previous transaction (←)" onClick={() => step(-1)}>
+                <ChevronLeftIcon />
+              </Button>
+              <Button variant="ghost" size="icon-sm" aria-label="Next transaction" title="Next transaction (→)" onClick={() => step(1)}>
+                <ChevronRightIcon />
+              </Button>
+              <Divider />
+              <form
+                className="flex items-center gap-1"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const ms = Date.parse(`${jumpDate}T00:00:00Z`);
+                  if (Number.isNaN(ms)) return;
+                  select(eventAtOrAfter(times, ms));
+                }}
+              >
+                <Input
+                  type="date"
+                  aria-label="Jump to date (UTC)"
+                  className="h-7 w-36 text-xs"
+                  value={jumpDate}
+                  min={range.start.slice(0, 10)}
+                  max={range.end.slice(0, 10)}
+                  onChange={(event) => setJumpDate(event.target.value)}
+                />
+                <Button type="submit" variant="ghost" size="sm" disabled={!jumpDate}>
+                  Jump
+                </Button>
+              </form>
+              <span
+                className="flex size-7 items-center justify-center text-muted-foreground"
+                title="Scroll to zoom, drag to pan, click a cluster to open it. ← and → step between transactions."
+              >
+                <CircleHelpIcon className="size-4" aria-hidden />
+              </span>
+            </div>
           </div>
+        </div>
+        <div className="border-t p-2">
           <TimelineMinimap
             times={times}
             range={bounds}
@@ -202,24 +260,13 @@ export function WalletTimeline({
               timeline.current?.showTimeRange(time - span / 2, time + span / 2, false);
             }}
           />
-          <p className="text-xs text-muted-foreground">
-            Scroll to zoom, drag to pan, click a cluster to open it. ← and → step between transactions.
-          </p>
         </div>
-        {current && selected !== null && (
-          <TransactionDetails
-            effect={current}
-            summary={summaries[selected]}
-            tx={transactions.get(current.signature)}
-            state={state}
-            assets={assets}
-            position={{ index: selected, count: items.length }}
-            onPrevious={() => step(-1)}
-            onNext={() => step(1)}
-            onClose={() => setSelected(null)}
-          />
-        )}
       </div>
-    </div>
+      {panel}
+    </>
   );
+}
+
+function Divider() {
+  return <div className="mx-0.5 h-5 w-px bg-border" aria-hidden />;
 }

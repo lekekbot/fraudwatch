@@ -4,14 +4,12 @@ import { DownloadIcon, SquareIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useIngestion } from "@/hooks/use-ingestion";
-import { useWalletStates } from "@/hooks/use-wallet-states";
+import type { useIngestion } from "@/hooks/use-ingestion";
 import type { FraudWatchCase } from "@/lib/case/model";
 import type { IngestionProgress, WalletIngestion } from "@/lib/ingest/ingest";
 import type { RpcSettings } from "@/lib/rpc/settings";
 import { shortenAddress } from "@/lib/solana/address";
-import { WalletStateView } from "./wallet-state-view";
+import { PanelSection } from "./panel";
 
 function walletName(c: FraudWatchCase, address: string) {
   return c.labels[address] ?? shortenAddress(address, 6);
@@ -85,75 +83,75 @@ function WalletCoverage({ w, c }: { w: WalletIngestion; c: FraudWatchCase }) {
   );
 }
 
-export function IngestionPanel({ c, rpc }: { c: FraudWatchCase; rpc: RpcSettings | undefined }) {
-  const { state, start, cancel, wallets } = useIngestion(c);
-  const walletStates = useWalletStates(state.status === "done" ? state.result : null, c.range, rpc?.url);
+/** Left-panel section: loads history from the RPC and reports how complete it is. */
+export function IngestionPanel({
+  c,
+  rpc,
+  ingestion,
+}: {
+  c: FraudWatchCase;
+  rpc: RpcSettings | undefined;
+  ingestion: ReturnType<typeof useIngestion>;
+}) {
+  const { state, start, cancel, wallets } = ingestion;
   const running = state.status === "running";
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Transactions</CardTitle>
-        <CardDescription>
-          Loads each mapped wallet&apos;s history for the case range from your RPC, including activity that only touches
-          its token accounts. Results are cached in this browser; later loads only fetch what isn&apos;t cached yet.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-center gap-2">
-          {running ? (
-            <Button variant="outline" size="sm" onClick={cancel}>
-              <SquareIcon />
-              Cancel
-            </Button>
-          ) : (
-            <Button size="sm" disabled={!rpc} onClick={() => rpc && start(rpc.url)}>
-              <DownloadIcon />
-              {state.status === "done" ? "Load missing history" : "Load transactions"}
-            </Button>
-          )}
-          {state.status === "done" && state.lastLoadedAt && (
-            <span className="text-xs text-muted-foreground">
-              {state.source === "cache" ? "From local cache · " : ""}last loaded{" "}
-              {state.lastLoadedAt.slice(0, 16).replace("T", " ")} UTC
-            </span>
-          )}
-          {rpc?.providerType === "enhanced" && (
-            <span className="text-xs text-muted-foreground">Enhanced provider APIs are not used yet; loading with standard RPC.</span>
-          )}
-        </div>
+    <PanelSection title="History">
+      <p className="text-xs text-muted-foreground">
+        Loads each mapped wallet&apos;s history for the case range from your RPC, including its token accounts. Cached
+        in this browser; later loads only fetch what&apos;s missing.
+      </p>
+      {running ? (
+        <Button variant="outline" size="sm" onClick={cancel}>
+          <SquareIcon />
+          Cancel
+        </Button>
+      ) : (
+        <Button size="sm" disabled={!rpc} onClick={() => rpc && start(rpc.url)}>
+          <DownloadIcon />
+          {state.status === "done" ? "Load missing history" : "Load transactions"}
+        </Button>
+      )}
+      {state.status === "done" && state.lastLoadedAt && (
+        <span className="text-xs text-muted-foreground">
+          {state.source === "cache" ? "From local cache · " : ""}last loaded{" "}
+          {state.lastLoadedAt.slice(0, 16).replace("T", " ")} UTC
+        </span>
+      )}
+      {rpc?.providerType === "enhanced" && (
+        <span className="text-xs text-muted-foreground">Enhanced provider APIs are not used yet; loading with standard RPC.</span>
+      )}
 
-        {state.status === "running" && <ProgressLines progress={state.progress} c={c} />}
+      {state.status === "running" && <ProgressLines progress={state.progress} c={c} />}
 
-        {state.status === "error" && (
-          <Alert variant="destructive">
-            <AlertTitle>Loading failed</AlertTitle>
-            <AlertDescription>{state.error}</AlertDescription>
-          </Alert>
-        )}
+      {state.status === "error" && (
+        <Alert variant="destructive">
+          <AlertTitle>Loading failed</AlertTitle>
+          <AlertDescription>{state.error}</AlertDescription>
+        </Alert>
+      )}
 
-        {state.status === "done" && (
-          <>
-            {(state.result.cancelled || state.result.wallets.some((w) => !w.coverage.complete)) && (
-              <Alert variant="destructive">
-                <AlertTitle>{state.result.cancelled ? "Loading cancelled — partial history" : "Partial history"}</AlertTitle>
-                <AlertDescription>
-                  Some activity in the range may be missing. Don&apos;t treat the absence of a transaction below as
-                  evidence it didn&apos;t happen.
-                  {state.result.wallets.length < wallets.length &&
-                    ` ${wallets.length - state.result.wallets.length} mapped wallet(s) were not loaded.`}
-                </AlertDescription>
-              </Alert>
-            )}
-            <ul className="divide-y">
-              {state.result.wallets.map((w) => (
-                <WalletCoverage key={w.wallet} w={w} c={c} />
-              ))}
-            </ul>
-            {walletStates && <WalletStateView c={c} states={walletStates.states} assets={walletStates.assets} transactions={state.result.transactions} />}
-          </>
-        )}
-      </CardContent>
-    </Card>
+      {state.status === "done" && (
+        <>
+          {(state.result.cancelled || state.result.wallets.some((w) => !w.coverage.complete)) && (
+            <Alert variant="destructive">
+              <AlertTitle>{state.result.cancelled ? "Loading cancelled — partial history" : "Partial history"}</AlertTitle>
+              <AlertDescription>
+                Some activity in the range may be missing. Don&apos;t treat the absence of a transaction as evidence it
+                didn&apos;t happen.
+                {state.result.wallets.length < wallets.length &&
+                  ` ${wallets.length - state.result.wallets.length} mapped wallet(s) were not loaded.`}
+              </AlertDescription>
+            </Alert>
+          )}
+          <ul className="divide-y">
+            {state.result.wallets.map((w) => (
+              <WalletCoverage key={w.wallet} w={w} c={c} />
+            ))}
+          </ul>
+        </>
+      )}
+    </PanelSection>
   );
 }

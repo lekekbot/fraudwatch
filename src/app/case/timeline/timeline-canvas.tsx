@@ -48,8 +48,8 @@ type Props = {
 /** Below this span, a time-spaced cluster can't be opened any further. */
 const UNRESOLVABLE_MS = 1000;
 
-const HEIGHT = 280;
-const LANE_Y = 132;
+/** Shortest the canvas gets: room for a card tier on each side of the lane plus the axis. */
+const MIN_HEIGHT = 280;
 const PAD = 28;
 const CARD_W = 150;
 const CARD_H = 64;
@@ -59,7 +59,6 @@ const PILL_GAP = 6;
 /** Narrowest bucket a dense period is split into, in px; fits a two-line pill. */
 const BUCKET_MIN = 84;
 const PILL_H = 32;
-const AXIS_Y = HEIGHT - 18;
 
 type Hit = { x0: number; y0: number; x1: number; y1: number; first: number; last: number };
 
@@ -120,6 +119,7 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
   const zoomRef = useRef<ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
   const transformRef = useRef<ZoomTransform>(zoomIdentity);
   const widthRef = useRef(800);
+  const heightRef = useRef(MIN_HEIGHT);
   const hitsRef = useRef<Hit[]>([]);
   const frameRef = useRef<number | null>(null);
   const latest = useRef({ items, range, mode, selected, onViewChange });
@@ -142,9 +142,13 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
     if (!ctx) return;
     const { items, range, mode, selected } = latest.current;
     const width = widthRef.current;
+    const height = heightRef.current;
+    // Lane sits in the middle of the space above the axis.
+    const axisY = height - 18;
+    const laneY = Math.round((axisY - 14) / 2);
     const dpr = window.devicePixelRatio || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, width, HEIGHT);
+    ctx.clearRect(0, 0, width, height);
     const p = readPalette(canvas);
 
     const base = baseScale();
@@ -171,8 +175,8 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
     ctx.strokeStyle = p.border;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(0, AXIS_Y - 14);
-    ctx.lineTo(width, AXIS_Y - 14);
+    ctx.moveTo(0, axisY - 14);
+    ctx.lineTo(width, axisY - 14);
     ctx.stroke();
     if (mode === "time") {
       const s = scale as ScaleTime<number, number>;
@@ -180,10 +184,10 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
       for (const t of ticks) {
         const x = s(t);
         ctx.beginPath();
-        ctx.moveTo(x, AXIS_Y - 14);
-        ctx.lineTo(x, AXIS_Y - 10);
+        ctx.moveTo(x, axisY - 14);
+        ctx.lineTo(x, axisY - 10);
         ctx.stroke();
-        ctx.fillText(axisLabel(t), x, AXIS_Y);
+        ctx.fillText(axisLabel(t), x, axisY);
       }
     } else {
       let lastX = Number.NEGATIVE_INFINITY;
@@ -195,11 +199,11 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
         // Name the day once; after that, show the time until the day changes.
         const date = new Date(items[i].time);
         const day = dayFormat(date);
-        ctx.fillText(day === lastDay ? axisFormats.minute(date) : day, x, AXIS_Y);
+        ctx.fillText(day === lastDay ? axisFormats.minute(date) : day, x, axisY);
         lastDay = day;
       }
-      ctx.textAlign = "right";
-      ctx.fillText("Event spacing: gaps between transactions aren't to scale", width - 8, 14);
+      ctx.textAlign = "left";
+      ctx.fillText("Event spacing: gaps between transactions aren't to scale", 8, axisY - 22);
       ctx.textAlign = "center";
     }
 
@@ -209,18 +213,18 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
     ctx.strokeStyle = p.muted;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(Math.max(openX, -10), LANE_Y);
-    ctx.lineTo(Math.min(closeX, width + 10), LANE_Y);
+    ctx.moveTo(Math.max(openX, -10), laneY);
+    ctx.lineTo(Math.min(closeX, width + 10), laneY);
     ctx.stroke();
     ctx.font = "600 11px ui-sans-serif, system-ui, sans-serif";
     ctx.fillStyle = p.muted;
     if (openX >= -40 && openX <= width) {
       ctx.textAlign = "left";
-      ctx.fillText("OPEN", openX + 4, LANE_Y - 22);
+      ctx.fillText("OPEN", openX + 4, laneY - 22);
     }
     if (closeX >= 0 && closeX <= width + 40) {
       ctx.textAlign = "right";
-      ctx.fillText("CLOSE", closeX - 4, LANE_Y - 22);
+      ctx.fillText("CLOSE", closeX - 4, laneY - 22);
     }
 
     // Events: natural clusters first, then dense runs split into calendar buckets that fit a pill.
@@ -273,7 +277,7 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
         const [count, when] = pillLines(g);
         const w = pillWidth(g);
         const x = g.x - w / 2;
-        roundRect(ctx, x, LANE_Y - PILL_H / 2, w, PILL_H, 10);
+        roundRect(ctx, x, laneY - PILL_H / 2, w, PILL_H, 10);
         ctx.fillStyle = p.card;
         ctx.fill();
         ctx.lineWidth = isSelected ? 2 : 1;
@@ -283,12 +287,12 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
         ctx.textBaseline = "middle";
         ctx.fillStyle = p.fg;
         ctx.font = "600 11px ui-sans-serif, system-ui, sans-serif";
-        ctx.fillText(count, g.x, LANE_Y - 6);
+        ctx.fillText(count, g.x, laneY - 6);
         ctx.fillStyle = p.muted;
         ctx.font = "10px ui-sans-serif, system-ui, sans-serif";
-        ctx.fillText(when, g.x, LANE_Y + 7);
+        ctx.fillText(when, g.x, laneY + 7);
         ctx.textBaseline = "alphabetic";
-        hits.push({ x0: x, y0: LANE_Y - PILL_H / 2, x1: x + w, y1: LANE_Y + PILL_H / 2, first: g.first, last: g.last });
+        hits.push({ x0: x, y0: laneY - PILL_H / 2, x1: x + w, y1: laneY + PILL_H / 2, first: g.first, last: g.last });
         return;
       }
 
@@ -296,11 +300,11 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
       const color = kindColor(p, item.kind);
       const placement = placements[gi];
       if (placement) {
-        const top = placement.tier === 0 ? LANE_Y - CARD_GAP - CARD_H : LANE_Y + CARD_GAP;
+        const top = placement.tier === 0 ? laneY - CARD_GAP - CARD_H : laneY + CARD_GAP;
         ctx.strokeStyle = p.border;
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(g.x, LANE_Y);
+        ctx.moveTo(g.x, laneY);
         ctx.lineTo(g.x, placement.tier === 0 ? top + CARD_H : top);
         ctx.stroke();
         roundRect(ctx, placement.left, top, CARD_W, CARD_H, 8);
@@ -330,7 +334,7 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
       }
 
       ctx.beginPath();
-      ctx.arc(g.x, LANE_Y, isSelected ? 7 : 5, 0, Math.PI * 2);
+      ctx.arc(g.x, laneY, isSelected ? 7 : 5, 0, Math.PI * 2);
       if (item.kind === "FAILED") {
         ctx.fillStyle = p.bg;
         ctx.fill();
@@ -346,7 +350,7 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
         ctx.strokeStyle = p.fg;
         ctx.stroke();
       }
-      hits.push({ x0: g.x - 8, y0: LANE_Y - 8, x1: g.x + 8, y1: LANE_Y + 8, first: g.first, last: g.first });
+      hits.push({ x0: g.x - 8, y0: laneY - 8, x1: g.x + 8, y1: laneY + 8, first: g.first, last: g.first });
     });
 
     hitsRef.current = hits;
@@ -432,6 +436,7 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
     if (!canvas) return;
     const resize = () => {
       const width = canvas.parentElement?.clientWidth ?? 800;
+      const height = Math.max(MIN_HEIGHT, canvas.parentElement?.clientHeight ?? MIN_HEIGHT);
       const dpr = window.devicePixelRatio || 1;
       // Keep the same stretch of time in view when the canvas changes width
       // (e.g. the details panel opens); the transform alone is in old pixels.
@@ -439,11 +444,12 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
       const before = transformRef.current.rescaleX(baseScale());
       const visible = [before.invert(PAD), before.invert(previousWidth - PAD)].map(Number);
       widthRef.current = width;
+      heightRef.current = height;
       canvas.width = Math.round(width * dpr);
-      canvas.height = Math.round(HEIGHT * dpr);
+      canvas.height = Math.round(height * dpr);
       canvas.style.width = `${width}px`;
-      canvas.style.height = `${HEIGHT}px`;
-      zoomRef.current?.extent([[0, 0], [width, HEIGHT]]).translateExtent([[0, 0], [width, HEIGHT]]).scaleExtent([1, maxZoom()]);
+      canvas.style.height = `${height}px`;
+      zoomRef.current?.extent([[0, 0], [width, height]]).translateExtent([[0, 0], [width, height]]).scaleExtent([1, maxZoom()]);
       if (width !== previousWidth && transformRef.current.k > 1) showBaseRange(visible[0], visible[1]);
       schedule();
     };
@@ -464,9 +470,10 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
     const canvas = canvasRef.current;
     if (!canvas) return;
     const width = widthRef.current;
+    const height = heightRef.current;
     const behavior = zoom<HTMLCanvasElement, unknown>()
-      .extent([[0, 0], [width, HEIGHT]])
-      .translateExtent([[0, 0], [width, HEIGHT]])
+      .extent([[0, 0], [width, height]])
+      .translateExtent([[0, 0], [width, height]])
       .scaleExtent([1, maxZoom()])
       .on("zoom", (event: { transform: ZoomTransform }) => {
         // Vertical pan is meaningless for a single lane; keep only x.
@@ -480,12 +487,23 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
     };
   }, [maxZoom, schedule]);
 
-  // A new mode or dataset starts from the full range.
+  // A new mode or range starts from the full range.
   useEffect(() => {
     zoomRef.current?.scaleExtent([1, maxZoom()]);
     applyTransform(zoomIdentity);
     schedule();
-  }, [items, mode, range.start, range.end, applyTransform, maxZoom, schedule]);
+  }, [mode, range.start, range.end, applyTransform, maxZoom, schedule]);
+
+  // New items (e.g. a filter change) keep the view in time spacing, where x
+  // doesn't depend on the items; event spacing re-spreads, so start over.
+  const itemsSeen = useRef(items);
+  useEffect(() => {
+    if (itemsSeen.current === items) return;
+    itemsSeen.current = items;
+    zoomRef.current?.scaleExtent([1, maxZoom()]);
+    if (latest.current.mode === "event") applyTransform(zoomIdentity);
+    schedule();
+  }, [items, applyTransform, maxZoom, schedule]);
 
   useEffect(schedule, [selected, schedule]);
 
@@ -502,7 +520,7 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
       ref={canvasRef}
       role="img"
       aria-label="Transaction timeline. Use the controls or arrow keys to move between transactions."
-      className="block cursor-grab touch-none active:cursor-grabbing"
+      className="absolute top-0 left-0 block cursor-grab touch-none active:cursor-grabbing"
       onClick={(event) => {
         const hit = hitAt(event);
         if (!hit) return;
