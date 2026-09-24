@@ -13,6 +13,7 @@ import { useIngestion } from "@/hooks/use-ingestion";
 import { useLocalQuery } from "@/hooks/use-local-db";
 import { useWalletStates } from "@/hooks/use-wallet-states";
 import { addressState } from "@/lib/case/address-state";
+import { buildWalletGraph, type GraphEdge } from "@/lib/graph/build";
 import type { FraudWatchCase } from "@/lib/case/model";
 import { formatRange } from "@/lib/case/range";
 import { getAddressLabels } from "@/lib/db/address-labels";
@@ -31,9 +32,12 @@ import { AddressPanel } from "./address-panel";
 import { CounterpartyList } from "./counterparty-list";
 import { DeleteCaseButton } from "./delete-case-button";
 import { FilterPanel } from "./filter-panel";
+import { EdgePanel } from "./graph/edge-panel";
+import { WalletGraph } from "./graph/wallet-graph";
 import { IngestionPanel } from "./ingestion-panel";
 import { PanelSection, SidePanel } from "./panel";
 import { WalletTimeline } from "./timeline/wallet-timeline";
+import { assetLabel, formatAssetAmount } from "./asset-format";
 import { WalletStateSummary, WalletStateTable } from "./wallet-state-view";
 
 async function copy(text: string, what: string) {
@@ -92,7 +96,10 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   const walletStates = useWalletStates(state.status === "done" ? state.result : null, c.range, rpc?.url);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
-  const [view, setView] = useState<"timeline" | "table">("timeline");
+  const [view, setView] = useState<"timeline" | "graph" | "table">("timeline");
+  const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
+  /** Transaction to open the timeline on, from the graph's "Show on timeline". */
+  const [focusSignature, setFocusSignature] = useState<string | undefined>(undefined);
   const [selectedWallet, setSelectedWallet] = useState(c.primaryWallet);
   const [filter, setFilter] = useState(EMPTY_FILTER);
   /** An address opened in the inspector (counterparty, sender, program); shown over transaction details. */
@@ -121,10 +128,19 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     () => (walletState && transactions ? walletState.effects.map((e) => summarizeEffect(e, transactions.get(e.signature))) : []),
     [walletState, transactions],
   );
-  // Only the map and table are filtered; the wallet state panel keeps the full history.
-  const visibleState = useMemo(
-    () => walletState && { ...walletState, effects: walletState.effects.filter((e, i) => passesFilter(e.signature, summaries[i], filter)) },
-    [walletState, summaries, filter],
+  // Only the views are filtered; the wallet state panel keeps the full history.
+  const visible = useMemo(() => {
+    if (!walletState) return undefined;
+    const keep = walletState.effects.map((e, i) => passesFilter(e.signature, summaries[i], filter));
+    return {
+      state: { ...walletState, effects: walletState.effects.filter((_, i) => keep[i]) },
+      summaries: summaries.filter((_, i) => keep[i]),
+    };
+  }, [walletState, summaries, filter]);
+  const visibleState = visible?.state;
+  const graph = useMemo(
+    () => (view === "graph" && visible ? buildWalletGraph(selectedWallet, visible.state.effects, visible.summaries) : null),
+    [view, visible, selectedWallet],
   );
   // Every program the loaded transactions invoked; unknown programs are still infrastructure.
   const programs = useMemo(() => {
@@ -163,12 +179,62 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     </>
   );
 
+  const edge = graph?.edges.find((e) => e.id === selectedEdge);
+  const describeEdge = (e: GraphEdge) => {
+    const n = `${e.signatures.length.toLocaleString()} tx`;
+    if (e.kind !== "flow" || !walletState || !walletStates) return e.kind === "program" ? `${n} · program call` : `${n} · sent`;
+    const [top, ...rest] = e.totals;
+    const amount = top ? ` · ${formatAssetAmount(top.amount, top.assetId, walletState, walletStates.assets)} ${assetLabel(top.assetId, walletStates.assets)}` : "";
+    return `${n}${amount}${rest.length > 0 ? ` +${rest.length} more` : ""}`;
+  };
+
   let center: React.ReactNode;
-  if (state.status === "done" && walletStates && walletState && visibleState) {
+  if (state.status === "done" && walletStates && walletState && visible && visibleState) {
     center =
-      view === "timeline" ? (
+      view === "graph" && graph ? (
+        <>
+          <WalletGraph
+            graph={graph}
+            wallet={selectedWallet}
+            names={names}
+            stateOf={(address) => addressState(address, c, registry, programs)}
+            selectedNode={selectedAddress}
+            selectedEdge={selectedEdge}
+            onSelectNode={setSelectedAddress}
+            onSelectEdge={setSelectedEdge}
+            describeEdge={describeEdge}
+          />
+          {(rightOpen || addressPanel || edge) && (
+            <SidePanel side="right" label="Inspector">
+              {addressPanel ||
+                (edge ? (
+                  <EdgePanel
+                    key={edge.id}
+                    edge={edge}
+                    names={names}
+                    state={walletState}
+                    assets={walletStates.assets}
+                    rows={visible.state.effects
+                      .map((effect, i) => ({ effect, summary: visible.summaries[i] }))
+                      .filter((r) => edge.signatures.includes(r.effect.signature))}
+                    onSelectAddress={setSelectedAddress}
+                    onShowOnTimeline={(signature) => {
+                      setFocusSignature(signature);
+                      setSelectedEdge(null);
+                      setView("timeline");
+                    }}
+                    onClose={() => setSelectedEdge(null)}
+                  />
+                ) : (
+                  walletInspector
+                ))}
+            </SidePanel>
+          )}
+        </>
+      ) : view === "timeline" ? (
         <WalletTimeline
           key={walletState.wallet}
+          initialSignature={focusSignature}
           state={visibleState}
           transactions={state.result.transactions}
           range={c.range}
@@ -246,9 +312,18 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
 
         {walletState && (
           <div className="absolute left-1/2 flex -translate-x-1/2 rounded-lg border p-0.5" role="group" aria-label="View">
-            {(["timeline", "table"] as const).map((v) => (
-              <Button key={v} size="xs" variant={view === v ? "secondary" : "ghost"} aria-pressed={view === v} onClick={() => setView(v)}>
-                {v === "timeline" ? "Timeline" : "Table"}
+            {(["timeline", "graph", "table"] as const).map((v) => (
+              <Button
+                key={v}
+                size="xs"
+                variant={view === v ? "secondary" : "ghost"}
+                aria-pressed={view === v}
+                onClick={() => {
+                  setView(v);
+                  setFocusSignature(undefined);
+                }}
+              >
+                {v === "timeline" ? "Timeline" : v === "graph" ? "Graph" : "Table"}
               </Button>
             ))}
           </div>
@@ -308,6 +383,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                         onClick={() => {
                           setSelectedWallet(w.address);
                           setSelectedAddress(null);
+                          setSelectedEdge(null);
                         }}
                         className={cn(
                           "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm",

@@ -40,6 +40,7 @@ export function WalletTimeline({
   addressPanel,
   inspectorOpen,
   emptyMessage = "No transactions to map in this range.",
+  initialSignature,
   onHide,
   onSelectAddress,
 }: {
@@ -56,13 +57,15 @@ export function WalletTimeline({
   /** Selecting a transaction opens the right panel even when it's hidden. */
   inspectorOpen: boolean;
   emptyMessage?: string;
+  /** Open on this transaction, selected and centred (e.g. "Show on timeline" from the graph). */
+  initialSignature?: string;
   /** Leaves a transaction off the map. */
   onHide: (signature: string) => void;
 }) {
   const timeline = useRef<TimelineHandle>(null);
   const [mode, setMode] = useState<SpacingMode>("time");
   // Tracked by signature so the selection survives filtering.
-  const [selectedSignature, setSelectedSignature] = useState<string | null>(null);
+  const [selectedSignature, setSelectedSignature] = useState<string | null>(initialSignature ?? null);
   const [view, setView] = useState<{ start: number; end: number } | null>(null);
   const [jumpDate, setJumpDate] = useState("");
 
@@ -116,6 +119,13 @@ export function WalletTimeline({
     timeline.current?.centerOn(pending.current);
     pending.current = null;
   }, [mode]);
+
+  // Opened on a transaction: it starts selected; centre it once the canvas (a child, so its effects ran first) is set up.
+  useEffect(() => {
+    if (selected !== null && initialSignature) timeline.current?.centerOn(selected);
+    // Once, on mount: later selection belongs to the user.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const step = (direction: 1 | -1) => select(stepEvent(items.length, selected, direction));
 
   const current = selected !== null ? state.effects[selected] : null;
