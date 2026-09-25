@@ -5,6 +5,7 @@ import { select } from "d3-selection";
 import { utcFormat } from "d3-time-format";
 import { type ZoomBehavior, type ZoomTransform, zoom, zoomIdentity } from "d3-zoom";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react";
+import { wheelAction } from "@/lib/gestures";
 import type { EffectKind } from "@/lib/state/summarize";
 import { connectors, type Flow } from "@/lib/timeline/lanes";
 import {
@@ -16,7 +17,6 @@ import {
   placeCards,
   type SpacingMode,
   splitByBucket,
-  wheelAction,
 } from "@/lib/timeline/layout";
 
 /** One lane's view of a transaction. */

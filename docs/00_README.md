@@ -121,7 +121,7 @@ Do not use force-directed positioning for the main graph.
 | 07A | Node graph view (Timeline / Graph / Table tabs) |
 | 07B | NFT trades (on-chain NFT check, buy / sale / mint / transfer) |
 | 08 | Multi-wallet chronological graph |
-| 08A | Minimap and trackpad fixes |
+| 08A | Minimap, trackpad gestures, add wallet by address |
 | 09 | Scaling, filters, aggregation, navigation |
 | 10 | Boundary context, case portability, export/import |
 | 11 | Reliability, privacy, deployment, private beta |

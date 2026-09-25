@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chooseBucket, eventAtOrAfter, fitTransform, eventTimes, groupEvents, histogram, mergeOverlapping, minimapTarget, placeCards, splitByBucket, stepEvent, wheelAction } from "./layout";
+import { chooseBucket, eventAtOrAfter, fitTransform, eventTimes, groupEvents, histogram, mergeOverlapping, minimapTarget, placeCards, splitByBucket, stepEvent } from "./layout";
 
 describe("eventTimes", () => {
   it("fills missing block times from the previous event", () => {
@@ -155,36 +155,5 @@ describe("minimapTarget", () => {
   it("stays inside the range near the ends", () => {
     expect(minimapTarget(10, { start: 500, end: 600 }, range)).toEqual({ start: 0, end: 100 });
     expect(minimapTarget(790, null, range)).toEqual({ start: 700, end: 800 });
-  });
-});
-
-describe("wheelAction", () => {
-  const wheel = (deltaX: number, deltaY: number, extra: Partial<{ ctrlKey: boolean; metaKey: boolean; deltaMode: number }> = {}) => ({
-    deltaX,
-    deltaY,
-    deltaMode: 0,
-    ctrlKey: false,
-    metaKey: false,
-    ...extra,
-  });
-
-  it("zooms on a pinch (ctrlKey), in or out, even when lanes overflow", () => {
-    const zoomIn = wheelAction(wheel(0, -10, { ctrlKey: true }), true);
-    expect(zoomIn.type).toBe("zoom");
-    expect(zoomIn.type === "zoom" && zoomIn.factor).toBeGreaterThan(1);
-    const zoomOut = wheelAction(wheel(0, 10, { metaKey: true }), true);
-    expect(zoomOut.type === "zoom" && zoomOut.factor).toBeLessThan(1);
-  });
-
-  it("pans on a sideways swipe", () => {
-    expect(wheelAction(wheel(30, 4), false)).toEqual({ type: "pan", dx: 30 });
-    // Line-mode deltas (mouse with Shift) are converted to px.
-    expect(wheelAction(wheel(-3, 0, { deltaMode: 1 }), true)).toEqual({ type: "pan", dx: -48 });
-  });
-
-  it("scrolls overflowing lanes on a vertical swipe, and zooms when they fit", () => {
-    expect(wheelAction(wheel(0, 20), true)).toEqual({ type: "scroll" });
-    const zoom = wheelAction(wheel(0, -20), false);
-    expect(zoom.type === "zoom" && zoom.factor).toBeGreaterThan(1);
   });
 });

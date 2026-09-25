@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDownIcon, ArrowUpIcon, EyeIcon, EyeOffIcon, FocusIcon, Link2Icon, PanelLeftIcon, PanelRightIcon, ShieldIcon, WalletIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, EyeIcon, EyeOffIcon, FocusIcon, Link2Icon, PanelLeftIcon, PanelRightIcon, PlusIcon, ShieldIcon, WalletIcon } from "lucide-react";
 import { toast } from "sonner";
 import { RpcStatusBadge } from "@/components/rpc-status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -14,7 +14,7 @@ import { useLocalQuery } from "@/hooks/use-local-db";
 import { useWalletStates } from "@/hooks/use-wallet-states";
 import { addressState } from "@/lib/case/address-state";
 import { laneOrder, moveLane, toggleLaneHidden, visibleLanes } from "@/lib/case/lanes";
-import { firstInteraction, mapWallet, unmapWallet, walletRange, walletRanges } from "@/lib/case/wallet-range";
+import { firstInteraction, mapWallet, newWalletProblem, unmapWallet, walletRange, walletRanges } from "@/lib/case/wallet-range";
 import { mappingSummary, sharedTransactions } from "@/lib/ingest/intersections";
 import { buildWalletGraph, type GraphEdge } from "@/lib/graph/build";
 import type { FraudWatchCase } from "@/lib/case/model";
@@ -109,6 +109,8 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   const [filter, setFilter] = useState(EMPTY_FILTER);
   /** Observed address the Map wallet dialog is open for. */
   const [mapTarget, setMapTarget] = useState<string | null>(null);
+  /** The "Add wallet" dialog, for an address the map hasn't met. */
+  const [addingWallet, setAddingWallet] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapBusy, setMapBusy] = useState(false);
   /** Most recently mapped wallet, whose loading summary is shown until dismissed. */
@@ -255,14 +257,17 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     setMapError(null);
     try {
       const first = result ? firstInteraction(address, result.transactions.values()) : null;
+      // It forks off the mapped wallet that shared that first transaction, not whichever is selected.
+      const parent = first ? (owners.get(first.signature)?.[0] ?? selectedWallet) : undefined;
       const next = mapWallet(c, {
         address,
         ...choice,
-        addedFromWallet: selectedWallet,
+        addedFromWallet: parent,
         addedFromTransaction: choice.rangeMode === "first_interaction" ? first?.signature : undefined,
       });
       await saveCase(getDb(), next);
       setMapTarget(null);
+      setAddingWallet(false);
       setSelectedAddress(null);
       setSelectedEdge(null);
       setSelectedWallet(address);
@@ -633,6 +638,18 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                   );
                 })}
               </ul>
+              <Button
+                variant="outline"
+                size="sm"
+                className="self-start"
+                onClick={() => {
+                  setMapError(null);
+                  setAddingWallet(true);
+                }}
+              >
+                <PlusIcon />
+                Add wallet
+              </Button>
               {focus.size > 0 && (
                 <p className="text-xs text-muted-foreground">
                   Focus: {[...focus].map((f) => names.of(f)).join(" + ")}. Other lanes are still mapped.
@@ -701,6 +718,22 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
         )}
         {center}
       </div>
+      {addingWallet && (
+        <MapWalletDialog
+          name=""
+          first={null}
+          enterAddress={{
+            problem: (address) => newWalletProblem(address, c, (a) => addressState(a, c, registry, programs) === "INFRASTRUCTURE"),
+            firstFor: (address) => (result ? firstInteraction(address, result.transactions.values()) : null),
+          }}
+          caseRange={c.range}
+          hasRpc={Boolean(rpc)}
+          busy={mapBusy}
+          error={mapError}
+          onConfirm={(choice, address) => address && void confirmMap(address, choice)}
+          onCancel={() => setAddingWallet(false)}
+        />
+      )}
       {mapTarget && (
         <MapWalletDialog
           name={names.of(mapTarget)}
