@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowLeftIcon, CopyIcon, ExternalLinkIcon, EyeIcon, EyeOffIcon, FilterIcon, GitBranchPlusIcon, StarIcon, UnlinkIcon, XIcon } from "lucide-react";
+import { CopyIcon, ExternalLinkIcon, EyeIcon, EyeOffIcon, FilterIcon, GitBranchPlusIcon, StarIcon, UnlinkIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -41,7 +41,6 @@ export function AddressPanel({
   label,
   entry,
   transactionCount,
-  onBack,
   onMap,
   mapped,
   lane,
@@ -55,7 +54,6 @@ export function AddressPanel({
   entry: RegistryEntry | undefined;
   /** Transactions of the selected wallet that involve this address. */
   transactionCount?: number;
-  onBack?: () => void;
   /** Starts mapping an observed wallet. */
   onMap?: () => void;
   /** For a mapped (non-primary) wallet: where its history starts, and removing it. */
@@ -91,11 +89,6 @@ export function AddressPanel({
         title={state === "OBSERVED" ? "Observed address" : state === "INFRASTRUCTURE" ? "Infrastructure" : "Wallet"}
         action={
           <span className="flex">
-            {onBack && (
-              <Button variant="ghost" size="icon-xs" aria-label="Back" title="Back" onClick={onBack}>
-                <ArrowLeftIcon />
-              </Button>
-            )}
             {bookmark && (
               <Button
                 variant="ghost"

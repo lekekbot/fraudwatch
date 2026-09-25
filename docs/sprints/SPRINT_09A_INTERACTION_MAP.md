@@ -29,6 +29,16 @@
   - The program toggle added 6 dotted connections without changing the wallet counts.
 - **Found in the case data:** a lookalike address `dLm6yzRB…BMf5Vo` (same first and last four characters as the primary `dLm61Lvp…Ddf5Vo`) sent 0.001 USDC to `2hGU…` 19 seconds after the primary's 3,520 USDC transfer. That's an address-poisoning pattern. The map shows the two as separate nodes, but both *label* as `dLm6…f5Vo`; the lookalike warning noted in Sprint 07 would flag this.
 
+## Follow-up: the inspector shows the last thing selected
+
+- **Reported:** after clicking a counterparty, clicking a transaction on the timeline didn't change the right panel; the address stayed until its back arrow was pressed. An opened address took priority over the selected transaction.
+- **Fix:** the right panel is an element viewer, and the last pick wins.
+  - Selecting a transaction (click, arrow keys, search, bookmark, "Show on timeline") clears any open address or graph line (`WalletTimeline` `onSelectTransaction`).
+  - Picking a wallet (Wallets list, lane name, search, bookmark) clears the timeline selection (`clearSelection` handle, `pickWallet` in the workspace).
+  - Opening an address or graph line shows it over whatever was there.
+- **Removed:** the back arrow in the address panel. The × on transaction details and connection panels still clears that selection.
+- **Browser-checked on the real case:** counterparty → transaction card click → wallet in the list → transaction via search each switched the panel with no back button needed.
+
 ## Acceptance criteria
 
 - [x] One node per address; one neutral, undirected line per interacting pair.
