@@ -87,7 +87,7 @@ const LANE_BAND = CARD_GAP + CARD_H + 48;
 const AXIS_SPACE = 44;
 
 type Hit =
-  | { type: "event"; x0: number; y0: number; x1: number; y1: number; first: number; last: number; lane: number }
+  | { type: "event"; x0: number; y0: number; x1: number; y1: number; first: number; last: number; lane: number; label?: string }
   | { type: "lane"; x0: number; y0: number; x1: number; y1: number; lane: number };
 
 type Palette = Record<"fg" | "muted" | "border" | "card" | "bg" | "send" | "receive" | "swap" | "nft" | "approval" | "neutral" | "failed", string>;
@@ -141,6 +141,54 @@ function axisLabel(date: Date): string {
   return axisFormats.month(date);
 }
 const timeFormat = utcFormat("%H:%M");
+const contextDay = utcFormat("%a %-d %b %Y");
+const contextYear = utcFormat("%Y");
+
+const KIND_WORD: Partial<Record<EffectKind, string>> = {
+  SEND: "send",
+  RECEIVE: "receive",
+  SWAP: "swap",
+  NFT_BUY: "NFT buy",
+  NFT_SELL: "NFT sale",
+  NFT_MINT: "NFT mint",
+  NFT_SWAP: "NFT swap",
+  NFT_TRANSFER: "NFT transfer",
+  APPROVAL: "approval",
+  STAKE: "stake",
+  ACCOUNT: "account setup",
+  PROGRAM: "program call",
+  FAILED: "failed",
+};
+
+/**
+ * Text widths by font and string. Pill labels ("12 tx", "3 Sep") repeat across
+ * lanes and frames, so measuring each once keeps dense frames cheap.
+ */
+const widthCache = new Map<string, number>();
+function textWidth(ctx: CanvasRenderingContext2D, font: string, text: string): number {
+  const key = `${font}|${text}`;
+  let w = widthCache.get(key);
+  if (w === undefined) {
+    if (widthCache.size > 20_000) widthCache.clear();
+    ctx.font = font;
+    w = ctx.measureText(text).width;
+    widthCache.set(key, w);
+  }
+  return w;
+}
+
+/** `text` cut with an ellipsis to fit `max` px, found by binary search. */
+function fitText(ctx: CanvasRenderingContext2D, font: string, text: string, max: number): string {
+  if (textWidth(ctx, font, text) <= max) return text;
+  let lo = 1;
+  let hi = text.length - 1;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (textWidth(ctx, font, `${text.slice(0, mid)}…`) <= max) lo = mid;
+    else hi = mid - 1;
+  }
+  return `${text.slice(0, lo)}…`;
+}
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath();
@@ -367,6 +415,29 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
       ctx.fillText("Event spacing: gaps between transactions aren't to scale", 8, axisY - 22);
       ctx.textAlign = "center";
     }
+    // Time context: tick labels drop the day (or year) as you zoom in, so name it at the left.
+    {
+      const leftTime =
+        mode === "time"
+          ? +(scale as ScaleTime<number, number>).invert(PAD)
+          : items[Math.max(0, Math.min(items.length - 1, Math.ceil((scale as ScaleLinear<number, number>).invert(PAD))))]?.time;
+      if (leftTime !== undefined) {
+        const visibleMs =
+          mode === "time"
+            ? +(scale as ScaleTime<number, number>).invert(width - PAD) - leftTime
+            : (items[Math.max(0, Math.min(items.length - 1, Math.floor((scale as ScaleLinear<number, number>).invert(width - PAD))))]?.time ?? leftTime) - leftTime;
+        const text = visibleMs < 3 * 86_400_000 ? contextDay(new Date(leftTime)) : contextYear(new Date(leftTime));
+        ctx.font = "600 11px ui-sans-serif, system-ui, sans-serif";
+        const w = ctx.measureText(text).width + 12;
+        ctx.fillStyle = p.bg;
+        ctx.fillRect(0, axisY - 11, w + 4, 14);
+        ctx.fillStyle = p.fg;
+        ctx.textAlign = "left";
+        ctx.fillText(text, 6, axisY);
+        ctx.textAlign = "center";
+        ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
+      }
+    }
 
     // Events per lane: natural clusters first, then dense runs split into calendar buckets that fit a pill.
     const DAY = 86_400_000;
@@ -383,7 +454,17 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
       const chunk = Math.max(1, Math.ceil(BUCKET_MIN / pxPerEvent));
       keyOfGlobal = (i) => Math.floor(i / chunk);
     }
+    // Merging asks for the same pills' labels many times per frame; format each once.
+    const pillCache = new Map<string, [string, string]>();
     const pillLines = (firstGlobal: number, lastGlobal: number, count: number): [string, string] => {
+      const key = `${firstGlobal}:${lastGlobal}:${count}`;
+      const cached = pillCache.get(key);
+      if (cached) return cached;
+      const lines = formatPill(firstGlobal, lastGlobal, count);
+      pillCache.set(key, lines);
+      return lines;
+    };
+    const formatPill = (firstGlobal: number, lastGlobal: number, count: number): [string, string] => {
       const t0 = new Date(items[firstGlobal].time);
       const t1 = new Date(items[lastGlobal].time);
       const sameDay = dayFormat(t0) === dayFormat(t1);
@@ -401,10 +482,7 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
       const lxs = indices.map((i) => xs[i]);
       const pillWidth = (g: Group) => {
         const [count, when] = pillLines(indices[g.first], indices[g.last], g.count);
-        ctx.font = "600 11px ui-sans-serif, system-ui, sans-serif";
-        const a = ctx.measureText(count).width;
-        ctx.font = "10px ui-sans-serif, system-ui, sans-serif";
-        return Math.max(a, ctx.measureText(when).width) + 18;
+        return Math.max(textWidth(ctx, "600 11px ui-sans-serif, system-ui, sans-serif", count), textWidth(ctx, "10px ui-sans-serif, system-ui, sans-serif", when)) + 18;
       };
       const groups = mergeOverlapping(
         splitByBucket(groupEvents(lxs, DOT_GAP), lxs, (k) => keyOfGlobal(indices[k])),
@@ -428,9 +506,27 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
           const [count, when] = pillLines(first, last, g.count);
           const w = pillWidth(g);
           const x = g.x - w / 2;
+          // What's inside, by type: a composition bar along the bottom and a hover breakdown.
+          const kinds = new Map<EffectKind, number>();
+          for (let k = g.first; k <= g.last; k++) {
+            const kind = entryOf(indices[k], l).kind;
+            kinds.set(kind, (kinds.get(kind) ?? 0) + 1);
+          }
+          const breakdown = [...kinds].sort((a, b) => b[1] - a[1]);
           roundRect(ctx, x, y - PILL_H / 2, w, PILL_H, 10);
           ctx.fillStyle = p.card;
           ctx.fill();
+          ctx.save();
+          ctx.clip();
+          let bx = x;
+          for (const [kind, n] of breakdown) {
+            const bw = (n / g.count) * w;
+            ctx.fillStyle = kindColor(p, kind);
+            ctx.fillRect(bx, y + PILL_H / 2 - 3, bw, 3);
+            bx += bw;
+          }
+          ctx.restore();
+          roundRect(ctx, x, y - PILL_H / 2, w, PILL_H, 10);
           ctx.lineWidth = isSelected ? 2 : 1;
           ctx.strokeStyle = isSelected || isEcho ? p.fg : p.muted;
           ctx.stroke();
@@ -443,7 +539,8 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
           ctx.font = "10px ui-sans-serif, system-ui, sans-serif";
           ctx.fillText(when, g.x, y + 7);
           ctx.textBaseline = "alphabetic";
-          hits.push({ type: "event", x0: x, y0: y - PILL_H / 2, x1: x + w, y1: y + PILL_H / 2, first, last, lane: l });
+          const label = `${count} · ${when}\n${breakdown.map(([kind, n]) => `${n} ${KIND_WORD[kind] ?? kind}`).join(" · ")}\nClick to open`;
+          hits.push({ type: "event", x0: x, y0: y - PILL_H / 2, x1: x + w, y1: y + PILL_H / 2, first, last, lane: l, label });
           return;
         }
 
@@ -477,8 +574,8 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
           entry.lines.slice(0, 4).forEach((line, li) => {
             ctx.font = fonts[li];
             ctx.fillStyle = colors[li];
-            let text = line;
-            while (text.length > 4 && ctx.measureText(text).width > CARD_W - 18) text = `${text.slice(0, -2)}…`;
+            const text = fitText(ctx, fonts[li], line, CARD_W - 18);
+            ctx.font = fonts[li];
             ctx.fillText(text, placement.left + 10, top + 16 + li * 14);
           });
           hits.push({ type: "event", x0: placement.left, y0: top, x1: placement.left + CARD_W, y1: top + CARD_H, first, last: first, lane: l });
@@ -735,7 +832,11 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
         }
       }}
       onMouseMove={(event) => {
-        event.currentTarget.style.cursor = hitAt(event) ? "pointer" : "";
+        const hit = hitAt(event);
+        event.currentTarget.style.cursor = hit ? "pointer" : "";
+        // Clusters say what's inside on hover.
+        const label = hit?.type === "event" ? (hit.label ?? "") : "";
+        if (event.currentTarget.title !== label) event.currentTarget.title = label;
       }}
     />
   );

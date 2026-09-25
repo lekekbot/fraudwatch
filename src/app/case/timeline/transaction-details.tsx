@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useState } from "react";
-import { ChevronLeftIcon, ChevronRightIcon, CopyIcon, ExternalLinkIcon, EyeOffIcon, XIcon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, CopyIcon, ExternalLinkIcon, EyeOffIcon, StarIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -95,6 +95,8 @@ export function TransactionDetails({
   onSelectAddress,
   sharedWith,
   walletName,
+  bookmarked,
+  onToggleBookmark,
 }: {
   effect: WalletTransactionEffect;
   summary: EffectSummary;
@@ -112,6 +114,8 @@ export function TransactionDetails({
   sharedWith: string[];
   /** With several lanes: whose side of the transaction this is. */
   walletName?: string;
+  bookmarked: boolean;
+  onToggleBookmark: () => void;
 }) {
   const enrichment = tx ? enrichTransaction(tx) : null;
   const protocols = enrichment ? protocolsUsed(enrichment) : [];
@@ -132,6 +136,16 @@ export function TransactionDetails({
           </Button>
           <Button variant="ghost" size="icon-sm" aria-label="Next transaction" onClick={onNext}>
             <ChevronRightIcon />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={bookmarked ? "Remove bookmark" : "Bookmark transaction"}
+            aria-pressed={bookmarked}
+            title={bookmarked ? "Remove bookmark" : "Bookmark transaction"}
+            onClick={onToggleBookmark}
+          >
+            <StarIcon className={bookmarked ? "fill-current text-[oklch(0.8_0.15_80)]" : undefined} />
           </Button>
           <Button variant="ghost" size="icon-sm" aria-label="Hide from map" title="Hide from map" onClick={onHide}>
             <EyeOffIcon />

@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-import { ArrowDownIcon, ArrowUpIcon, EyeIcon, EyeOffIcon, FocusIcon, Link2Icon, PanelLeftIcon, PanelRightIcon, PlusIcon, ShieldIcon, WalletIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDownIcon, ArrowUpIcon, CalendarIcon, EyeIcon, EyeOffIcon, FocusIcon, Link2Icon, PanelLeftIcon, HashIcon, PanelRightIcon, PlusIcon, SearchIcon, ShieldIcon, WalletIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { RpcStatusBadge } from "@/components/rpc-status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -13,10 +13,11 @@ import { useIngestion } from "@/hooks/use-ingestion";
 import { useLocalQuery } from "@/hooks/use-local-db";
 import { useWalletStates } from "@/hooks/use-wallet-states";
 import { addressState } from "@/lib/case/address-state";
+import { isBookmarked, removeBookmark, toggleBookmark } from "@/lib/case/bookmarks";
 import { laneOrder, moveLane, toggleLaneHidden, visibleLanes } from "@/lib/case/lanes";
 import { firstInteraction, mapWallet, newWalletProblem, unmapWallet, walletRange, walletRanges } from "@/lib/case/wallet-range";
 import { mappingSummary, sharedTransactions } from "@/lib/ingest/intersections";
-import { buildWalletGraph, type GraphEdge } from "@/lib/graph/build";
+import { buildInteractionGraph } from "@/lib/graph/build";
 import type { FraudWatchCase } from "@/lib/case/model";
 import { formatRange } from "@/lib/case/range";
 import { getAddressLabels } from "@/lib/db/address-labels";
@@ -24,13 +25,15 @@ import { getCase, saveCase, touchCase } from "@/lib/db/cases";
 import { getDb } from "@/lib/db/db";
 import { getRpcSettings } from "@/lib/db/rpc-settings";
 import { createNames } from "@/lib/labels/labels";
-import { registry } from "@/lib/protocols/registry";
+import { enrichTransaction, protocolsUsed, registry } from "@/lib/protocols/registry";
 import { buildMapSearch } from "@/lib/routing/map-params";
 import type { RpcSettings } from "@/lib/rpc/settings";
 import { shortenAddress } from "@/lib/solana/address";
 import { collectCounterparties } from "@/lib/state/counterparties";
-import { type NftCatalog, summarizeEffect } from "@/lib/state/summarize";
-import { EMPTY_FILTER, passesFilter, toggled } from "@/lib/timeline/filter";
+import { type EffectSummary, type NftCatalog, summarizeEffect } from "@/lib/state/summarize";
+import { EMPTY_FILTER, type FilterableTx, involvedAddresses, movedAssets, passesFilter, toggled } from "@/lib/timeline/filter";
+import type { SearchItem } from "@/lib/search";
+import { eventTimes } from "@/lib/timeline/layout";
 import { cn } from "@/lib/utils";
 import { AddressPanel } from "./address-panel";
 import { CounterpartyList } from "./counterparty-list";
@@ -41,9 +44,12 @@ import { EdgePanel } from "./graph/edge-panel";
 import { WalletGraph } from "./graph/wallet-graph";
 import { IngestionPanel } from "./ingestion-panel";
 import { PanelSection, SidePanel } from "./panel";
-import { type WalletLane, WalletTimeline } from "./timeline/wallet-timeline";
-import { assetLabel, formatAssetAmount } from "./asset-format";
+import { type WalletLane, WalletTimeline, type WalletTimelineHandle } from "./timeline/wallet-timeline";
+import { SearchDialog } from "./search-dialog";
+import { formatAssetAmount } from "./asset-format";
 import { WalletStateSummary, WalletStateTable } from "./wallet-state-view";
+
+const NO_SUMMARIES: EffectSummary[] = [];
 
 async function copy(text: string, what: string) {
   try {
@@ -105,12 +111,16 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
   /** Transaction to open the timeline on, from the graph's "Show on timeline". */
   const [focusSignature, setFocusSignature] = useState<string | undefined>(undefined);
+  /** Moment to open the timeline on, from a date bookmark. */
+  const [focusTime, setFocusTime] = useState<number | undefined>(undefined);
   const [selectedWallet, setSelectedWallet] = useState(c.primaryWallet);
   const [filter, setFilter] = useState(EMPTY_FILTER);
   /** Observed address the Map wallet dialog is open for. */
   const [mapTarget, setMapTarget] = useState<string | null>(null);
   /** The "Add wallet" dialog, for an address the map hasn't met. */
   const [addingWallet, setAddingWallet] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const timelineRef = useRef<WalletTimelineHandle>(null);
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapBusy, setMapBusy] = useState(false);
   /** Most recently mapped wallet, whose loading summary is shown until dismissed. */
@@ -125,6 +135,11 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSearchOpen(true);
+        return;
+      }
       if (!(event.metaKey || event.ctrlKey) || event.key !== "\\") return;
       event.preventDefault();
       const show = !(leftOpen || rightOpen);
@@ -143,28 +158,42 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     () => ({ isNft: (m) => assets?.get(m)?.nft === true, royaltyRecipients: (m) => assets?.get(m)?.royaltyRecipients ?? [] }),
     [assets],
   );
-  const summaries = useMemo(
-    () => (walletState && transactions ? walletState.effects.map((e) => summarizeEffect(e, transactions.get(e.signature), nfts)) : []),
-    [walletState, transactions, nfts],
-  );
-  // Only the views are filtered; the wallet state panel keeps the full history.
-  const visible = useMemo(() => {
-    if (!walletState) return undefined;
-    const keep = walletState.effects.map((e, i) => passesFilter(e.signature, summaries[i], filter));
-    return {
-      state: { ...walletState, effects: walletState.effects.filter((_, i) => keep[i]) },
-      summaries: summaries.filter((_, i) => keep[i]),
-    };
-  }, [walletState, summaries, filter]);
-  const visibleState = visible?.state;
-
-  // Every mapped wallet's summaries and filtered effects, for the lanes.
-  const perWallet = useMemo(() => {
-    const out = new Map<string, { all: ReturnType<typeof summarizeEffect>[]; state: NonNullable<typeof walletState>; summaries: ReturnType<typeof summarizeEffect>[] }>();
+  // Summaries once per wallet (the costly part); filtering below is plain comparisons on them.
+  const summariesByWallet = useMemo(() => {
+    const out = new Map<string, EffectSummary[]>();
     if (!walletStates || !transactions) return out;
-    for (const ws of walletStates.states) {
-      const all = ws.effects.map((e) => summarizeEffect(e, transactions.get(e.signature), nfts));
-      const keep = ws.effects.map((e, i) => passesFilter(e.signature, all[i], filter));
+    for (const ws of walletStates.states) out.set(ws.wallet, ws.effects.map((e) => summarizeEffect(e, transactions.get(e.signature), nfts)));
+    return out;
+  }, [walletStates, transactions, nfts]);
+  const filterables = useMemo(() => {
+    const protocolsOf = new Map<string, string[]>();
+    const out = new Map<string, FilterableTx[]>();
+    for (const ws of walletStates?.states ?? []) {
+      const sums = summariesByWallet.get(ws.wallet) ?? [];
+      const times = eventTimes(ws.effects.map((e) => e.timestamp), Date.parse(c.range.start));
+      out.set(
+        ws.wallet,
+        ws.effects.map((e, i) => {
+          let protocols = protocolsOf.get(e.signature);
+          if (!protocols) {
+            const tx = transactions?.get(e.signature);
+            protocols = tx ? protocolsUsed(enrichTransaction(tx)).map((p) => p.id) : [];
+            protocolsOf.set(e.signature, protocols);
+          }
+          return { signature: e.signature, time: times[i], summary: sums[i], protocols, addresses: involvedAddresses(sums[i]) };
+        }),
+      );
+    }
+    return out;
+  }, [walletStates, summariesByWallet, transactions, c.range.start]);
+  // Only the views are filtered; the wallet state panel keeps the full history.
+  const perWallet = useMemo(() => {
+    const tagsOf = (address: string) => names.label(address)?.tags ?? [];
+    const out = new Map<string, { all: EffectSummary[]; state: NonNullable<typeof walletState>; summaries: EffectSummary[] }>();
+    for (const ws of walletStates?.states ?? []) {
+      const rows = filterables.get(ws.wallet) ?? [];
+      const keep = rows.map((row) => passesFilter(row, filter, tagsOf));
+      const all = summariesByWallet.get(ws.wallet) ?? [];
       out.set(ws.wallet, {
         all,
         state: { ...ws, effects: ws.effects.filter((_, i) => keep[i]) },
@@ -172,7 +201,24 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
       });
     }
     return out;
-  }, [walletStates, transactions, nfts, filter]);
+  }, [walletStates, filterables, summariesByWallet, filter, names]);
+  const summaries = summariesByWallet.get(selectedWallet) ?? NO_SUMMARIES;
+  const visible = perWallet.get(selectedWallet);
+  const visibleState = visible?.state;
+  // Program connections are separate from wallet interactions and hidden until asked for.
+  const [showPrograms, setShowPrograms] = useState(false);
+  // Every program the loaded transactions invoked; unknown programs are still infrastructure.
+  const programs = useMemo(() => {
+    const ids = new Set<string>();
+    for (const tx of transactions?.values() ?? []) for (const ix of [...tx.instructions, ...tx.innerInstructions]) ids.add(ix.programId);
+    return ids;
+  }, [transactions]);
+  const counterparties = useMemo(
+    () => collectCounterparties(selectedWallet, summaries).map((r) => ({ ...r, state: addressState(r.address, c, registry, programs) })),
+    [selectedWallet, summaries, c, programs],
+  );
+  const shareSearch = buildMapSearch({ wallet: c.primaryWallet, range: c.range });
+
   // Lane order: saved order, else primary then first appearance. Focus narrows without changing it.
   const [focus, setFocus] = useState<ReadonlySet<string>>(new Set());
   const order = useMemo(() => {
@@ -213,6 +259,101 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     return out;
   }, [state]);
 
+  // Everything search can find in this case.
+  const searchIndex = useMemo<SearchItem[]>(() => {
+    const items: SearchItem[] = [];
+    const mapped = new Set(c.mappedWallets.map((w) => w.address));
+    const tagsOf = (a: string) => names.label(a)?.tags ?? [];
+    for (const w of c.mappedWallets) {
+      items.push({ kind: "wallet", id: w.address, label: names.of(w.address), detail: shortenAddress(w.address, 6), keywords: [w.address, ...tagsOf(w.address)] });
+    }
+    const seen = new Set<string>();
+    const addAddress = (a: string) => {
+      if (mapped.has(a) || seen.has(a)) return;
+      seen.add(a);
+      const label = names.label(a);
+      items.push({
+        kind: "address",
+        id: a,
+        label: names.of(a),
+        detail: [shortenAddress(a, 6), ...(label?.tags ?? [])].join(" · "),
+        keywords: [a, ...(label?.tags ?? []), ...(label?.note ? [label.note] : []), ...(registry.lookup(a) ? [registry.lookup(a)!.protocolName] : [])],
+      });
+    };
+    for (const l of labelRows.status === "ready" ? labelRows.data : []) addAddress(l.address);
+    const assetIds = new Set<string>();
+    const protocolIds = new Set<string>();
+    const tags = new Set<string>();
+    for (const [wallet, rows] of filterables) {
+      for (const row of rows) {
+        for (const a of row.addresses) addAddress(a);
+        for (const a of movedAssets(row.summary)) assetIds.add(a);
+        for (const p of row.protocols) protocolIds.add(p);
+        if (!seen.has(`tx:${row.signature}`)) {
+          seen.add(`tx:${row.signature}`);
+          items.push({
+            kind: "transaction",
+            id: row.signature,
+            label: shortenAddress(row.signature, 6),
+            detail: `${new Date(row.time).toISOString().slice(0, 16).replace("T", " ")} UTC · ${row.summary.kind.replace("_", " ")} · ${names.of(wallet)}`,
+            keywords: [],
+          });
+        }
+      }
+    }
+    for (const l of labelRows.status === "ready" ? labelRows.data : []) for (const t of l.tags) tags.add(t);
+    for (const t of tags) items.push({ kind: "tag", id: t, label: t, detail: "Filter to transactions involving it", keywords: [] });
+    for (const id of assetIds) {
+      const meta = walletStates?.assets.get(id);
+      items.push({ kind: "asset", id, label: meta?.symbol || meta?.name || shortenAddress(id, 4), detail: meta?.name ?? undefined, keywords: [meta?.name ?? "", meta?.symbol ?? ""].filter(Boolean) });
+    }
+    for (const id of protocolIds) {
+      const p = registry.protocols.get(id);
+      items.push({ kind: "protocol", id, label: p?.name ?? id, detail: p?.category.replace("_", " "), keywords: [id] });
+    }
+    return items;
+  }, [c.mappedWallets, names, labelRows, filterables, walletStates]);
+
+  /** Select a transaction on the timeline, switching to it if needed. */
+  function goToTransaction(signature: string, wallet?: string) {
+    if (view === "timeline" && timelineRef.current) {
+      if (!timelineRef.current.jumpTo(signature, wallet)) toast.info("That transaction is hidden by your filters or a hidden lane.");
+      return;
+    }
+    setFocusSignature(signature);
+    setView("timeline");
+  }
+
+  function pickSearch(item: SearchItem) {
+    setSearchOpen(false);
+    const earliest = (match: (row: FilterableTx) => boolean) => {
+      let best: FilterableTx | undefined;
+      let bestWallet: string | undefined;
+      for (const [wallet, rows] of filterables) {
+        for (const row of rows) {
+          if (match(row) && (!best || row.time < best.time)) {
+            best = row;
+            bestWallet = wallet;
+          }
+        }
+      }
+      return best && { signature: best.signature, wallet: bestWallet };
+    };
+    if (item.kind === "wallet") {
+      setSelectedWallet(item.id);
+      setSelectedAddress(null);
+      setSelectedEdge(null);
+    } else if (item.kind === "address") setSelectedAddress(item.id);
+    else if (item.kind === "transaction") goToTransaction(item.id, owners.get(item.id)?.[0]);
+    else if (item.kind === "tag") {
+      setFilter((f) => ({ ...f, tags: new Set([item.id]) }));
+      toast.success(`Showing transactions involving “${item.id}”.`);
+    } else {
+      const first = earliest((row) => (item.kind === "asset" ? movedAssets(row.summary).includes(item.id) : row.protocols.includes(item.id)));
+      if (first) goToTransaction(first.signature, first.wallet);
+    }
+  }
+
   async function updateCase(next: FraudWatchCase) {
     try {
       await saveCase(getDb(), next);
@@ -220,21 +361,6 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
       toast.error(err instanceof Error ? err.message : "Could not save the case.");
     }
   }
-  const graph = useMemo(
-    () => (view === "graph" && visible ? buildWalletGraph(selectedWallet, visible.state.effects, visible.summaries) : null),
-    [view, visible, selectedWallet],
-  );
-  // Every program the loaded transactions invoked; unknown programs are still infrastructure.
-  const programs = useMemo(() => {
-    const ids = new Set<string>();
-    for (const tx of transactions?.values() ?? []) for (const ix of [...tx.instructions, ...tx.innerInstructions]) ids.add(ix.programId);
-    return ids;
-  }, [transactions]);
-  const counterparties = useMemo(
-    () => collectCounterparties(selectedWallet, summaries).map((r) => ({ ...r, state: addressState(r.address, c, registry, programs) })),
-    [selectedWallet, summaries, c, programs],
-  );
-  const shareSearch = buildMapSearch({ wallet: c.primaryWallet, range: c.range });
 
   const result = state.status === "done" ? state.result : null;
   // Transactions each mapped wallet shares with every other mapped wallet.
@@ -319,6 +445,12 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
           ? { rangeText: rangeText(address), onUnmap: () => void unmap(address) }
           : undefined
       }
+      bookmark={{ on: isBookmarked(c, "wallet", address), toggle: () => void updateCase(toggleBookmark(c, { kind: "wallet", target: address })) }}
+      onFilterTo={
+        c.mappedWallets.some((m) => m.address === address)
+          ? undefined
+          : { active: filter.address === address, toggle: () => setFilter((f) => ({ ...f, address: f.address === address ? null : address })) }
+      }
       lane={
         c.mappedWallets.length > 1 && c.mappedWallets.some((m) => m.address === address)
           ? { hidden: (c.hiddenLanes ?? []).includes(address), onToggle: () => void updateCase(toggleLaneHidden(c, address)) }
@@ -339,13 +471,20 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     </>
   );
 
+  // The interaction map covers every visible lane, from the same filtered transactions as the timeline.
+  const graph = useMemo(() => {
+    if (view !== "graph") return null;
+    const sides = shownLanes.flatMap((wallet) => {
+      const data = perWallet.get(wallet);
+      return data ? [{ wallet, effects: data.state.effects, summaries: data.summaries }] : [];
+    });
+    return buildInteractionGraph(sides, { hiddenAssets: filter.hiddenAssets, showPrograms });
+  }, [view, shownLanes, perWallet, filter.hiddenAssets, showPrograms]);
   const edge = graph?.edges.find((e) => e.id === selectedEdge);
-  const describeEdge = (e: GraphEdge) => {
-    const n = `${e.signatures.length.toLocaleString()} tx`;
-    if (e.kind !== "flow" || !walletState || !walletStates) return e.kind === "program" ? `${n} · program call` : `${n} · sent`;
-    const [top, ...rest] = e.totals;
-    const amount = top ? ` · ${formatAssetAmount(top.amount, top.assetId, walletState, walletStates.assets)} ${assetLabel(top.assetId, walletStates.assets)}` : "";
-    return `${n}${amount}${rest.length > 0 ? ` +${rest.length} more` : ""}`;
+  const formatAmount = (amount: string, assetId: string) => {
+    if (!walletStates || !walletState) return amount;
+    const source = walletStates.states.find((st) => assetId in st.decimals) ?? walletState;
+    return formatAssetAmount(amount, assetId, source, walletStates.assets);
   };
 
   let center: React.ReactNode;
@@ -355,14 +494,15 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
         <>
           <WalletGraph
             graph={graph}
-            wallet={selectedWallet}
+            wallet={shownLanes.includes(selectedWallet) ? selectedWallet : (shownLanes[0] ?? selectedWallet)}
             names={names}
             stateOf={(address) => addressState(address, c, registry, programs)}
             selectedNode={selectedAddress}
             selectedEdge={selectedEdge}
             onSelectNode={setSelectedAddress}
             onSelectEdge={setSelectedEdge}
-            describeEdge={describeEdge}
+            showPrograms={showPrograms}
+            onToggleProgramCalls={() => setShowPrograms((v) => !v)}
           />
           {(rightOpen || addressPanel || edge) && (
             <SidePanel side="right" label="Inspector">
@@ -372,16 +512,12 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                     key={edge.id}
                     edge={edge}
                     names={names}
-                    state={walletState}
                     assets={walletStates.assets}
-                    rows={visible.state.effects
-                      .map((effect, i) => ({ effect, summary: visible.summaries[i] }))
-                      .filter((r) => edge.signatures.includes(r.effect.signature))}
+                    formatAmount={formatAmount}
                     onSelectAddress={setSelectedAddress}
-                    onShowOnTimeline={(signature) => {
-                      setFocusSignature(signature);
+                    onShowOnTimeline={(signature, wallet) => {
                       setSelectedEdge(null);
-                      setView("timeline");
+                      goToTransaction(signature, wallet);
                     }}
                     onClose={() => setSelectedEdge(null)}
                   />
@@ -393,6 +529,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
         </>
       ) : view === "timeline" ? (
         <WalletTimeline
+          ref={timelineRef}
           initialSignature={focusSignature}
           lanes={lanes}
           transactions={state.result.transactions}
@@ -416,6 +553,13 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
             setSelectedAddress(null);
           }}
           sharedWith={(signature, wallet) => (owners.get(signature) ?? []).filter((w) => w !== wallet)}
+          isBookmarked={(signature) => isBookmarked(c, "transaction", signature)}
+          onToggleBookmark={(signature, wallet) => void updateCase(toggleBookmark(c, { kind: "transaction", target: signature, wallet }))}
+          onBookmarkTime={(time) => {
+            void updateCase(toggleBookmark(c, { kind: "date", target: new Date(time).toISOString() }));
+            toast.success(`Bookmarked ${new Date(time).toISOString().slice(0, 16).replace("T", " ")} UTC.`);
+          }}
+          initialTime={focusTime}
         />
       ) : (
         <>
@@ -491,6 +635,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                 onClick={() => {
                   setView(v);
                   setFocusSignature(undefined);
+                  setFocusTime(undefined);
                 }}
               >
                 {v === "timeline" ? "Timeline" : v === "graph" ? "Graph" : "Table"}
@@ -500,6 +645,11 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
         )}
 
         <div className="ml-auto flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => setSearchOpen(true)} title="Search this case (⌘K)">
+            <SearchIcon />
+            Search
+            <kbd className="ml-1 rounded border px-1 text-[10px] text-muted-foreground">⌘K</kbd>
+          </Button>
           <Button
             variant="ghost"
             size="sm"
@@ -661,13 +811,68 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
             </PanelSection>
             {walletState && walletStates && visibleState && (
               <FilterPanel
-                // The timeline filters every visible lane; the graph and table show the selected wallet.
-                summaries={view === "timeline" ? shownLanes.flatMap((w) => perWallet.get(w)?.all ?? []) : summaries}
+                // The timeline and graph cover every visible lane; the table shows the selected wallet.
+                rows={view !== "table" ? shownLanes.flatMap((w) => filterables.get(w) ?? []) : (filterables.get(selectedWallet) ?? [])}
                 assets={walletStates.assets}
+                names={names}
+                decimalsOf={(assetId) =>
+                  walletStates.assets.get(assetId)?.decimals ?? walletStates.states.find((st) => assetId in st.decimals)?.decimals[assetId] ?? 0
+                }
+                caseRange={c.range}
                 filter={filter}
-                shown={view === "timeline" ? lanes.reduce((n, l) => n + l.state.effects.length, 0) : visibleState.effects.length}
+                shown={view !== "table" ? lanes.reduce((n, l) => n + l.state.effects.length, 0) : visibleState.effects.length}
                 onChange={setFilter}
               />
+            )}
+            {(c.bookmarks ?? []).length > 0 && (
+              <PanelSection title={`Bookmarks (${c.bookmarks!.length})`}>
+                <ul className="-mx-1 flex flex-col">
+                  {[...c.bookmarks!]
+                    .sort((a, b) => a.kind.localeCompare(b.kind) || a.createdAt.localeCompare(b.createdAt))
+                    .map((b) => {
+                      const Icon = b.kind === "wallet" ? WalletIcon : b.kind === "transaction" ? HashIcon : CalendarIcon;
+                      const text =
+                        b.kind === "wallet"
+                          ? names.of(b.target)
+                          : b.kind === "transaction"
+                            ? shortenAddress(b.target, 5)
+                            : `${b.target.slice(0, 16).replace("T", " ")} UTC`;
+                      return (
+                        <li key={b.id} className="group/bm flex items-center">
+                          <button
+                            type="button"
+                            className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted/50"
+                            onClick={() => {
+                              if (b.kind === "wallet") {
+                                if (c.mappedWallets.some((w) => w.address === b.target)) {
+                                  setSelectedWallet(b.target);
+                                  setSelectedAddress(null);
+                                } else setSelectedAddress(b.target);
+                              } else if (b.kind === "transaction") goToTransaction(b.target, b.wallet);
+                              else if (view === "timeline" && timelineRef.current) timelineRef.current.showTime(Date.parse(b.target));
+                              else {
+                                setFocusTime(Date.parse(b.target));
+                                setView("timeline");
+                              }
+                            }}
+                          >
+                            <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                            <span className={cn("min-w-0 flex-1 truncate", b.kind !== "date" && !names.known(b.target) && "font-mono")}>{text}</span>
+                          </button>
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-label="Remove bookmark"
+                            className="opacity-0 group-hover/bm:opacity-100 focus-visible:opacity-100"
+                            onClick={() => void updateCase(removeBookmark(c, b.id))}
+                          >
+                            <XIcon />
+                          </Button>
+                        </li>
+                      );
+                    })}
+                </ul>
+              </PanelSection>
             )}
             {walletState && (
               <CounterpartyList rows={counterparties} names={names} selected={selectedAddress} onSelect={setSelectedAddress} />
@@ -718,6 +923,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
         )}
         {center}
       </div>
+      {searchOpen && <SearchDialog items={searchIndex} onPick={pickSearch} onClose={() => setSearchOpen(false)} />}
       {addingWallet && (
         <MapWalletDialog
           name=""

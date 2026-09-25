@@ -15,3 +15,16 @@ export function formatBaseUnits(amount: string, decimals: number): string {
 export function formatLamports(lamports: string): string {
   return `${formatBaseUnits(lamports, SOL_DECIMALS)} SOL`;
 }
+
+/**
+ * A decimal string typed by a user ("1.5") as base units for `decimals`
+ * ("1500000" at 6). Null when it isn't a plain non-negative number or has more
+ * fraction digits than the asset allows.
+ */
+export function parseUnits(text: string, decimals: number): string | null {
+  const match = /^(\d*)(?:\.(\d*))?$/.exec(text.trim());
+  if (!match || (match[1] === "" && (match[2] ?? "") === "")) return null;
+  const [, whole, fraction = ""] = match;
+  if (fraction.length > decimals) return null;
+  return BigInt(`${whole || "0"}${fraction.padEnd(decimals, "0")}`).toString();
+}

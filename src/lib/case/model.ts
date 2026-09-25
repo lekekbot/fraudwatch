@@ -17,6 +17,18 @@ export type MappedWalletConfig = {
   customStart?: string;
 };
 
+/** A wallet or address, a transaction (on a wallet's lane), or a moment in time. */
+export type Bookmark = {
+  id: string;
+  kind: "wallet" | "transaction" | "date";
+  /** Address, signature, or ISO time. */
+  target: string;
+  /** For a transaction: whose lane it was bookmarked on. */
+  wallet?: string;
+  note?: string;
+  createdAt: string;
+};
+
 export type FraudWatchCase = {
   id: string;
   version: number;
@@ -34,6 +46,8 @@ export type FraudWatchCase = {
   laneOrder?: string[];
   /** Mapped wallets whose lanes are hidden; still mapped and loaded. */
   hiddenLanes?: string[];
+  /** Places the investigator marked to come back to (Sprint 09). */
+  bookmarks?: Bookmark[];
 
   createdAt: string;
   updatedAt: string;

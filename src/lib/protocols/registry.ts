@@ -37,6 +37,8 @@ export type RegistryEntry = {
 export type ProtocolRegistry = {
   version: number;
   lookup: (address: string) => RegistryEntry | undefined;
+  /** Protocols by id: name and category. */
+  protocols: ReadonlyMap<string, { name: string; category: ProtocolCategory }>;
   size: number;
 };
 
@@ -56,6 +58,7 @@ export function parseRegistry(json: unknown): ProtocolRegistry {
   if (!isObject(root.protocols)) fail("protocols", "must be an object");
 
   const byAddress = new Map<string, RegistryEntry>();
+  const protocols = new Map<string, { name: string; category: ProtocolCategory }>();
   for (const [protocolId, p] of Object.entries(root.protocols as Record<string, unknown>)) {
     const at = `protocols.${protocolId}`;
     if (!/^[a-z0-9_]+$/.test(protocolId)) fail(at, "id must be lowercase letters, digits or _");
@@ -64,6 +67,7 @@ export function parseRegistry(json: unknown): ProtocolRegistry {
     if (typeof name !== "string" || !name) fail(`${at}.name`, "must be a non-empty string");
     if (!CATEGORIES.includes(category as ProtocolCategory)) fail(`${at}.category`, `must be one of ${CATEGORIES.join(", ")}`);
     if (!isObject(addresses) || Object.keys(addresses).length === 0) fail(`${at}.addresses`, "must list at least one address");
+    protocols.set(protocolId, { name: name as string, category: category as ProtocolCategory });
 
     for (const [address, a] of Object.entries(addresses as Record<string, unknown>)) {
       const where = `${at}.addresses.${address}`;
@@ -84,7 +88,7 @@ export function parseRegistry(json: unknown): ProtocolRegistry {
       });
     }
   }
-  return { version: version as number, lookup: (address) => byAddress.get(address), size: byAddress.size };
+  return { version: version as number, lookup: (address) => byAddress.get(address), protocols, size: byAddress.size };
 }
 
 /** The bundled registry. */

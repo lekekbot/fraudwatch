@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBaseUnits, formatLamports } from "./amount";
+import { formatBaseUnits, formatLamports, parseUnits } from "./amount";
 
 describe("formatBaseUnits", () => {
   it.each([
@@ -16,5 +16,21 @@ describe("formatBaseUnits", () => {
 
   it("formats lamports as SOL", () => {
     expect(formatLamports("110000")).toBe("0.00011 SOL");
+  });
+});
+
+describe("parseUnits", () => {
+  it("turns typed decimals into base units", () => {
+    expect(parseUnits("1.5", 6)).toBe("1500000");
+    expect(parseUnits("  250 ", 6)).toBe("250000000");
+    expect(parseUnits(".25", 9)).toBe("250000000");
+    expect(parseUnits("1", 0)).toBe("1");
+  });
+
+  it("rejects what isn't a plain amount or is finer than the asset allows", () => {
+    expect(parseUnits("", 6)).toBeNull();
+    expect(parseUnits("-1", 6)).toBeNull();
+    expect(parseUnits("1e3", 6)).toBeNull();
+    expect(parseUnits("0.0000001", 6)).toBeNull();
   });
 });

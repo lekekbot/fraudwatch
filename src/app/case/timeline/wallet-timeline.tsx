@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeftIcon, ChevronRightIcon, CircleHelpIcon, MaximizeIcon, MinusIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
+import { useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { ChevronLeftIcon, ChevronRightIcon, CircleHelpIcon, MaximizeIcon, MinusIcon, PlusIcon, RotateCcwIcon, StarIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
@@ -79,6 +79,13 @@ export type WalletLane = {
   forkFrom?: { wallet: string; time: string };
 };
 
+export type WalletTimelineHandle = {
+  /** Select and centre a transaction, on `wallet`'s lane if it's there. False if it isn't shown. */
+  jumpTo: (signature: string, wallet?: string) => boolean;
+  /** Centre the view on a moment, keeping the zoom. */
+  showTime: (time: number) => void;
+};
+
 /**
  * The case's chronological mapper: one lane per mapped wallet, one event per
  * transaction however many lanes it touches. A single wallet is one lane.
@@ -98,7 +105,13 @@ export function WalletTimeline({
   onSelectAddress,
   onSelectLane,
   sharedWith,
+  isBookmarked,
+  onToggleBookmark,
+  onBookmarkTime,
+  initialTime,
+  ref,
 }: {
+  ref?: React.Ref<WalletTimelineHandle>;
   lanes: WalletLane[];
   transactions: Map<string, CanonicalTransaction>;
   /** The case range: the x axis. */
@@ -121,6 +134,12 @@ export function WalletTimeline({
   onHide: (signature: string) => void;
   /** Other mapped wallets that also have this transaction, seen from `wallet`. */
   sharedWith: (signature: string, wallet: string) => string[];
+  isBookmarked: (signature: string) => boolean;
+  onToggleBookmark: (signature: string, wallet: string) => void;
+  /** Bookmark a moment: the centre of the current view. */
+  onBookmarkTime: (time: number) => void;
+  /** Open centred on this moment (a date bookmark), keeping the default zoom. */
+  initialTime?: number;
 }) {
   const timeline = useRef<TimelineHandle>(null);
   const [mode, setMode] = useState<SpacingMode>("time");
@@ -212,10 +231,28 @@ export function WalletTimeline({
   // Opened on a transaction: it starts selected; centre it once the canvas (a child, so its effects ran first) is set up.
   useEffect(() => {
     if (selected !== null && initialSignature) timeline.current?.centerOn(selected.index, selected.lane);
+    else if (initialTime !== undefined) {
+      // A date bookmark: show a week around it.
+      timeline.current?.showTimeRange(initialTime - 3.5 * 86_400_000, initialTime + 3.5 * 86_400_000, false);
+    }
     // Once, on mount: later selection belongs to the user.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const step = (direction: 1 | -1) => select(stepEvent(items.length, selected?.index ?? null, direction));
+
+  useImperativeHandle(ref, () => ({
+    jumpTo: (signature, wallet) => {
+      const index = items.findIndex((i) => i.signature === signature);
+      if (index === -1) return false;
+      const lane = items[index].entries.find((e) => lanes[e.lane].wallet === wallet)?.lane;
+      select(index, lane);
+      return true;
+    },
+    showTime: (time) => {
+      const span = view ? view.end - view.start : bounds.end - bounds.start;
+      timeline.current?.showTimeRange(time - span / 2, time + span / 2, false);
+    },
+  }));
 
   const currentLane = selected ? lanes[selected.lane] : null;
   const currentEntry = selected ? events[selected.index].entries.find((e) => e.lane === selected.lane) : undefined;
@@ -246,6 +283,8 @@ export function WalletTimeline({
           onSelectAddress={onSelectAddress}
           sharedWith={sharedWith(current.signature, currentLane.wallet)}
           walletName={lanes.length > 1 ? currentLane.label : undefined}
+          bookmarked={isBookmarked(current.signature)}
+          onToggleBookmark={() => onToggleBookmark(current.signature, currentLane.wallet)}
         />
       ) : (
         inspector
@@ -363,6 +402,15 @@ export function WalletTimeline({
                   Jump
                 </Button>
               </form>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Bookmark this moment"
+                title="Bookmark this moment (the centre of the view)"
+                onClick={() => onBookmarkTime(view ? (view.start + view.end) / 2 : (bounds.start + bounds.end) / 2)}
+              >
+                <StarIcon />
+              </Button>
               <span
                 className="flex size-7 items-center justify-center text-muted-foreground"
                 title="Scroll to zoom, drag to pan, click a cluster to open it. ← and → step between transactions."
