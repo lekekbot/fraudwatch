@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chooseBucket, eventAtOrAfter, fitTransform, eventTimes, groupEvents, histogram, mergeOverlapping, placeCards, splitByBucket, stepEvent } from "./layout";
+import { chooseBucket, eventAtOrAfter, fitTransform, eventTimes, groupEvents, histogram, mergeOverlapping, minimapTarget, placeCards, splitByBucket, stepEvent } from "./layout";
 
 describe("eventTimes", () => {
   it("fills missing block times from the previous event", () => {
@@ -130,5 +130,30 @@ describe("fitTransform", () => {
   it("never zooms out past the full range or beyond maxK", () => {
     expect(fitTransform(0, 5000, 1000, 50, 1e9).k).toBe(1);
     expect(fitTransform(10, 10, 1000, 50, 1234).k).toBe(1234);
+  });
+});
+
+describe("placeCards with one tier", () => {
+  it("never places a card below the lane", () => {
+    const groups = groupEvents([0, 40, 400], 10);
+    expect(placeCards(groups, 150, 8, 1).map((p) => p?.tier ?? null)).toEqual([0, null, 0]);
+  });
+});
+
+describe("minimapTarget", () => {
+  const range = { start: 0, end: 800 };
+
+  it("zooms in around the click when the whole range is in view", () => {
+    expect(minimapTarget(400, null, range)).toEqual({ start: 350, end: 450 });
+    expect(minimapTarget(400, { start: 0, end: 800 }, range)).toEqual({ start: 350, end: 450 });
+  });
+
+  it("re-centres a zoomed-in view, keeping its span", () => {
+    expect(minimapTarget(300, { start: 500, end: 600 }, range)).toEqual({ start: 250, end: 350 });
+  });
+
+  it("stays inside the range near the ends", () => {
+    expect(minimapTarget(10, { start: 500, end: 600 }, range)).toEqual({ start: 0, end: 100 });
+    expect(minimapTarget(790, null, range)).toEqual({ start: 700, end: 800 });
   });
 });

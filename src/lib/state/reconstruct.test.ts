@@ -4,7 +4,7 @@ import { NATIVE_SOL } from "@/lib/assets/assets";
 import type { RawParsedTransaction } from "@/lib/rpc/generic-adapter";
 import { type CanonicalTransaction, canonicalize } from "@/lib/solana/canonical";
 import { type Fixture, loadFixture } from "@/test/fixture-rpc";
-import { type AssetChange, reconstructWalletState } from "./reconstruct";
+import { type AssetChange, netChange, reconstructWalletState } from "./reconstruct";
 
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
@@ -158,5 +158,21 @@ describe("reconstructWalletState with several token accounts for one mint", () =
       { assetId: USDC, before: "150", delta: "10", after: "160" },
     ]);
     expect(state.closing[0].amount).toBe("160");
+  });
+});
+
+describe("netChange", () => {
+  it("reports closing minus opening for assets that moved, including ones that appear or disappear", () => {
+    const a = (assetId: string, amount: string) => ({ assetId, amount, confidence: "observed" as const });
+    expect(
+      netChange({
+        opening: [a("SOL", "100"), a("USDC", "5"), a("GONE", "3")],
+        closing: [a("SOL", "40"), a("USDC", "5"), a("NEW", "7")],
+      }),
+    ).toEqual([
+      { assetId: "SOL", delta: "-60" },
+      { assetId: "GONE", delta: "-3" },
+      { assetId: "NEW", delta: "7" },
+    ]);
   });
 });

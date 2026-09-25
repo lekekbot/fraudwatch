@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import { createCase } from "./model";
-import { firstInteraction, mapWallet, MappingError, unmapWallet, walletRange, walletRanges } from "./wallet-range";
+import { firstInteraction, mapWallet, MappingError, newWalletProblem, unmapWallet, walletRange, walletRanges } from "./wallet-range";
 
 const A = "dLm61Lvpigiaig9ZHcdh6iE7mFp7WmfqzkFMrDdf5Vo";
 const B = "4VWKf8NrCT5gK3f1YwPRspArUU7KZNKBvYqF8rxVZVCi";
@@ -76,5 +76,18 @@ describe("firstInteraction", () => {
     ];
     expect(firstInteraction(B, txs)).toEqual({ timestamp: "2026-07-01T00:00:00.000Z", signature: "owner" });
     expect(firstInteraction("nobody", txs)).toBeNull();
+  });
+});
+
+describe("newWalletProblem", () => {
+  it("accepts a new, valid wallet address and trims it", () => {
+    expect(newWalletProblem(`  ${B} `, base(), () => false)).toBeNull();
+  });
+
+  it("explains why an address can't be added", () => {
+    expect(newWalletProblem("", base(), () => false)).toMatch(/Paste/);
+    expect(newWalletProblem("0xabc", base(), () => false)).toMatch(/Not a valid/);
+    expect(newWalletProblem(A, base(), () => false)).toMatch(/already mapped/);
+    expect(newWalletProblem(B, base(), (a) => a === B)).toMatch(/program or protocol/);
   });
 });

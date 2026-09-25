@@ -1,3 +1,4 @@
+import { isValidSolanaAddress } from "@/lib/solana/address";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import type { FraudWatchCase, MappedWalletConfig } from "./model";
 import type { CaseRange } from "./range";
@@ -75,4 +76,22 @@ export function unmapWallet(c: FraudWatchCase, address: string, now = new Date()
   if (!target) throw new MappingError("This wallet isn't mapped.");
   if (target.role === "primary") throw new MappingError("The primary wallet can't be removed from the case.");
   return { ...c, mappedWallets: c.mappedWallets.filter((w) => w.address !== address), updatedAt: now.toISOString() };
+}
+
+/**
+ * Why an address can't be added as a wallet, or null if it can: it must be a
+ * valid Solana address, not already mapped, and not a program or protocol
+ * address (`isInfrastructure`).
+ */
+export function newWalletProblem(
+  input: string,
+  c: Pick<FraudWatchCase, "mappedWallets">,
+  isInfrastructure: (address: string) => boolean,
+): string | null {
+  const address = input.trim();
+  if (!address) return "Paste a wallet address.";
+  if (!isValidSolanaAddress(address)) return "Not a valid Solana address.";
+  if (c.mappedWallets.some((w) => w.address === address)) return "This wallet is already mapped.";
+  if (isInfrastructure(address)) return "That's a program or protocol address, not a wallet.";
+  return null;
 }

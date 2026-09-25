@@ -6,6 +6,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react"
 import { MaximizeIcon, MinusIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { AddressState } from "@/lib/case/address-state";
+import { graphWheelAction } from "@/lib/gestures";
 import type { GraphEdge, WalletGraph as Graph } from "@/lib/graph/build";
 import { layoutGraph, nodeRadius, type Point } from "@/lib/graph/layout";
 import type { Names } from "@/lib/labels/labels";
@@ -315,7 +316,8 @@ export function WalletGraph({
       .scaleExtent([0.1, 4])
       .clickDistance(4)
       .filter((event: MouseEvent & TouchEvent) => {
-        if (event.type === "wheel") return true;
+        // Wheel and trackpad gestures are handled below (see graphWheelAction).
+        if (event.type === "wheel") return false;
         if (event.button) return false;
         const point = event.touches?.[0] ?? event;
         return !hitAt(point).node;
@@ -330,6 +332,27 @@ export function WalletGraph({
       select(canvas).on(".zoom", null);
     };
   }, [hitAt, schedule]);
+
+  // Pinch (or Ctrl/⌘ + wheel) zooms around the pointer; swipes and the plain wheel pan.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onWheel = (event: WheelEvent) => {
+      const behavior = zoomRef.current;
+      if (!behavior) return;
+      event.preventDefault();
+      const action = graphWheelAction(event);
+      if (action.type === "zoom") {
+        const rect = canvas.getBoundingClientRect();
+        select(canvas).call(behavior.scaleBy, action.factor, [event.clientX - rect.left, event.clientY - rect.top]);
+      } else {
+        const k = transformRef.current.k;
+        select(canvas).call(behavior.translateBy, -action.dx / k, -action.dy / k);
+      }
+    };
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", onWheel);
+  }, []);
 
   // New graph: start from the layout and frame it. Declared after the size and
   // zoom effects so both exist on the first fit.

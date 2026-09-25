@@ -94,6 +94,7 @@ export function TransactionDetails({
   names,
   onSelectAddress,
   sharedWith,
+  walletName,
 }: {
   effect: WalletTransactionEffect;
   summary: EffectSummary;
@@ -109,6 +110,8 @@ export function TransactionDetails({
   onSelectAddress: (address: string) => void;
   /** Other mapped wallets that also have this transaction. */
   sharedWith: string[];
+  /** With several lanes: whose side of the transaction this is. */
+  walletName?: string;
 }) {
   const enrichment = tx ? enrichTransaction(tx) : null;
   const protocols = enrichment ? protocolsUsed(enrichment) : [];
@@ -140,6 +143,12 @@ export function TransactionDetails({
       </div>
 
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+        {walletName && (
+          <>
+            <dt className="text-muted-foreground">Wallet</dt>
+            <dd className="min-w-0 truncate font-medium">{walletName}</dd>
+          </>
+        )}
         <dt className="text-muted-foreground">Signature</dt>
         <dd className="flex min-w-0 items-center gap-1">
           <span className="truncate font-mono text-xs">{effect.signature}</span>
