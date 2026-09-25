@@ -30,6 +30,11 @@ export type FraudWatchCase = {
 
   mappedWallets: MappedWalletConfig[];
 
+  /** Lane order the user chose (Sprint 08); wallets missing from it follow in default order. */
+  laneOrder?: string[];
+  /** Mapped wallets whose lanes are hidden; still mapped and loaded. */
+  hiddenLanes?: string[];
+
   createdAt: string;
   updatedAt: string;
 };

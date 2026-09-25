@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowLeftIcon, CopyIcon, ExternalLinkIcon, GitBranchPlusIcon, UnlinkIcon, XIcon } from "lucide-react";
+import { ArrowLeftIcon, CopyIcon, ExternalLinkIcon, EyeIcon, EyeOffIcon, GitBranchPlusIcon, UnlinkIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -44,6 +44,7 @@ export function AddressPanel({
   onBack,
   onMap,
   mapped,
+  lane,
 }: {
   caseId: string;
   address: string;
@@ -57,6 +58,8 @@ export function AddressPanel({
   onMap?: () => void;
   /** For a mapped (non-primary) wallet: where its history starts, and removing it. */
   mapped?: { rangeText: string; onUnmap: () => void };
+  /** For any mapped wallet when there are several lanes: hide or show its lane. */
+  lane?: { hidden: boolean; onToggle: () => void };
 }) {
   const [name, setName] = useState(label?.name ?? "");
   const [note, setNote] = useState(label?.note ?? "");
@@ -131,6 +134,12 @@ export function AddressPanel({
           <Button variant="outline" size="sm" onClick={onMap}>
             <GitBranchPlusIcon />
             Map wallet
+          </Button>
+        )}
+        {lane && (
+          <Button variant="ghost" size="sm" className="self-start text-muted-foreground" onClick={lane.onToggle}>
+            {lane.hidden ? <EyeIcon /> : <EyeOffIcon />}
+            {lane.hidden ? "Show lane" : "Hide lane"}
           </Button>
         )}
         {mapped && (

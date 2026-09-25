@@ -194,3 +194,14 @@ export function reconstructWalletState(
     decimals,
   };
 }
+
+/** Closing minus opening per asset, for assets whose balance changed over the range, in opening order. */
+export function netChange(state: Pick<WalletState, "opening" | "closing">): { assetId: string; delta: string }[] {
+  const opening = new Map(state.opening.map((a) => [a.assetId, BigInt(a.amount)]));
+  const ids = [...new Set([...state.opening, ...state.closing].map((a) => a.assetId))];
+  const closing = new Map(state.closing.map((a) => [a.assetId, BigInt(a.amount)]));
+  return ids
+    .map((assetId) => ({ assetId, delta: (closing.get(assetId) ?? BigInt(0)) - (opening.get(assetId) ?? BigInt(0)) }))
+    .filter((c) => c.delta !== BigInt(0))
+    .map((c) => ({ assetId: c.assetId, delta: c.delta.toString() }));
+}

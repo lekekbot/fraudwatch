@@ -5,7 +5,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { formatLamports } from "@/lib/solana/amount";
 import { shortenAddress } from "@/lib/solana/address";
-import type { AssetState, WalletState, WalletTransactionEffect } from "@/lib/state/reconstruct";
+import { type AssetState, netChange, type WalletState, type WalletTransactionEffect } from "@/lib/state/reconstruct";
 import { type Assets, assetLabel, formatAssetAmount, formatUtc } from "./asset-format";
 
 const MAX_ROWS = 200;
@@ -89,6 +89,7 @@ export function WalletStateSummary({ state, assets }: { state: WalletState; asse
 
       <StateTable title="Opening state" rows={state.opening} status={state.openingStatus} state={state} assets={assets} />
       <StateTable title="Closing state" rows={state.closing} status={state.closingStatus} state={state} assets={assets} />
+      <NetChange state={state} assets={assets} />
       <ul className="list-disc pl-5 text-xs text-muted-foreground">
         {state.partialReasons.map((r) => (
           <li key={r}>{r}</li>
@@ -162,6 +163,36 @@ export function WalletStateTable({ state, assets }: { state: WalletState; assets
             </p>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Closing minus opening per asset: what the wallet gained or lost over its range. */
+function NetChange({ state, assets }: { state: WalletState; assets: Assets }) {
+  const changes = netChange(state);
+  const partial = state.openingStatus !== "OBSERVED" || state.closingStatus !== "OBSERVED";
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border p-3">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-medium">Net change</h3>
+        {partial && <Badge variant="destructive">Partial</Badge>}
+      </div>
+      {changes.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No balance changed between opening and closing.</p>
+      ) : (
+        <dl className="text-sm">
+          {changes.map((c) => (
+            <div key={c.assetId} className="flex justify-between gap-4 py-0.5">
+              <dt className="text-muted-foreground" title={c.assetId}>
+                {assetLabel(c.assetId, assets)}
+              </dt>
+              <dd className={`tabular-nums ${c.delta.startsWith("-") ? "text-destructive" : "text-emerald-500"}`}>
+                {amount(c.delta, c.assetId, state, assets, true)}
+              </dd>
+            </div>
+          ))}
+        </dl>
       )}
     </div>
   );

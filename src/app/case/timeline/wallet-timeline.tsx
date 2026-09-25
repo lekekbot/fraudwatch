@@ -8,10 +8,11 @@ import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import type { Names } from "@/lib/labels/labels";
 import type { WalletState } from "@/lib/state/reconstruct";
 import { describeAction, type EffectSummary } from "@/lib/state/summarize";
-import { eventAtOrAfter, eventTimes, type SpacingMode, stepEvent } from "@/lib/timeline/layout";
+import { eventAtOrAfter, eventTimes, minimapTarget, type SpacingMode, stepEvent } from "@/lib/timeline/layout";
+import { type Flow, mergeLaneEvents } from "@/lib/timeline/lanes";
 import { type Assets, assetLabel, formatAssetAmount, nftLabel } from "../asset-format";
 import { SidePanel } from "../panel";
-import { type TimelineHandle, type TimelineItem, TimelineCanvas } from "./timeline-canvas";
+import { type TimelineHandle, type TimelineItem, type TimelineLane, type TimelineSelection, TimelineCanvas } from "./timeline-canvas";
 import { TimelineMinimap } from "./timeline-minimap";
 import { TransactionDetails } from "./transaction-details";
 
@@ -37,9 +38,53 @@ function headline(summary: EffectSummary, state: WalletState, assets: Assets, na
   return summary.kind === "FAILED" ? "No balance change" : describeAction(summary.action, summary.action ? names.known(summary.action.programId) : undefined);
 }
 
+/** How value moved for one wallet, to orient connectors between lanes. */
+function flowOf(s: EffectSummary): Flow {
+  if (s.kind === "SEND" || s.kind === "NFT_BUY" || s.kind === "NFT_MINT") return "out";
+  if (s.kind === "RECEIVE" || s.kind === "NFT_SELL") return "in";
+  if (s.kind === "NFT_TRANSFER" && s.nft) return s.nft.received.length > 0 ? "in" : "out";
+  return "none";
+}
+
+function cardLines(s: EffectSummary, time: number, state: WalletState, assets: Assets, names: Names): string[] {
+  const cp = s.counterparties[0];
+  const arrow = s.kind === "RECEIVE" ? "←" : "→";
+  return [
+    cardDate(time),
+    s.nft && s.nft.payment && !(s.nft.received.length > 0 && s.nft.sent.length > 0)
+      ? `${s.kind.replace("_", " ")} · ${nftLabel(s.nft.received.length > 0 ? s.nft.received : s.nft.sent, assets)}`
+      : s.kind.replace("_", " "),
+    headline(s, state, assets, names),
+    s.nft?.party
+      ? // Buyers and receivers get the NFT from the other party; sellers and senders give it to them.
+        `${s.nft.received.length > 0 && s.nft.sent.length > 0 ? "⇄" : s.nft.received.length > 0 ? "←" : "→"} ${names.of(s.nft.party, 3)}`
+      : cp
+        ? `${arrow} ${names.of(cp.address, 3)}`
+        : s.actor
+          ? `by ${names.of(s.actor, 3)}`
+          : "",
+  ];
+}
+
+/** One mapped wallet's lane: its (filtered) effects and summaries, and where its history starts. */
+export type WalletLane = {
+  wallet: string;
+  state: WalletState;
+  /** One per `state.effects` entry, NFT-aware; computed by the workspace. */
+  summaries: EffectSummary[];
+  range: { start: string; end: string };
+  label: string;
+  sublabel?: string;
+  /** Mapped from this wallet at its first interaction. */
+  forkFrom?: { wallet: string; time: string };
+};
+
+/**
+ * The case's chronological mapper: one lane per mapped wallet, one event per
+ * transaction however many lanes it touches. A single wallet is one lane.
+ */
 export function WalletTimeline({
-  state,
-  summaries,
+  lanes,
   transactions,
   range,
   assets,
@@ -51,12 +96,12 @@ export function WalletTimeline({
   initialSignature,
   onHide,
   onSelectAddress,
+  onSelectLane,
   sharedWith,
 }: {
-  state: WalletState;
-  /** One per `state.effects` entry, NFT-aware; computed by the workspace. */
-  summaries: EffectSummary[];
+  lanes: WalletLane[];
   transactions: Map<string, CanonicalTransaction>;
+  /** The case range: the x axis. */
   range: { start: string; end: string };
   assets: Assets;
   names: Names;
@@ -65,6 +110,8 @@ export function WalletTimeline({
   /** An address opened from the details; shown over them until dismissed. */
   addressPanel: React.ReactNode;
   onSelectAddress: (address: string) => void;
+  /** A lane's name was clicked: show that wallet in the inspector. */
+  onSelectLane: (wallet: string) => void;
   /** Selecting a transaction opens the right panel even when it's hidden. */
   inspectorOpen: boolean;
   emptyMessage?: string;
@@ -72,106 +119,133 @@ export function WalletTimeline({
   initialSignature?: string;
   /** Leaves a transaction off the map. */
   onHide: (signature: string) => void;
-  /** Other mapped wallets that also have this transaction. */
-  sharedWith: (signature: string) => string[];
+  /** Other mapped wallets that also have this transaction, seen from `wallet`. */
+  sharedWith: (signature: string, wallet: string) => string[];
 }) {
   const timeline = useRef<TimelineHandle>(null);
   const [mode, setMode] = useState<SpacingMode>("time");
-  // Tracked by signature so the selection survives filtering.
-  const [selectedSignature, setSelectedSignature] = useState<string | null>(initialSignature ?? null);
+  // Tracked by signature and wallet so the selection survives filtering and lane changes.
+  const [selection, setSelection] = useState<{ signature: string; wallet: string | null } | null>(
+    initialSignature ? { signature: initialSignature, wallet: null } : null,
+  );
   const [view, setView] = useState<{ start: number; end: number } | null>(null);
   const [jumpDate, setJumpDate] = useState("");
 
   const bounds = useMemo(() => ({ start: Date.parse(range.start), end: Date.parse(range.end) }), [range.start, range.end]);
-  const times = useMemo(() => eventTimes(state.effects.map((e) => e.timestamp), bounds.start), [state, bounds.start]);
+  const events = useMemo(
+    () =>
+      mergeLaneEvents(
+        lanes.map((lane) => {
+          const times = eventTimes(lane.state.effects.map((e) => e.timestamp), Date.parse(lane.range.start));
+          return lane.state.effects.map((e, effectIndex) => ({ signature: e.signature, time: times[effectIndex], effectIndex }));
+        }),
+      ),
+    [lanes],
+  );
   const items = useMemo<TimelineItem[]>(
     () =>
-      state.effects.map((e, i) => {
-        const s = summaries[i];
-        const cp = s.counterparties[0];
-        const arrow = s.kind === "RECEIVE" ? "←" : "→";
-        return {
-          signature: e.signature,
-          time: times[i],
-          kind: s.kind,
-          lines: [
-            cardDate(times[i]),
-            s.nft && s.nft.payment && !(s.nft.received.length > 0 && s.nft.sent.length > 0)
-              ? `${s.kind.replace("_", " ")} · ${nftLabel(s.nft.received.length > 0 ? s.nft.received : s.nft.sent, assets)}`
-              : s.kind.replace("_", " "),
-            headline(s, state, assets, names),
-            s.nft?.party
-              ? // Buyers and receivers get the NFT from the other party; sellers and senders give it to them.
-                `${s.nft.received.length > 0 && s.nft.sent.length > 0 ? "⇄" : s.nft.received.length > 0 ? "←" : "→"} ${names.of(s.nft.party, 3)}`
-              : cp
-                ? `${arrow} ${names.of(cp.address, 3)}`
-                : s.actor
-                  ? `by ${names.of(s.actor, 3)}`
-                  : "",
-          ],
-        };
-      }),
-    [state, summaries, times, assets, names],
+      events.map((ev) => ({
+        signature: ev.signature,
+        time: ev.time,
+        entries: ev.entries.map(({ lane, effectIndex }) => {
+          const { state, summaries } = lanes[lane];
+          const s = summaries[effectIndex];
+          return { lane, kind: s.kind, flow: flowOf(s), lines: cardLines(s, ev.time, state, assets, names) };
+        }),
+      })),
+    [events, lanes, assets, names],
   );
-  const selectedIndex = selectedSignature === null ? -1 : items.findIndex((i) => i.signature === selectedSignature);
-  const selected = selectedIndex === -1 ? null : selectedIndex;
-  const setSelected = (index: number | null) => setSelectedSignature(index === null ? null : (items[index]?.signature ?? null));
+  const canvasLanes = useMemo<TimelineLane[]>(() => {
+    const index = new Map(lanes.map((l, i) => [l.wallet, i]));
+    return lanes.map((l) => ({
+      label: l.label,
+      sublabel: l.sublabel,
+      start: Date.parse(l.range.start),
+      end: Date.parse(l.range.end),
+      ...(l.forkFrom && index.has(l.forkFrom.wallet)
+        ? { fork: { fromLane: index.get(l.forkFrom.wallet)!, time: Date.parse(l.forkFrom.time) } }
+        : {}),
+    }));
+  }, [lanes]);
+  const times = useMemo(() => items.map((i) => i.time), [items]);
+
+  const selectedIndex = selection ? items.findIndex((i) => i.signature === selection.signature) : -1;
+  const selectedLane =
+    selectedIndex === -1
+      ? -1
+      : (() => {
+          const entries = items[selectedIndex].entries;
+          const onWallet = entries.find((e) => lanes[e.lane].wallet === selection?.wallet);
+          return (onWallet ?? entries[0]).lane;
+        })();
+  const selected: TimelineSelection | null = selectedIndex === -1 ? null : { index: selectedIndex, lane: selectedLane };
+  const setSelected = (index: number | null, lane?: number) => {
+    if (index === null || !items[index]) return setSelection(null);
+    const entries = items[index].entries;
+    // Stay on the current wallet's lane when stepping, if the transaction is on it.
+    const keep = lane ?? entries.find((e) => lanes[e.lane].wallet === selection?.wallet)?.lane ?? entries[0].lane;
+    setSelection({ signature: items[index].signature, wallet: lanes[keep].wallet });
+  };
 
   // Selection to centre once the canvas has switched spacing mode.
-  const pending = useRef<number | null>(null);
+  const pending = useRef<{ index: number; lane: number } | null>(null);
 
   const sharesTimestamp = (index: number) =>
     times.some((t, i) => i !== index && Math.abs(t - times[index]) < 1000);
 
-  const select = (index: number | null) => {
-    setSelected(index);
+  const select = (index: number | null, lane?: number) => {
+    setSelected(index, lane);
     if (index === null) return;
+    const targetLane = lane ?? items[index].entries[0].lane;
     if (mode === "time" && sharesTimestamp(index)) {
-      pending.current = index;
+      pending.current = { index, lane: targetLane };
       setMode("event");
-    } else timeline.current?.centerOn(index);
+    } else timeline.current?.centerOn(index, targetLane);
   };
 
   useEffect(() => {
     if (pending.current === null) return;
-    timeline.current?.centerOn(pending.current);
+    timeline.current?.centerOn(pending.current.index, pending.current.lane);
     pending.current = null;
   }, [mode]);
 
   // Opened on a transaction: it starts selected; centre it once the canvas (a child, so its effects ran first) is set up.
   useEffect(() => {
-    if (selected !== null && initialSignature) timeline.current?.centerOn(selected);
+    if (selected !== null && initialSignature) timeline.current?.centerOn(selected.index, selected.lane);
     // Once, on mount: later selection belongs to the user.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const step = (direction: 1 | -1) => select(stepEvent(items.length, selected, direction));
+  const step = (direction: 1 | -1) => select(stepEvent(items.length, selected?.index ?? null, direction));
 
-  const current = selected !== null ? state.effects[selected] : null;
+  const currentLane = selected ? lanes[selected.lane] : null;
+  const currentEntry = selected ? events[selected.index].entries.find((e) => e.lane === selected.lane) : undefined;
+  const current = currentLane && currentEntry ? currentLane.state.effects[currentEntry.effectIndex] : null;
 
   const panel = (inspectorOpen || current || addressPanel) && (
     <SidePanel side="right" label="Inspector">
       {addressPanel ? (
         addressPanel
-      ) : current && selected !== null ? (
+      ) : current && selected && currentLane && currentEntry ? (
         <TransactionDetails
           effect={current}
-          summary={summaries[selected]}
+          summary={currentLane.summaries[currentEntry.effectIndex]}
           tx={transactions.get(current.signature)}
-          state={state}
+          state={currentLane.state}
           assets={assets}
-          position={{ index: selected, count: items.length }}
+          position={{ index: selected.index, count: items.length }}
           onPrevious={() => step(-1)}
           onNext={() => step(1)}
           onClose={() => setSelected(null)}
           onHide={() => {
             // Move on to a neighbour so stepping through the timeline isn't interrupted.
-            const next = items[selected + 1] ?? items[selected - 1];
-            setSelectedSignature(next?.signature ?? null);
+            const next = items[selected.index + 1] ?? items[selected.index - 1];
+            setSelection(next ? { signature: next.signature, wallet: selection?.wallet ?? null } : null);
             onHide(current.signature);
           }}
           names={names}
           onSelectAddress={onSelectAddress}
-          sharedWith={sharedWith(current.signature)}
+          sharedWith={sharedWith(current.signature, currentLane.wallet)}
+          walletName={lanes.length > 1 ? currentLane.label : undefined}
         />
       ) : (
         inspector
@@ -204,23 +278,28 @@ export function WalletTimeline({
           event.preventDefault();
         }}
       >
-        <div className="relative min-h-0 flex-1 overflow-hidden">
-          <TimelineCanvas
-            ref={timeline}
-            items={items}
-            range={bounds}
-            mode={mode}
-            selected={selected}
-            onSelect={select}
-            onNeedsEventSpacing={(index) => {
-              pending.current = index;
-              setSelected(index);
-              setMode("event");
-            }}
-            onViewChange={(start, end) =>
-              setView((v) => (v && Math.abs(v.start - start) < 1 && Math.abs(v.end - end) < 1 ? v : { start, end }))
-            }
-          />
+        <div className="relative min-h-0 flex-1">
+          {/* Lanes scroll vertically when they don't fit; the toolbar floats above them. */}
+          <div className="absolute inset-0 overflow-x-hidden overflow-y-auto">
+            <TimelineCanvas
+              ref={timeline}
+              items={items}
+              lanes={canvasLanes}
+              range={bounds}
+              mode={mode}
+              selected={selected}
+              onSelect={select}
+              onSelectLane={(lane) => onSelectLane(lanes[lane].wallet)}
+              onNeedsEventSpacing={(index, lane) => {
+                pending.current = { index, lane };
+                setSelected(index, lane);
+                setMode("event");
+              }}
+              onViewChange={(start, end) =>
+                setView((v) => (v && Math.abs(v.start - start) < 1 && Math.abs(v.end - end) < 1 ? v : { start, end }))
+              }
+            />
+          </div>
           {/* Floating toolbar over the canvas. */}
           <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-3">
             <div className="pointer-events-auto flex flex-wrap items-center gap-1 rounded-xl border bg-popover/95 p-1 shadow-lg backdrop-blur">
@@ -293,15 +372,21 @@ export function WalletTimeline({
             </div>
           </div>
         </div>
-        <div className="border-t p-2">
+        <div className="shrink-0 border-t px-2 pt-2 pb-3">
           <TimelineMinimap
             times={times}
             range={bounds}
             view={view}
             onNavigate={(time) => {
+              // Zoomed out, a click zooms in around it; zoomed in, it re-centres.
+              const target = minimapTarget(time, view, bounds);
+              timeline.current?.showTimeRange(target.start, target.end, false);
+            }}
+            onPan={(time) => {
               const span = view ? view.end - view.start : bounds.end - bounds.start;
               timeline.current?.showTimeRange(time - span / 2, time + span / 2, false);
             }}
+            onSelectRange={(start, end) => timeline.current?.showTimeRange(start, end, false)}
           />
         </div>
       </div>

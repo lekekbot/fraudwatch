@@ -122,16 +122,17 @@ export function splitByBucket(groups: Group[], xs: number[], keyOf: (index: numb
 export type Placement = { tier: 0 | 1; left: number } | null;
 
 /**
- * Give single events a card when it fits: above the lane first, then below;
- * otherwise the event stays a dot. Deterministic, so cards don't jump around
+ * Give single events a card when it fits: above the lane first, then below
+ * (only above with `tiers` 1, when lanes are stacked); otherwise the event stays a dot. Deterministic, so cards don't jump around
  * while panning.
  */
-export function placeCards(groups: Group[], cardWidth: number, padding: number): Placement[] {
+export function placeCards(groups: Group[], cardWidth: number, padding: number, tiers: 1 | 2 = 2): Placement[] {
   const edge: [number, number] = [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY];
+  const order = tiers === 1 ? ([0] as const) : ([0, 1] as const);
   return groups.map((g) => {
     if (g.count !== 1) return null;
     const left = g.x - cardWidth / 2;
-    for (const tier of [0, 1] as const) {
+    for (const tier of order) {
       if (left >= edge[tier] + padding) {
         edge[tier] = left + cardWidth;
         return { tier, left };
@@ -177,4 +178,47 @@ export function fitTransform(x0: number, x1: number, width: number, pad: number,
   const span = Math.max(1e-9, x1 - x0);
   const k = Math.max(1, Math.min(maxK, (width - 2 * pad) / span));
   return { k, x: width / 2 - k * ((x0 + x1) / 2) };
+}
+
+/** When zoomed out this far (share of the range in view), a minimap click zooms in instead of re-centring. */
+const ZOOMED_OUT = 0.9;
+/** Share of the range a minimap click zooms to from fully zoomed out. */
+const CLICK_ZOOM = 1 / 8;
+
+/**
+ * Where a minimap click at `time` should move the view. Zoomed in, it keeps
+ * the view's span and centres it on `time`; zoomed out (re-centring would do
+ * nothing), it zooms to an eighth of the range around `time`. Kept inside the range.
+ */
+export function minimapTarget(
+  time: number,
+  view: { start: number; end: number } | null,
+  range: { start: number; end: number },
+): { start: number; end: number } {
+  const total = range.end - range.start;
+  const current = view ? view.end - view.start : total;
+  const span = current >= total * ZOOMED_OUT ? total * CLICK_ZOOM : current;
+  const start = Math.min(Math.max(range.start, time - span / 2), range.end - span);
+  return { start, end: start + span };
+}
+
+export type WheelInput = { deltaX: number; deltaY: number; deltaMode: number; ctrlKey: boolean; metaKey: boolean };
+export type WheelAction = { type: "zoom"; factor: number } | { type: "pan"; dx: number } | { type: "scroll" };
+
+/** Line- and page-mode wheel deltas in px, so mice and trackpads move alike. */
+const deltaPx = (delta: number, mode: number) => delta * (mode === 1 ? 16 : mode === 2 ? 400 : 1);
+
+/**
+ * What a wheel or trackpad gesture does on the timeline. A pinch arrives as a
+ * wheel event with ctrlKey set (Ctrl/⌘ + wheel on a mouse): zoom. A mostly
+ * sideways swipe (or Shift + wheel) pans through time. Vertical movement scrolls
+ * the lanes when they overflow, and zooms otherwise.
+ */
+export function wheelAction(e: WheelInput, lanesOverflow: boolean): WheelAction {
+  const dx = deltaPx(e.deltaX, e.deltaMode);
+  const dy = deltaPx(e.deltaY, e.deltaMode);
+  if (e.ctrlKey || e.metaKey) return { type: "zoom", factor: Math.exp(-dy * 0.01) };
+  if (Math.abs(dx) > Math.abs(dy)) return { type: "pan", dx };
+  if (lanesOverflow) return { type: "scroll" };
+  return { type: "zoom", factor: Math.exp(-dy * 0.002) };
 }

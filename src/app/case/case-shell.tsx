@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Link2Icon, PanelLeftIcon, PanelRightIcon, ShieldIcon, WalletIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, EyeIcon, EyeOffIcon, FocusIcon, Link2Icon, PanelLeftIcon, PanelRightIcon, ShieldIcon, WalletIcon } from "lucide-react";
 import { toast } from "sonner";
 import { RpcStatusBadge } from "@/components/rpc-status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -13,6 +13,7 @@ import { useIngestion } from "@/hooks/use-ingestion";
 import { useLocalQuery } from "@/hooks/use-local-db";
 import { useWalletStates } from "@/hooks/use-wallet-states";
 import { addressState } from "@/lib/case/address-state";
+import { laneOrder, moveLane, toggleLaneHidden, visibleLanes } from "@/lib/case/lanes";
 import { firstInteraction, mapWallet, unmapWallet, walletRange, walletRanges } from "@/lib/case/wallet-range";
 import { mappingSummary, sharedTransactions } from "@/lib/ingest/intersections";
 import { buildWalletGraph, type GraphEdge } from "@/lib/graph/build";
@@ -26,6 +27,7 @@ import { createNames } from "@/lib/labels/labels";
 import { registry } from "@/lib/protocols/registry";
 import { buildMapSearch } from "@/lib/routing/map-params";
 import type { RpcSettings } from "@/lib/rpc/settings";
+import { shortenAddress } from "@/lib/solana/address";
 import { collectCounterparties } from "@/lib/state/counterparties";
 import { type NftCatalog, summarizeEffect } from "@/lib/state/summarize";
 import { EMPTY_FILTER, passesFilter, toggled } from "@/lib/timeline/filter";
@@ -39,7 +41,7 @@ import { EdgePanel } from "./graph/edge-panel";
 import { WalletGraph } from "./graph/wallet-graph";
 import { IngestionPanel } from "./ingestion-panel";
 import { PanelSection, SidePanel } from "./panel";
-import { WalletTimeline } from "./timeline/wallet-timeline";
+import { type WalletLane, WalletTimeline } from "./timeline/wallet-timeline";
 import { assetLabel, formatAssetAmount } from "./asset-format";
 import { WalletStateSummary, WalletStateTable } from "./wallet-state-view";
 
@@ -153,6 +155,69 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     };
   }, [walletState, summaries, filter]);
   const visibleState = visible?.state;
+
+  // Every mapped wallet's summaries and filtered effects, for the lanes.
+  const perWallet = useMemo(() => {
+    const out = new Map<string, { all: ReturnType<typeof summarizeEffect>[]; state: NonNullable<typeof walletState>; summaries: ReturnType<typeof summarizeEffect>[] }>();
+    if (!walletStates || !transactions) return out;
+    for (const ws of walletStates.states) {
+      const all = ws.effects.map((e) => summarizeEffect(e, transactions.get(e.signature), nfts));
+      const keep = ws.effects.map((e, i) => passesFilter(e.signature, all[i], filter));
+      out.set(ws.wallet, {
+        all,
+        state: { ...ws, effects: ws.effects.filter((_, i) => keep[i]) },
+        summaries: all.filter((_, i) => keep[i]),
+      });
+    }
+    return out;
+  }, [walletStates, transactions, nfts, filter]);
+  // Lane order: saved order, else primary then first appearance. Focus narrows without changing it.
+  const [focus, setFocus] = useState<ReadonlySet<string>>(new Set());
+  const order = useMemo(() => {
+    const firstSeen = new Map<string, number>();
+    for (const ws of walletStates?.states ?? []) {
+      const t = ws.effects.find((e) => e.timestamp)?.timestamp;
+      if (t) firstSeen.set(ws.wallet, Date.parse(t));
+    }
+    return laneOrder(c, firstSeen);
+  }, [c, walletStates]);
+  const shownLanes = useMemo(() => visibleLanes(order, c.hiddenLanes ?? [], focus), [order, c.hiddenLanes, focus]);
+  const lanes = useMemo<WalletLane[]>(
+    () =>
+      shownLanes.flatMap((wallet) => {
+        const data = perWallet.get(wallet);
+        const config = c.mappedWallets.find((w) => w.address === wallet);
+        if (!data || !config) return [];
+        const r = walletRange(c, config);
+        const tags = names.label(wallet)?.tags ?? [];
+        return [
+          {
+            wallet,
+            state: data.state,
+            summaries: data.summaries,
+            range: r,
+            label: names.known(wallet) ?? shortenAddress(wallet, 4),
+            sublabel: [names.known(wallet) ? shortenAddress(wallet, 4) : null, tags[0] ?? null].filter(Boolean).join(" · ") || undefined,
+            ...(config.rangeMode === "first_interaction" && config.addedFromWallet ? { forkFrom: { wallet: config.addedFromWallet, time: r.start } } : {}),
+          },
+        ];
+      }),
+    [shownLanes, perWallet, c, names],
+  );
+  // Every mapped wallet each signature belongs to.
+  const owners = useMemo(() => {
+    const out = new Map<string, string[]>();
+    for (const w of state.status === "done" ? state.result.wallets : []) for (const sig of w.signatures) out.set(sig, [...(out.get(sig) ?? []), w.wallet]);
+    return out;
+  }, [state]);
+
+  async function updateCase(next: FraudWatchCase) {
+    try {
+      await saveCase(getDb(), next);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save the case.");
+    }
+  }
   const graph = useMemo(
     () => (view === "graph" && visible ? buildWalletGraph(selectedWallet, visible.state.effects, visible.summaries) : null),
     [view, visible, selectedWallet],
@@ -172,13 +237,6 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   const result = state.status === "done" ? state.result : null;
   // Transactions each mapped wallet shares with every other mapped wallet.
   const shared = useMemo(() => (result ? sharedTransactions(result.wallets) : new Map<string, Map<string, string[]>>()), [result]);
-  const sharedWith = useMemo(() => {
-    const bySignature = new Map<string, string[]>();
-    for (const [other, signatures] of shared.get(selectedWallet) ?? []) {
-      for (const s of signatures) bySignature.set(s, [...(bySignature.get(s) ?? []), other]);
-    }
-    return bySignature;
-  }, [shared, selectedWallet]);
   const summary = useMemo(() => {
     const w = justMapped ? result?.wallets.find((x) => x.wallet === justMapped) : undefined;
     if (!w || !result || !walletStates) return null;
@@ -256,6 +314,11 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
           ? { rangeText: rangeText(address), onUnmap: () => void unmap(address) }
           : undefined
       }
+      lane={
+        c.mappedWallets.length > 1 && c.mappedWallets.some((m) => m.address === address)
+          ? { hidden: (c.hiddenLanes ?? []).includes(address), onToggle: () => void updateCase(toggleLaneHidden(c, address)) }
+          : undefined
+      }
     />
   );
   const addressPanel = selectedAddress && panelFor(selectedAddress, () => setSelectedAddress(null));
@@ -325,21 +388,29 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
         </>
       ) : view === "timeline" ? (
         <WalletTimeline
-          key={walletState.wallet}
           initialSignature={focusSignature}
-          state={visibleState}
-          summaries={visible.summaries}
+          lanes={lanes}
           transactions={state.result.transactions}
-          range={walletRange(c, c.mappedWallets.find((w) => w.address === selectedWallet) ?? c.mappedWallets[0])}
+          range={c.range}
           assets={walletStates.assets}
           names={names}
           inspector={walletInspector}
           addressPanel={addressPanel}
           onSelectAddress={setSelectedAddress}
           inspectorOpen={rightOpen}
-          emptyMessage={walletState.effects.length > 0 ? "No transactions match the filters." : undefined}
+          emptyMessage={
+            lanes.length === 0
+              ? "Every lane is hidden. Show one from the Wallets panel."
+              : lanes.some((l) => (walletStates.states.find((s) => s.wallet === l.wallet)?.effects.length ?? 0) > 0)
+                ? "No transactions match the filters."
+                : undefined
+          }
           onHide={(signature) => setFilter((f) => ({ ...f, hiddenSignatures: toggled(f.hiddenSignatures, signature) }))}
-          sharedWith={(signature) => sharedWith.get(signature) ?? []}
+          onSelectLane={(wallet) => {
+            setSelectedWallet(wallet);
+            setSelectedAddress(null);
+          }}
+          sharedWith={(signature, wallet) => (owners.get(signature) ?? []).filter((w) => w !== wallet)}
         />
       ) : (
         <>
@@ -464,55 +535,120 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                 </Alert>
               </div>
             )}
-            <PanelSection title="Wallets">
+            <PanelSection
+              title="Wallets"
+              action={
+                focus.size > 0 && (
+                  <Button variant="ghost" size="xs" onClick={() => setFocus(new Set())}>
+                    Clear focus
+                  </Button>
+                )
+              }
+            >
               <ul className="-mx-1 flex flex-col">
-                {c.mappedWallets.map((w) => {
-                  const s = walletStates?.states.find((st) => st.wallet === w.address);
+                {order.map((address, position) => {
+                  const w = c.mappedWallets.find((m) => m.address === address)!;
+                  const s = walletStates?.states.find((st) => st.wallet === address);
                   const flagged = s && (s.mismatches.length > 0 || s.openingStatus !== "OBSERVED");
+                  const hidden = (c.hiddenLanes ?? []).includes(address);
+                  const focused = focus.has(address);
+                  const shown = shownLanes.includes(address);
                   return (
-                    <li key={w.address}>
+                    <li key={address} className="group/row relative flex items-center">
                       <button
                         type="button"
-                        aria-current={w.address === selectedWallet}
+                        aria-current={address === selectedWallet}
                         onClick={() => {
-                          setSelectedWallet(w.address);
+                          setSelectedWallet(address);
                           setSelectedAddress(null);
                           setSelectedEdge(null);
                         }}
                         className={cn(
-                          "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm",
-                          w.address === selectedWallet ? "bg-muted" : "hover:bg-muted/50",
+                          "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm",
+                          address === selectedWallet ? "bg-muted" : "hover:bg-muted/50",
+                          !shown && "opacity-50",
                         )}
                       >
                         <WalletIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                        <span className={cn("min-w-0 flex-1 truncate text-xs", !names.known(w.address) && "font-mono")}>
-                          {names.of(w.address)}
+                        <span className={cn("min-w-0 flex-1 truncate text-xs", !names.known(address) && "font-mono")}>
+                          {names.of(address)}
                         </span>
                         {flagged && <span className="text-destructive" title="State mismatch or partial history">•</span>}
                         {w.role === "primary" ? (
                           <Badge variant="secondary">primary</Badge>
                         ) : (
                           w.rangeMode !== "case" && (
-                            <span className="text-[10px] text-muted-foreground" title={rangeText(w.address)}>
+                            <span className="text-[10px] text-muted-foreground" title={rangeText(address)}>
                               from {walletRange(c, w).start.slice(5, 10)}
                             </span>
                           )
                         )}
                       </button>
+                      {c.mappedWallets.length > 1 && (
+                        // Overlaid on hover so the wallet's name keeps its full width otherwise.
+                        <span className="absolute top-1/2 right-1 flex -translate-y-1/2 rounded-md bg-muted opacity-0 transition-opacity group-hover/row:opacity-100 focus-within:opacity-100">
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-label="Move lane up"
+                            title="Move lane up"
+                            disabled={position === 0}
+                            onClick={() => void updateCase(moveLane(c, order, address, -1))}
+                          >
+                            <ArrowUpIcon />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-label="Move lane down"
+                            title="Move lane down"
+                            disabled={position === order.length - 1}
+                            onClick={() => void updateCase(moveLane(c, order, address, 1))}
+                          >
+                            <ArrowDownIcon />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-label={hidden ? "Show lane" : "Hide lane"}
+                            aria-pressed={hidden}
+                            title={hidden ? "Show lane" : "Hide lane (stays mapped)"}
+                            onClick={() => void updateCase(toggleLaneHidden(c, address))}
+                          >
+                            {hidden ? <EyeOffIcon /> : <EyeIcon />}
+                          </Button>
+                          <Button
+                            variant={focused ? "secondary" : "ghost"}
+                            size="icon-xs"
+                            aria-label={focused ? "Remove from focus" : "Focus on this lane"}
+                            aria-pressed={focused}
+                            title="Focus: show only focused lanes, without unmapping the rest"
+                            onClick={() => setFocus((f) => toggled(f, address))}
+                          >
+                            <FocusIcon />
+                          </Button>
+                        </span>
+                      )}
                     </li>
                   );
                 })}
               </ul>
+              {focus.size > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Focus: {[...focus].map((f) => names.of(f)).join(" + ")}. Other lanes are still mapped.
+                </p>
+              )}
               <p className="text-xs text-muted-foreground">
                 Only mapped wallets get a full history load. Counterparties stay shallow until you map them.
               </p>
             </PanelSection>
             {walletState && walletStates && visibleState && (
               <FilterPanel
-                summaries={summaries}
+                // The timeline filters every visible lane; the graph and table show the selected wallet.
+                summaries={view === "timeline" ? shownLanes.flatMap((w) => perWallet.get(w)?.all ?? []) : summaries}
                 assets={walletStates.assets}
                 filter={filter}
-                shown={visibleState.effects.length}
+                shown={view === "timeline" ? lanes.reduce((n, l) => n + l.state.effects.length, 0) : visibleState.effects.length}
                 onChange={setFilter}
               />
             )}
