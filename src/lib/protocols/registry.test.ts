@@ -40,6 +40,7 @@ describe("bundled registry", () => {
     expect(registry.size).toBeGreaterThan(30);
     expect(registry.lookup(JUPITER)).toMatchObject({ protocolId: "jupiter", category: "dex_aggregator", role: "program" });
     expect(registry.lookup("11111111111111111111111111111111")).toMatchObject({ category: "core", label: "System Program" });
+    expect(registry.protocols.get("jupiter")).toEqual({ name: "Jupiter", category: "dex_aggregator" });
   });
 
   it("leaves unknown addresses unknown", () => {

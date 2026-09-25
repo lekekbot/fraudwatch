@@ -61,6 +61,10 @@ function mintName(bytes: Uint8Array): string | undefined {
 
 /** Every cNFT mint and transfer in a transaction, in execution order. */
 export function cnftMoves(tx: CanonicalTransaction): CnftMove[] {
+  // Most transactions never touch Bubblegum; skip decoding them.
+  if (!tx.instructions.some((ix) => ix.programId === BUBBLEGUM_PROGRAM) && !tx.innerInstructions.some((ix) => ix.programId === BUBBLEGUM_PROGRAM)) {
+    return [];
+  }
   // Execution order: each outer instruction, then the inner ones it invoked.
   const ordered: CanonicalInstruction[] = tx.instructions.flatMap((ix, i) => [ix, ...tx.innerInstructions.filter((inner) => inner.outerIndex === i)]);
   const signers = new Set(tx.accounts.filter((a) => a.signer).map((a) => a.address));

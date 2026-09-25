@@ -3,7 +3,7 @@
 import { select } from "d3-selection";
 import { type ZoomBehavior, type ZoomTransform, zoom, zoomIdentity } from "d3-zoom";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { MaximizeIcon, MinusIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
+import { MaximizeIcon, MinusIcon, PlusIcon, RotateCcwIcon, WorkflowIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { AddressState } from "@/lib/case/address-state";
 import { graphWheelAction } from "@/lib/gestures";
@@ -11,7 +11,7 @@ import type { GraphEdge, WalletGraph as Graph } from "@/lib/graph/build";
 import { layoutGraph, nodeRadius, type Point } from "@/lib/graph/layout";
 import type { Names } from "@/lib/labels/labels";
 
-type Palette = Record<"fg" | "muted" | "border" | "card" | "bg" | "send" | "receive" | "program", string>;
+type Palette = Record<"fg" | "muted" | "border" | "card" | "bg" | "program", string>;
 
 function readPalette(el: HTMLElement): Palette {
   const css = getComputedStyle(el);
@@ -22,35 +22,27 @@ function readPalette(el: HTMLElement): Palette {
     border: v("--border", "#333"),
     card: v("--card", "#1a1a1a"),
     bg: v("--background", "#111"),
-    send: v("--destructive", "#e5484d"),
-    receive: "oklch(0.72 0.16 155)",
     program: "oklch(0.7 0.14 250)",
   };
 }
 
-/** Curve offset in world px between parallel edges of the same pair. */
-const CURVE_STEP = 30;
+type Segment = { edge: GraphEdge; from: Point; to: Point };
 
-type Curve = { edge: GraphEdge; from: Point; control: Point; to: Point };
-
-function edgeColor(p: Palette, e: GraphEdge, wallet: string) {
-  if (e.kind === "program") return p.program;
-  if (e.kind === "sent_by") return p.muted;
-  return e.target === wallet ? p.receive : e.source === wallet ? p.send : p.muted;
-}
-
-function quadAt(c: Curve, t: number): Point {
-  const u = 1 - t;
-  return {
-    x: u * u * c.from.x + 2 * u * t * c.control.x + t * t * c.to.x,
-    y: u * u * c.from.y + 2 * u * t * c.control.y + t * t * c.to.y,
-  };
+/** Distance from `p` to the segment `a`–`b`. */
+function distanceToSegment(p: Point, a: Point, b: Point): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy || 1;
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
 /**
- * Node-link view of one wallet: counterparties, senders and programs around
- * it, one aggregated edge per relationship and direction. Pan and zoom the
- * canvas, drag nodes, click a node or edge to inspect it.
+ * Wallet interaction map: one node per address, one calm undirected line per
+ * pair that directly exchanged value. Transaction detail (direction, amounts,
+ * dates) lives in the side panel, not on the lines. Program links are dotted
+ * and only drawn when turned on. Pan and zoom, drag nodes, click a node or
+ * line to inspect it.
  */
 export function WalletGraph({
   graph,
@@ -61,7 +53,8 @@ export function WalletGraph({
   selectedEdge,
   onSelectNode,
   onSelectEdge,
-  describeEdge,
+  showPrograms,
+  onToggleProgramCalls,
 }: {
   graph: Graph;
   wallet: string;
@@ -71,8 +64,8 @@ export function WalletGraph({
   selectedEdge: string | null;
   onSelectNode: (id: string | null) => void;
   onSelectEdge: (id: string | null) => void;
-  /** Short summary drawn on a hovered edge, e.g. "12 tx · 250 USDC". */
-  describeEdge: (edge: GraphEdge) => string;
+  showPrograms: boolean;
+  onToggleProgramCalls: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const zoomRef = useRef<ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
@@ -83,38 +76,23 @@ export function WalletGraph({
   const dragRef = useRef<{ id: string; x: number; y: number; moved: boolean } | null>(null);
   const suppressClick = useRef(false);
 
-  const layout = useMemo(() => layoutGraph(graph.nodes, graph.edges), [graph]);
+  const layout = useMemo(() => layoutGraph(graph.nodes, graph.edges, wallet), [graph, wallet]);
   // Positions start from the layout; dragging moves them without re-running it.
   const positions = useRef(new Map<string, Point>());
   const nodesById = useMemo(() => new Map(graph.nodes.map((n) => [n.id, n])), [graph]);
 
-  const latest = useRef({ graph, wallet, names, stateOf, selectedNode, selectedEdge, describeEdge, nodesById });
+  const latest = useRef({ graph, wallet, names, stateOf, selectedNode, selectedEdge, nodesById });
   // Drawing reads props through this ref; refresh it before any effect or frame uses it.
   useLayoutEffect(() => {
-    latest.current = { graph, wallet, names, stateOf, selectedNode, selectedEdge, describeEdge, nodesById };
+    latest.current = { graph, wallet, names, stateOf, selectedNode, selectedEdge, nodesById };
   });
 
-  const curves = useCallback((): Curve[] => {
-    const { graph } = latest.current;
-    const groups = new Map<string, GraphEdge[]>();
-    for (const e of graph.edges) {
-      const key = [e.source, e.target].sort().join("|");
-      groups.set(key, [...(groups.get(key) ?? []), e]);
-    }
-    const out: Curve[] = [];
-    for (const group of groups.values()) {
-      group.forEach((edge, i) => {
-        const from = positions.current.get(edge.source);
-        const to = positions.current.get(edge.target);
-        if (!from || !to) return;
-        // Offset along the normal of a canonical direction, so A→B and B→A bow to opposite sides.
-        const [a, b] = edge.source < edge.target ? [from, to] : [to, from];
-        const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-        const nx = -(b.y - a.y) / len;
-        const ny = (b.x - a.x) / len;
-        const offset = (i - (group.length - 1) / 2) * CURVE_STEP;
-        out.push({ edge, from, to, control: { x: (from.x + to.x) / 2 + nx * offset, y: (from.y + to.y) / 2 + ny * offset } });
-      });
+  const segments = useCallback((): Segment[] => {
+    const out: Segment[] = [];
+    for (const edge of latest.current.graph.edges) {
+      const from = positions.current.get(edge.a);
+      const to = positions.current.get(edge.b);
+      if (from && to) out.push({ edge, from, to });
     }
     return out;
   }, []);
@@ -124,7 +102,7 @@ export function WalletGraph({
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
-    const { wallet, names, stateOf, selectedNode, selectedEdge, describeEdge, nodesById, graph } = latest.current;
+    const { names, stateOf, selectedNode, selectedEdge, graph } = latest.current;
     const { width, height } = sizeRef.current;
     const dpr = window.devicePixelRatio || 1;
     const t = transformRef.current;
@@ -134,63 +112,47 @@ export function WalletGraph({
     ctx.setTransform(dpr * t.k, 0, 0, dpr * t.k, dpr * t.x, dpr * t.y);
 
     const hover = hoverRef.current;
-    const focusNode = hover.node ?? selectedNode ?? undefined;
-    const focusEdge = hover.edge ?? selectedEdge ?? undefined;
-    const lit = (e: GraphEdge) =>
-      focusEdge ? e.id === focusEdge : focusNode ? e.source === focusNode || e.target === focusNode : true;
+    const focusEdge = selectedEdge ?? hover.edge ?? undefined;
+    const focusNode = focusEdge ? undefined : (hover.node ?? selectedNode ?? undefined);
+    const lit = (e: GraphEdge) => (focusEdge ? e.id === focusEdge : focusNode ? e.a === focusNode || e.b === focusNode : true);
 
-    const all = curves();
-    for (const c of all) {
-      const on = lit(c.edge);
-      const color = edgeColor(p, c.edge, wallet);
-      ctx.globalAlpha = on ? 1 : 0.18;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = (Math.min(6, 1 + Math.log2(c.edge.signatures.length + 1)) + (c.edge.id === focusEdge ? 1.5 : 0)) / t.k ** 0.5;
-      ctx.setLineDash(c.edge.kind === "sent_by" ? [6, 5] : c.edge.kind === "program" ? [2, 4] : []);
+    // One calm line per pair: no arrows, no labels. The selected one stands out, the rest recede.
+    const line = 1.25 / Math.sqrt(t.k);
+    for (const { edge, from, to } of segments()) {
+      const on = lit(edge);
+      const selected = edge.id === selectedEdge;
+      ctx.globalAlpha = on ? 1 : 0.15;
+      ctx.strokeStyle = edge.kind === "program" ? p.program : selected || (on && (focusEdge || focusNode)) ? p.fg : p.muted;
+      ctx.lineWidth = selected ? line * 2.4 : line;
+      ctx.setLineDash(edge.kind === "program" ? [2 / t.k ** 0.5, 4 / t.k ** 0.5] : []);
       ctx.beginPath();
-      ctx.moveTo(c.from.x, c.from.y);
-      ctx.quadraticCurveTo(c.control.x, c.control.y, c.to.x, c.to.y);
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
       ctx.stroke();
-      ctx.setLineDash([]);
-      // Arrowhead where the curve meets the target's edge.
-      const target = nodesById.get(c.edge.target);
-      if (target) {
-        const dx = c.to.x - c.control.x;
-        const dy = c.to.y - c.control.y;
-        const len = Math.hypot(dx, dy) || 1;
-        const ux = dx / len;
-        const uy = dy / len;
-        const r = nodeRadius(target) + 3;
-        const tip = { x: c.to.x - ux * r, y: c.to.y - uy * r };
-        const size = 8;
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.moveTo(tip.x, tip.y);
-        ctx.lineTo(tip.x - ux * size - uy * size * 0.55, tip.y - uy * size + ux * size * 0.55);
-        ctx.lineTo(tip.x - ux * size + uy * size * 0.55, tip.y - uy * size - ux * size * 0.55);
-        ctx.closePath();
-        ctx.fill();
-      }
     }
+    ctx.setLineDash([]);
     ctx.globalAlpha = 1;
 
+    const litNodes = new Set<string>();
+    if (focusEdge || focusNode) {
+      for (const e of graph.edges) if (lit(e)) litNodes.add(e.a).add(e.b);
+      if (focusNode) litNodes.add(focusNode);
+    }
     for (const n of graph.nodes) {
       const pos = positions.current.get(n.id);
       if (!pos) continue;
       const r = nodeRadius(n);
-      const state = n.kind === "wallet" ? "PRIMARY" : stateOf(n.id);
-      const dim = focusNode && focusNode !== n.id && !graph.edges.some((e) => lit(e) && (e.source === n.id || e.target === n.id));
-      ctx.globalAlpha = dim ? 0.3 : 1;
+      const state = n.kind === "wallet" ? "MAPPED" : stateOf(n.id);
+      ctx.globalAlpha = litNodes.size > 0 && !litNodes.has(n.id) ? 0.3 : 1;
       ctx.beginPath();
-      if (state === "INFRASTRUCTURE") ctx.roundRect(pos.x - r, pos.y - r, r * 2, r * 2, 4);
+      if (n.kind === "program" || state === "INFRASTRUCTURE") ctx.roundRect(pos.x - r, pos.y - r, r * 2, r * 2, 4);
       else ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
       ctx.fillStyle = n.kind === "wallet" ? p.fg : p.card;
       ctx.fill();
       ctx.lineWidth = n.id === selectedNode ? 3 : 1.5;
-      ctx.strokeStyle =
-        n.id === selectedNode ? p.fg : state === "INFRASTRUCTURE" ? p.program : state === "MAPPED" || state === "PRIMARY" ? p.fg : p.muted;
+      ctx.strokeStyle = n.id === selectedNode ? p.fg : n.kind === "program" ? p.program : n.kind === "wallet" ? p.fg : p.muted;
       ctx.stroke();
-      if (n.kind !== "wallet") {
+      if (n.kind !== "wallet" && n.txCount > 0) {
         ctx.fillStyle = p.muted;
         ctx.font = "600 10px ui-sans-serif, system-ui, sans-serif";
         ctx.textAlign = "center";
@@ -198,39 +160,20 @@ export function WalletGraph({
         ctx.fillText(String(n.txCount), pos.x, pos.y);
       }
       const known = names.known(n.id);
-      ctx.font = known ? "500 11px ui-sans-serif, system-ui, sans-serif" : "11px ui-monospace, monospace";
-      ctx.fillStyle = known ? p.fg : p.muted;
+      const label = known ?? names.of(n.id, 4);
+      ctx.font = known || n.kind === "wallet" ? "500 11px ui-sans-serif, system-ui, sans-serif" : "11px ui-monospace, monospace";
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
-      // A halo in the background colour keeps labels readable over edges.
+      // A halo in the background colour keeps labels readable over lines.
       ctx.lineJoin = "round";
       ctx.lineWidth = 4;
       ctx.strokeStyle = p.bg;
-      ctx.strokeText(known ?? names.of(n.id, 4), pos.x, pos.y + r + 4);
-      ctx.fillText(known ?? names.of(n.id, 4), pos.x, pos.y + r + 4);
+      ctx.strokeText(label, pos.x, pos.y + r + 4);
+      ctx.fillStyle = known || n.kind === "wallet" ? p.fg : p.muted;
+      ctx.fillText(label, pos.x, pos.y + r + 4);
     }
     ctx.globalAlpha = 1;
-
-    // Summary on the hovered (or selected) edge.
-    const labelled = all.find((c) => c.edge.id === focusEdge);
-    if (labelled) {
-      const mid = quadAt(labelled, 0.5);
-      const text = describeEdge(labelled.edge);
-      ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
-      const w = ctx.measureText(text).width + 12;
-      ctx.fillStyle = p.card;
-      ctx.strokeStyle = p.border;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.roundRect(mid.x - w / 2, mid.y - 10, w, 20, 6);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = p.fg;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(text, mid.x, mid.y);
-    }
-  }, [curves]);
+  }, [segments]);
 
   const schedule = useCallback(() => {
     if (frameRef.current === null) frameRef.current = requestAnimationFrame(draw);
@@ -296,16 +239,13 @@ export function WalletGraph({
       }
       const tolerance = 6 / transformRef.current.k;
       let best: { id: string; d: number } | null = null;
-      for (const c of curves()) {
-        for (let s = 0; s <= 20; s++) {
-          const q = quadAt(c, s / 20);
-          const d = Math.hypot(q.x - w.x, q.y - w.y);
-          if (d < tolerance && (!best || d < best.d)) best = { id: c.edge.id, d };
-        }
+      for (const sgm of segments()) {
+        const d = distanceToSegment(w, sgm.from, sgm.to);
+        if (d < tolerance && (!best || d < best.d)) best = { id: sgm.edge.id, d };
       }
       return best ? { edge: best.id } : {};
     },
-    [curves, toWorld],
+    [segments, toWorld],
   );
 
   // Pan and zoom, except when the press starts on a node (that drags the node).
@@ -388,6 +328,12 @@ export function WalletGraph({
           if (hit.node !== hoverRef.current.node || hit.edge !== hoverRef.current.edge) {
             hoverRef.current = hit;
             event.currentTarget.style.cursor = hit.node ? "grab" : hit.edge ? "pointer" : "";
+            // The count goes in a tooltip, never on the line itself.
+            const edge = hit.edge ? latest.current.graph.edges.find((e) => e.id === hit.edge) : undefined;
+            const n = edge?.interactions.length ?? 0;
+            event.currentTarget.title = edge
+              ? `${latest.current.names.of(edge.a)} ↔ ${latest.current.names.of(edge.b)} · ${n} ${edge.kind === "program" ? "program call" : "transaction"}${n === 1 ? "" : "s"} · click for details`
+              : "";
             schedule();
           }
         }}
@@ -456,18 +402,33 @@ export function WalletGraph({
           >
             <RotateCcwIcon />
           </Button>
+          <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
+          <Button
+            variant={showPrograms ? "secondary" : "ghost"}
+            size="sm"
+            aria-pressed={showPrograms}
+            title="Program calls are separate from wallet-to-wallet interactions and hidden by default"
+            onClick={onToggleProgramCalls}
+          >
+            <WorkflowIcon />
+            Program calls
+          </Button>
         </div>
       </div>
 
       <div className="pointer-events-none absolute bottom-3 left-3 flex flex-col gap-1 rounded-lg border bg-popover/90 px-2.5 py-2 text-[11px] text-muted-foreground backdrop-blur">
-        <Legend color="bg-[oklch(0.72_0.16_155)]">Received by wallet</Legend>
-        <Legend color="bg-destructive">Sent by wallet</Legend>
-        <Legend color="border-t border-dashed border-muted-foreground bg-transparent">Sent the transaction</Legend>
-        <Legend color="border-t-2 border-dotted border-[oklch(0.7_0.14_250)] bg-transparent">Program called</Legend>
-        <span className="pt-0.5">Number in node: transactions · square: program</span>
-        {graph.omittedNodes > 0 && (
-          <span>+{graph.omittedNodes.toLocaleString()} quieter addresses not drawn</span>
+        <span className="font-medium text-foreground">
+          {graph.counts.addresses.toLocaleString()} addresses · {graph.counts.connections.toLocaleString()} connections ·{" "}
+          {graph.counts.transactions.toLocaleString()} transactions
+        </span>
+        <Legend color="bg-muted-foreground">Interacted directly (one line per pair, any direction)</Legend>
+        {showPrograms ? (
+          <Legend color="border-t-2 border-dotted border-[oklch(0.7_0.14_250)] bg-transparent">Program called ({graph.counts.programConnections})</Legend>
+        ) : (
+          graph.counts.programConnections > 0 && <span>{graph.counts.programConnections.toLocaleString()} program connections hidden</span>
         )}
+        <span className="pt-0.5">Click a line for its transactions · number in node: transactions · filled: mapped wallet</span>
+        {graph.omittedNodes > 0 && <span>+{graph.omittedNodes.toLocaleString()} quieter addresses not drawn</span>}
       </div>
     </div>
   );

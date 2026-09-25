@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowLeftIcon, CopyIcon, ExternalLinkIcon, EyeIcon, EyeOffIcon, GitBranchPlusIcon, UnlinkIcon, XIcon } from "lucide-react";
+import { ArrowLeftIcon, CopyIcon, ExternalLinkIcon, EyeIcon, EyeOffIcon, FilterIcon, GitBranchPlusIcon, StarIcon, UnlinkIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -45,6 +45,8 @@ export function AddressPanel({
   onMap,
   mapped,
   lane,
+  onFilterTo,
+  bookmark,
 }: {
   caseId: string;
   address: string;
@@ -60,6 +62,9 @@ export function AddressPanel({
   mapped?: { rangeText: string; onUnmap: () => void };
   /** For any mapped wallet when there are several lanes: hide or show its lane. */
   lane?: { hidden: boolean; onToggle: () => void };
+  /** Narrow the views to transactions involving this address. */
+  onFilterTo?: { active: boolean; toggle: () => void };
+  bookmark?: { on: boolean; toggle: () => void };
 }) {
   const [name, setName] = useState(label?.name ?? "");
   const [note, setNote] = useState(label?.note ?? "");
@@ -89,6 +94,18 @@ export function AddressPanel({
             {onBack && (
               <Button variant="ghost" size="icon-xs" aria-label="Back" title="Back" onClick={onBack}>
                 <ArrowLeftIcon />
+              </Button>
+            )}
+            {bookmark && (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label={bookmark.on ? "Remove bookmark" : "Bookmark address"}
+                aria-pressed={bookmark.on}
+                title={bookmark.on ? "Remove bookmark" : "Bookmark address"}
+                onClick={bookmark.toggle}
+              >
+                <StarIcon className={bookmark.on ? "fill-current text-[oklch(0.8_0.15_80)]" : undefined} />
               </Button>
             )}
             <Button variant="ghost" size="icon-xs" aria-label="Copy address" title="Copy address" onClick={() => copy(address)}>
@@ -129,6 +146,12 @@ export function AddressPanel({
           <p className="text-xs text-muted-foreground">
             In {transactionCount.toLocaleString()} of this wallet&apos;s transactions.
           </p>
+        )}
+        {onFilterTo && (
+          <Button variant={onFilterTo.active ? "secondary" : "outline"} size="sm" className="self-start" onClick={onFilterTo.toggle}>
+            <FilterIcon />
+            {onFilterTo.active ? "Showing only its transactions" : "Show only its transactions"}
+          </Button>
         )}
         {state === "OBSERVED" && onMap && (
           <Button variant="outline" size="sm" onClick={onMap}>
