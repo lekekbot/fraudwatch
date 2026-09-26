@@ -314,6 +314,14 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     return items;
   }, [c.mappedWallets, names, labelRows, filterables, walletStates]);
 
+  /** Show a mapped wallet in the inspector: the last pick wins over any open address, line or transaction. */
+  function pickWallet(address: string) {
+    setSelectedWallet(address);
+    setSelectedAddress(null);
+    setSelectedEdge(null);
+    timelineRef.current?.clearSelection();
+  }
+
   /** Select a transaction on the timeline, switching to it if needed. */
   function goToTransaction(signature: string, wallet?: string) {
     if (view === "timeline" && timelineRef.current) {
@@ -339,11 +347,8 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
       }
       return best && { signature: best.signature, wallet: bestWallet };
     };
-    if (item.kind === "wallet") {
-      setSelectedWallet(item.id);
-      setSelectedAddress(null);
-      setSelectedEdge(null);
-    } else if (item.kind === "address") setSelectedAddress(item.id);
+    if (item.kind === "wallet") pickWallet(item.id);
+    else if (item.kind === "address") setSelectedAddress(item.id);
     else if (item.kind === "transaction") goToTransaction(item.id, owners.get(item.id)?.[0]);
     else if (item.kind === "tag") {
       setFilter((f) => ({ ...f, tags: new Set([item.id]) }));
@@ -426,7 +431,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     return `from ${r.start.slice(0, 16).replace("T", " ")} UTC${how} to the case end`;
   };
 
-  const panelFor = (address: string, onBack?: () => void) => (
+  const panelFor = (address: string) => (
     <AddressPanel
       key={address}
       caseId={c.id}
@@ -435,7 +440,6 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
       label={names.label(address)}
       entry={registry.lookup(address)}
       transactionCount={address === selectedWallet ? undefined : counterparties.find((r) => r.address === address)?.count}
-      onBack={onBack}
       onMap={() => {
         setMapError(null);
         setMapTarget(address);
@@ -458,7 +462,8 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
       }
     />
   );
-  const addressPanel = selectedAddress && panelFor(selectedAddress, () => setSelectedAddress(null));
+  // The inspector shows the last thing selected; an address stays until something else is picked.
+  const addressPanel = selectedAddress && panelFor(selectedAddress);
 
   const walletInspector = (
     <>
@@ -548,10 +553,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                 : undefined
           }
           onHide={(signature) => setFilter((f) => ({ ...f, hiddenSignatures: toggled(f.hiddenSignatures, signature) }))}
-          onSelectLane={(wallet) => {
-            setSelectedWallet(wallet);
-            setSelectedAddress(null);
-          }}
+          onSelectLane={pickWallet}
           sharedWith={(signature, wallet) => (owners.get(signature) ?? []).filter((w) => w !== wallet)}
           isBookmarked={(signature) => isBookmarked(c, "transaction", signature)}
           onToggleBookmark={(signature, wallet) => void updateCase(toggleBookmark(c, { kind: "transaction", target: signature, wallet }))}
@@ -560,6 +562,10 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
             toast.success(`Bookmarked ${new Date(time).toISOString().slice(0, 16).replace("T", " ")} UTC.`);
           }}
           initialTime={focusTime}
+          onSelectTransaction={() => {
+            setSelectedAddress(null);
+            setSelectedEdge(null);
+          }}
         />
       ) : (
         <>
@@ -713,11 +719,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                       <button
                         type="button"
                         aria-current={address === selectedWallet}
-                        onClick={() => {
-                          setSelectedWallet(address);
-                          setSelectedAddress(null);
-                          setSelectedEdge(null);
-                        }}
+                        onClick={() => pickWallet(address)}
                         className={cn(
                           "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm",
                           address === selectedWallet ? "bg-muted" : "hover:bg-muted/50",
@@ -844,10 +846,8 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                             className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted/50"
                             onClick={() => {
                               if (b.kind === "wallet") {
-                                if (c.mappedWallets.some((w) => w.address === b.target)) {
-                                  setSelectedWallet(b.target);
-                                  setSelectedAddress(null);
-                                } else setSelectedAddress(b.target);
+                                if (c.mappedWallets.some((w) => w.address === b.target)) pickWallet(b.target);
+                                else setSelectedAddress(b.target);
                               } else if (b.kind === "transaction") goToTransaction(b.target, b.wallet);
                               else if (view === "timeline" && timelineRef.current) timelineRef.current.showTime(Date.parse(b.target));
                               else {

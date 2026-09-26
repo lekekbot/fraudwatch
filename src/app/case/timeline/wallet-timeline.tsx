@@ -84,6 +84,8 @@ export type WalletTimelineHandle = {
   jumpTo: (signature: string, wallet?: string) => boolean;
   /** Centre the view on a moment, keeping the zoom. */
   showTime: (time: number) => void;
+  /** Deselect, so the inspector can show something else picked elsewhere (e.g. a wallet). */
+  clearSelection: () => void;
 };
 
 /**
@@ -109,6 +111,7 @@ export function WalletTimeline({
   onToggleBookmark,
   onBookmarkTime,
   initialTime,
+  onSelectTransaction,
   ref,
 }: {
   ref?: React.Ref<WalletTimelineHandle>;
@@ -140,6 +143,8 @@ export function WalletTimeline({
   onBookmarkTime: (time: number) => void;
   /** Open centred on this moment (a date bookmark), keeping the default zoom. */
   initialTime?: number;
+  /** A transaction was selected; the inspector should show it over any open address. */
+  onSelectTransaction: () => void;
 }) {
   const timeline = useRef<TimelineHandle>(null);
   const [mode, setMode] = useState<SpacingMode>("time");
@@ -200,6 +205,8 @@ export function WalletTimeline({
   const selected: TimelineSelection | null = selectedIndex === -1 ? null : { index: selectedIndex, lane: selectedLane };
   const setSelected = (index: number | null, lane?: number) => {
     if (index === null || !items[index]) return setSelection(null);
+    // The inspector shows the last thing selected: this transaction now.
+    onSelectTransaction();
     const entries = items[index].entries;
     // Stay on the current wallet's lane when stepping, if the transaction is on it.
     const keep = lane ?? entries.find((e) => lanes[e.lane].wallet === selection?.wallet)?.lane ?? entries[0].lane;
@@ -248,6 +255,7 @@ export function WalletTimeline({
       select(index, lane);
       return true;
     },
+    clearSelection: () => setSelection(null),
     showTime: (time) => {
       const span = view ? view.end - view.start : bounds.end - bounds.start;
       timeline.current?.showTimeRange(time - span / 2, time + span / 2, false);
@@ -328,7 +336,11 @@ export function WalletTimeline({
               mode={mode}
               selected={selected}
               onSelect={select}
-              onSelectLane={(lane) => onSelectLane(lanes[lane].wallet)}
+              onSelectLane={(lane) => {
+                // A lane name is a pick too: show that wallet, not the last transaction.
+                setSelection(null);
+                onSelectLane(lanes[lane].wallet);
+              }}
               onNeedsEventSpacing={(index, lane) => {
                 pending.current = { index, lane };
                 setSelected(index, lane);
