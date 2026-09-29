@@ -32,4 +32,10 @@ describe("layoutGraph", () => {
       }
     }
   });
+
+  it("uses a radial one-hop layout", () => {
+    const pos = layoutGraph(nodes, edges, "W");
+    const radii = nodes.slice(1).map((n) => Math.round(Math.hypot(pos.get(n.id)!.x, pos.get(n.id)!.y)));
+    expect(new Set(radii)).toEqual(new Set([180]));
+  });
 });

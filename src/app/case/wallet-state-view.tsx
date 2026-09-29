@@ -6,7 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { formatLamports } from "@/lib/solana/amount";
 import { shortenAddress } from "@/lib/solana/address";
 import { type AssetState, netChange, type WalletState, type WalletTransactionEffect } from "@/lib/state/reconstruct";
-import { type Assets, assetLabel, formatAssetAmount, formatUtc } from "./asset-format";
+import { type Assets, assetLabel, assetLogo, formatAssetAmount, formatUtc } from "./asset-format";
+import { AssetIcon } from "./asset-icon";
 
 const MAX_ROWS = 200;
 
@@ -31,6 +32,16 @@ function TransactionCell({ e }: { e: WalletTransactionEffect }) {
   );
 }
 
+function AssetName({ assetId, assets }: { assetId: string; assets: Assets }) {
+  const label = assetLabel(assetId, assets);
+  return (
+    <span className="flex items-center gap-2" title={assetId}>
+      <AssetIcon label={label} logo={assetLogo(assetId, assets)} />
+      <span>{label}</span>
+    </span>
+  );
+}
+
 function StateTable({ title, rows, status, state, assets }: {
   title: string;
   rows: AssetState[];
@@ -51,8 +62,8 @@ function StateTable({ title, rows, status, state, assets }: {
         <dl className="text-sm">
           {rows.map((r) => (
             <div key={r.assetId} className="flex justify-between gap-4 py-0.5">
-              <dt className="text-muted-foreground" title={r.assetId}>
-                {assetLabel(r.assetId, assets)}
+              <dt className="text-muted-foreground">
+                <AssetName assetId={r.assetId} assets={assets} />
               </dt>
               <dd className="tabular-nums">{amount(r.amount, r.assetId, state, assets)}</dd>
             </div>
@@ -138,11 +149,16 @@ export function WalletStateTable({ state, assets }: { state: WalletState; assets
                     <td className="py-1 pr-4 align-top whitespace-nowrap tabular-nums">
                       {i === 0 && <TransactionCell e={e} />}
                     </td>
-                    <td className="py-1 pr-4" title={c.assetId}>
-                      {assetLabel(c.assetId, assets)}
-                      {c.assetId === "SOL" && e.feeLamports !== "0" && (
-                        <span className="block text-xs text-muted-foreground">incl. {formatLamports(e.feeLamports)} fee</span>
-                      )}
+                    <td className="py-1 pr-4">
+                      <div className="flex items-start gap-2">
+                        <AssetIcon label={assetLabel(c.assetId, assets)} logo={assetLogo(c.assetId, assets)} className="mt-0.5" />
+                        <div title={c.assetId}>
+                          {assetLabel(c.assetId, assets)}
+                          {c.assetId === "SOL" && e.feeLamports !== "0" && (
+                            <span className="block text-xs text-muted-foreground">incl. {formatLamports(e.feeLamports)} fee</span>
+                          )}
+                        </div>
+                      </div>
                     </td>
                     <td className="py-1 pr-4 text-right tabular-nums">{c.before && amount(c.before, c.assetId, state, assets)}</td>
                     <td
@@ -184,8 +200,8 @@ function NetChange({ state, assets }: { state: WalletState; assets: Assets }) {
         <dl className="text-sm">
           {changes.map((c) => (
             <div key={c.assetId} className="flex justify-between gap-4 py-0.5">
-              <dt className="text-muted-foreground" title={c.assetId}>
-                {assetLabel(c.assetId, assets)}
+              <dt className="text-muted-foreground">
+                <AssetName assetId={c.assetId} assets={assets} />
               </dt>
               <dd className={`tabular-nums ${c.delta.startsWith("-") ? "text-destructive" : "text-emerald-500"}`}>
                 {amount(c.delta, c.assetId, state, assets, true)}

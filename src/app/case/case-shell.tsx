@@ -17,7 +17,7 @@ import { isBookmarked, removeBookmark, toggleBookmark } from "@/lib/case/bookmar
 import { laneOrder, moveLane, toggleLaneHidden, visibleLanes } from "@/lib/case/lanes";
 import { firstInteraction, mapWallet, newWalletProblem, unmapWallet, walletRange, walletRanges } from "@/lib/case/wallet-range";
 import { mappingSummary, sharedTransactions } from "@/lib/ingest/intersections";
-import { buildInteractionGraph } from "@/lib/graph/build";
+import { buildInteractionGraph, type GraphRanking } from "@/lib/graph/build";
 import type { FraudWatchCase } from "@/lib/case/model";
 import { formatRange } from "@/lib/case/range";
 import { getAddressLabels } from "@/lib/db/address-labels";
@@ -46,7 +46,7 @@ import { IngestionPanel } from "./ingestion-panel";
 import { PanelSection, SidePanel } from "./panel";
 import { type WalletLane, WalletTimeline, type WalletTimelineHandle } from "./timeline/wallet-timeline";
 import { SearchDialog } from "./search-dialog";
-import { formatAssetAmount } from "./asset-format";
+import { assetLabel, assetLogo, formatAssetAmount } from "./asset-format";
 import { WalletStateSummary, WalletStateTable } from "./wallet-state-view";
 
 const NO_SUMMARIES: EffectSummary[] = [];
@@ -115,6 +115,9 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   const [focusTime, setFocusTime] = useState<number | undefined>(undefined);
   const [selectedWallet, setSelectedWallet] = useState(c.primaryWallet);
   const [filter, setFilter] = useState(EMPTY_FILTER);
+  const [graphRanking, setGraphRanking] = useState<GraphRanking>("significant");
+  const [graphNodeLimit, setGraphNodeLimit] = useState<10 | 25 | 50 | 100 | null>(25);
+  const [graphRange, setGraphRange] = useState<{ start: number; end: number } | null>(null);
   /** Observed address the Map wallet dialog is open for. */
   const [mapTarget, setMapTarget] = useState<string | null>(null);
   /** The "Add wallet" dialog, for an address the map hasn't met. */
@@ -481,10 +484,21 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     if (view !== "graph") return null;
     const sides = shownLanes.flatMap((wallet) => {
       const data = perWallet.get(wallet);
-      return data ? [{ wallet, effects: data.state.effects, summaries: data.summaries }] : [];
+      if (!data) return [];
+      if (!graphRange) return [{ wallet, effects: data.state.effects, summaries: data.summaries }];
+      const keep = data.state.effects.map((effect) => {
+        const time = effect.timestamp ? Date.parse(effect.timestamp) : Date.parse(c.range.start);
+        return time >= graphRange.start && time <= graphRange.end;
+      });
+      return [{ wallet, effects: data.state.effects.filter((_, i) => keep[i]), summaries: data.summaries.filter((_, i) => keep[i]) }];
     });
-    return buildInteractionGraph(sides, { hiddenAssets: filter.hiddenAssets, showPrograms });
-  }, [view, shownLanes, perWallet, filter.hiddenAssets, showPrograms]);
+    return buildInteractionGraph(sides, {
+      hiddenAssets: filter.hiddenAssets,
+      showPrograms,
+      maxNodes: graphNodeLimit ?? Infinity,
+      ranking: graphRanking,
+    });
+  }, [view, shownLanes, perWallet, filter.hiddenAssets, showPrograms, graphRange, c.range.start, graphNodeLimit, graphRanking]);
   const edge = graph?.edges.find((e) => e.id === selectedEdge);
   const formatAmount = (amount: string, assetId: string) => {
     if (!walletStates || !walletState) return amount;
@@ -501,13 +515,20 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
             graph={graph}
             wallet={shownLanes.includes(selectedWallet) ? selectedWallet : (shownLanes[0] ?? selectedWallet)}
             names={names}
+            assetInfo={(assetId) => ({ id: assetId, label: assetLabel(assetId, walletStates.assets), logo: assetLogo(assetId, walletStates.assets) })}
             stateOf={(address) => addressState(address, c, registry, programs)}
             selectedNode={selectedAddress}
-            selectedEdge={selectedEdge}
+            selectedEdge={edge?.id ?? null}
             onSelectNode={setSelectedAddress}
             onSelectEdge={setSelectedEdge}
             showPrograms={showPrograms}
             onToggleProgramCalls={() => setShowPrograms((v) => !v)}
+            ranking={graphRanking}
+            onRankingChange={setGraphRanking}
+            nodeLimit={graphNodeLimit}
+            onNodeLimitChange={setGraphNodeLimit}
+            timeRange={graphRange}
+            onClearTimeRange={() => setGraphRange(null)}
           />
           {(rightOpen || addressPanel || edge) && (
             <SidePanel side="right" label="Inspector">
@@ -566,6 +587,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
             setSelectedAddress(null);
             setSelectedEdge(null);
           }}
+          onGraphRangeChange={setGraphRange}
         />
       ) : (
         <>

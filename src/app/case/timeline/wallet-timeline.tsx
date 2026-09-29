@@ -112,6 +112,7 @@ export function WalletTimeline({
   onBookmarkTime,
   initialTime,
   onSelectTransaction,
+  onGraphRangeChange,
   ref,
 }: {
   ref?: React.Ref<WalletTimelineHandle>;
@@ -145,6 +146,8 @@ export function WalletTimeline({
   initialTime?: number;
   /** A transaction was selected; the inspector should show it over any open address. */
   onSelectTransaction: () => void;
+  /** A minimap brush becomes the Graph view's investigation window. */
+  onGraphRangeChange?: (range: { start: number; end: number } | null) => void;
 }) {
   const timeline = useRef<TimelineHandle>(null);
   const [mode, setMode] = useState<SpacingMode>("time");
@@ -379,6 +382,7 @@ export function WalletTimeline({
                 onClick={() => {
                   setSelected(null);
                   setMode("time");
+                  onGraphRangeChange?.(null);
                   timeline.current?.fit();
                 }}
               >
@@ -446,7 +450,10 @@ export function WalletTimeline({
               const span = view ? view.end - view.start : bounds.end - bounds.start;
               timeline.current?.showTimeRange(time - span / 2, time + span / 2, false);
             }}
-            onSelectRange={(start, end) => timeline.current?.showTimeRange(start, end, false)}
+            onSelectRange={(start, end) => {
+              onGraphRangeChange?.({ start, end });
+              timeline.current?.showTimeRange(start, end, false);
+            }}
           />
         </div>
       </div>

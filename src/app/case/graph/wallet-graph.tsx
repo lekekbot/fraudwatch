@@ -2,16 +2,17 @@
 
 import { select } from "d3-selection";
 import { type ZoomBehavior, type ZoomTransform, zoom, zoomIdentity } from "d3-zoom";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { MaximizeIcon, MinusIcon, PlusIcon, RotateCcwIcon, WorkflowIcon } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ArrowDownLeftIcon, ArrowUpRightIcon, ChevronDownIcon, ChevronUpIcon, MaximizeIcon, MinusIcon, PlusIcon, RotateCcwIcon, WorkflowIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { AddressState } from "@/lib/case/address-state";
 import { graphWheelAction } from "@/lib/gestures";
-import type { GraphEdge, WalletGraph as Graph } from "@/lib/graph/build";
+import { edgeFlow, OMITTED_NODE_ID, type GraphEdge, type GraphRanking, type WalletGraph as Graph } from "@/lib/graph/build";
 import { layoutGraph, nodeRadius, type Point } from "@/lib/graph/layout";
 import type { Names } from "@/lib/labels/labels";
+import { AssetIcon } from "../asset-icon";
 
-type Palette = Record<"fg" | "muted" | "border" | "card" | "bg" | "program", string>;
+type Palette = Record<"fg" | "muted" | "border" | "card" | "bg" | "program" | "send" | "receive", string>;
 
 function readPalette(el: HTMLElement): Palette {
   const css = getComputedStyle(el);
@@ -23,10 +24,38 @@ function readPalette(el: HTMLElement): Palette {
     card: v("--card", "#1a1a1a"),
     bg: v("--background", "#111"),
     program: "oklch(0.7 0.14 250)",
+    send: v("--destructive", "#e5484d"),
+    receive: "oklch(0.72 0.16 155)",
   };
 }
 
 type Segment = { edge: GraphEdge; from: Point; to: Point };
+type HoverAsset = { id: string; label: string; logo?: string };
+type HoverFlow = { kind: "sent" | "received"; count: number };
+type HoverCard = {
+  x: number;
+  y: number;
+  flipX: boolean;
+  flipY: boolean;
+  title: string;
+  kicker?: string;
+  lines: string[];
+  assets?: HoverAsset[];
+  flows?: HoverFlow[];
+  hint: string;
+};
+
+const day = (time: number) => new Date(time).toISOString().slice(0, 10);
+
+function edgePerspective(edge: GraphEdge, wallet: string, nodes: ReadonlyMap<string, { kind: string }>) {
+  const flow = edgeFlow(edge);
+  const reference = edge.a === wallet || edge.b === wallet ? wallet : nodes.get(edge.a)?.kind === "wallet" ? edge.a : edge.b;
+  return {
+    counterparty: reference === edge.a ? edge.b : edge.a,
+    sent: flow.from === reference ? flow.forward : flow.reverse,
+    received: flow.from === reference ? flow.reverse : flow.forward,
+  };
+}
 
 /** Distance from `p` to the segment `a`–`b`. */
 function distanceToSegment(p: Point, a: Point, b: Point): number {
@@ -48,6 +77,7 @@ export function WalletGraph({
   graph,
   wallet,
   names,
+  assetInfo,
   stateOf,
   selectedNode,
   selectedEdge,
@@ -55,10 +85,17 @@ export function WalletGraph({
   onSelectEdge,
   showPrograms,
   onToggleProgramCalls,
+  ranking,
+  onRankingChange,
+  nodeLimit,
+  onNodeLimitChange,
+  timeRange,
+  onClearTimeRange,
 }: {
   graph: Graph;
   wallet: string;
   names: Names;
+  assetInfo: (assetId: string) => HoverAsset;
   stateOf: (address: string) => AddressState;
   selectedNode: string | null;
   selectedEdge: string | null;
@@ -66,6 +103,12 @@ export function WalletGraph({
   onSelectEdge: (id: string | null) => void;
   showPrograms: boolean;
   onToggleProgramCalls: () => void;
+  ranking: GraphRanking;
+  onRankingChange: (ranking: GraphRanking) => void;
+  nodeLimit: 10 | 25 | 50 | 100 | null;
+  onNodeLimitChange: (limit: 10 | 25 | 50 | 100 | null) => void;
+  timeRange: { start: number; end: number } | null;
+  onClearTimeRange: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const zoomRef = useRef<ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
@@ -75,6 +118,8 @@ export function WalletGraph({
   const hoverRef = useRef<{ node?: string; edge?: string }>({});
   const dragRef = useRef<{ id: string; x: number; y: number; moved: boolean } | null>(null);
   const suppressClick = useRef(false);
+  const [hoverCard, setHoverCard] = useState<HoverCard | null>(null);
+  const [legendOpen, setLegendOpen] = useState(true);
 
   const layout = useMemo(() => layoutGraph(graph.nodes, graph.edges, wallet), [graph, wallet]);
   // Positions start from the layout; dragging moves them without re-running it.
@@ -102,7 +147,7 @@ export function WalletGraph({
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
-    const { names, stateOf, selectedNode, selectedEdge, graph } = latest.current;
+    const { names, stateOf, selectedNode, selectedEdge, graph, wallet, nodesById } = latest.current;
     const { width, height } = sizeRef.current;
     const dpr = window.devicePixelRatio || 1;
     const t = transformRef.current;
@@ -118,12 +163,37 @@ export function WalletGraph({
 
     // One calm line per pair: no arrows, no labels. The selected one stands out, the rest recede.
     const line = 1.25 / Math.sqrt(t.k);
+    const aggregate = positions.current.get(OMITTED_NODE_ID);
+    const primary = positions.current.get(latest.current.wallet);
+    if (aggregate && primary) {
+      ctx.globalAlpha = 0.65;
+      ctx.strokeStyle = p.muted;
+      ctx.lineWidth = line;
+      ctx.setLineDash([3 / Math.sqrt(t.k), 4 / Math.sqrt(t.k)]);
+      ctx.beginPath();
+      ctx.moveTo(primary.x, primary.y);
+      ctx.lineTo(aggregate.x, aggregate.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+    }
     for (const { edge, from, to } of segments()) {
       const on = lit(edge);
       const selected = edge.id === selectedEdge;
+      const { sent, received } = edgePerspective(edge, wallet, nodesById);
       ctx.globalAlpha = on ? 1 : 0.15;
-      ctx.strokeStyle = edge.kind === "program" ? p.program : selected || (on && (focusEdge || focusNode)) ? p.fg : p.muted;
-      ctx.lineWidth = selected ? line * 2.4 : line;
+      ctx.strokeStyle =
+        edge.kind === "program"
+          ? p.program
+          : sent > 0 && received === 0
+            ? p.send
+            : received > 0 && sent === 0
+              ? p.receive
+              : selected || (on && (focusEdge || focusNode))
+                ? p.fg
+                : p.muted;
+      const weight = 1 + Math.min(4, Math.log2(edge.interactions.length + 1) * 0.65);
+      ctx.lineWidth = selected ? line * weight * 1.8 : line * weight;
       ctx.setLineDash(edge.kind === "program" ? [2 / t.k ** 0.5, 4 / t.k ** 0.5] : []);
       ctx.beginPath();
       ctx.moveTo(from.x, from.y);
@@ -138,19 +208,26 @@ export function WalletGraph({
       for (const e of graph.edges) if (lit(e)) litNodes.add(e.a).add(e.b);
       if (focusNode) litNodes.add(focusNode);
     }
+    const topLabels = new Set(
+      [...graph.nodes]
+        .filter((node) => node.kind === "counterparty")
+        .sort((a, b) => b.txCount - a.txCount || a.id.localeCompare(b.id))
+        .slice(0, 8)
+        .map((node) => node.id),
+    );
     for (const n of graph.nodes) {
       const pos = positions.current.get(n.id);
       if (!pos) continue;
       const r = nodeRadius(n);
-      const state = n.kind === "wallet" ? "MAPPED" : stateOf(n.id);
+      const infrastructure = n.kind === "program" || (n.kind === "counterparty" && stateOf(n.id) === "INFRASTRUCTURE");
       ctx.globalAlpha = litNodes.size > 0 && !litNodes.has(n.id) ? 0.3 : 1;
       ctx.beginPath();
-      if (n.kind === "program" || state === "INFRASTRUCTURE") ctx.roundRect(pos.x - r, pos.y - r, r * 2, r * 2, 4);
+      if (infrastructure || n.kind === "aggregate") ctx.roundRect(pos.x - r, pos.y - r, r * 2, r * 2, 4);
       else ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
       ctx.fillStyle = n.kind === "wallet" ? p.fg : p.card;
       ctx.fill();
       ctx.lineWidth = n.id === selectedNode ? 3 : 1.5;
-      ctx.strokeStyle = n.id === selectedNode ? p.fg : n.kind === "program" ? p.program : n.kind === "wallet" ? p.fg : p.muted;
+      ctx.strokeStyle = n.id === selectedNode ? p.fg : n.kind === "program" ? p.program : n.kind === "wallet" || n.kind === "aggregate" ? p.fg : p.muted;
       ctx.stroke();
       if (n.kind !== "wallet" && n.txCount > 0) {
         ctx.fillStyle = p.muted;
@@ -159,9 +236,11 @@ export function WalletGraph({
         ctx.textBaseline = "middle";
         ctx.fillText(String(n.txCount), pos.x, pos.y);
       }
-      const known = names.known(n.id);
-      const label = known ?? names.of(n.id, 4);
-      ctx.font = known || n.kind === "wallet" ? "500 11px ui-sans-serif, system-ui, sans-serif" : "11px ui-monospace, monospace";
+      const known = n.kind === "aggregate" ? undefined : names.known(n.id);
+      const showLabel = n.kind === "wallet" || n.kind === "aggregate" || n.id === selectedNode || n.id === hover.node || names.label(n.id) || topLabels.has(n.id);
+      if (!showLabel) continue;
+      const label = n.kind === "aggregate" ? `Other addresses (${n.txCount})` : (known ?? names.of(n.id, 4));
+      ctx.font = known || n.kind === "wallet" || n.kind === "aggregate" ? "500 11px ui-sans-serif, system-ui, sans-serif" : "11px ui-monospace, monospace";
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       // A halo in the background colour keeps labels readable over lines.
@@ -169,7 +248,7 @@ export function WalletGraph({
       ctx.lineWidth = 4;
       ctx.strokeStyle = p.bg;
       ctx.strokeText(label, pos.x, pos.y + r + 4);
-      ctx.fillStyle = known || n.kind === "wallet" ? p.fg : p.muted;
+      ctx.fillStyle = known || n.kind === "wallet" || n.kind === "aggregate" ? p.fg : p.muted;
       ctx.fillText(label, pos.x, pos.y + r + 4);
     }
     ctx.globalAlpha = 1;
@@ -310,8 +389,9 @@ export function WalletGraph({
         aria-label="Node graph of the wallet's counterparties, senders and programs. Click a node or edge to inspect it."
         className="absolute top-0 left-0 block touch-none"
         onPointerDown={(event) => {
+          setHoverCard(null);
           const hit = hitAt(event);
-          if (!hit.node) return;
+          if (!hit.node || hit.node === OMITTED_NODE_ID) return;
           dragRef.current = { id: hit.node, x: event.clientX, y: event.clientY, moved: false };
           event.currentTarget.setPointerCapture(event.pointerId);
         }}
@@ -325,16 +405,68 @@ export function WalletGraph({
             return;
           }
           const hit = hitAt(event);
+          const rect = event.currentTarget.getBoundingClientRect();
+          const place = (card: Omit<HoverCard, "x" | "y" | "flipX" | "flipY">) =>
+            setHoverCard({
+              ...card,
+              x: event.clientX - rect.left,
+              y: event.clientY - rect.top,
+              flipX: event.clientX - rect.left > rect.width - 300,
+              flipY: event.clientY - rect.top > rect.height - 180,
+            });
           if (hit.node !== hoverRef.current.node || hit.edge !== hoverRef.current.edge) {
             hoverRef.current = hit;
-            event.currentTarget.style.cursor = hit.node ? "grab" : hit.edge ? "pointer" : "";
-            // The count goes in a tooltip, never on the line itself.
-            const edge = hit.edge ? latest.current.graph.edges.find((e) => e.id === hit.edge) : undefined;
-            const n = edge?.interactions.length ?? 0;
-            event.currentTarget.title = edge
-              ? `${latest.current.names.of(edge.a)} ↔ ${latest.current.names.of(edge.b)} · ${n} ${edge.kind === "program" ? "program call" : "transaction"}${n === 1 ? "" : "s"} · click for details`
-              : "";
             schedule();
+          }
+          const edge = hit.edge ? latest.current.graph.edges.find((e) => e.id === hit.edge) : undefined;
+          const node = hit.node ? latest.current.graph.nodes.find((n) => n.id === hit.node) : undefined;
+          event.currentTarget.style.cursor = node?.kind === "aggregate" ? "pointer" : hit.node ? "grab" : hit.edge ? "pointer" : "";
+          if (node?.kind === "aggregate") {
+            place({ title: `Other addresses (${node.txCount.toLocaleString()})`, lines: ["Lower-ranked counterparties are collapsed here."], hint: "Click to reveal all addresses" });
+          } else if (node) {
+            const related = latest.current.graph.edges.filter((e) => e.a === node.id || e.b === node.id);
+            const interactions = [...new Map(related.flatMap((e) => e.interactions).map((it) => [it.signature, it])).values()];
+            const incoming = interactions.filter((it) => it.movements.some((m) => m.to === node.id)).length;
+            const outgoing = interactions.filter((it) => it.movements.some((m) => m.from === node.id)).length;
+            const times = interactions.flatMap((it) => (it.time === null ? [] : [it.time]));
+            const assets = [...new Set(interactions.flatMap((it) => it.movements.map((m) => m.assetId)))].map(assetInfo);
+            place({
+              title: latest.current.names.of(node.id),
+              kicker: latest.current.names.known(node.id) ? node.id : node.kind === "wallet" ? "Mapped wallet" : node.kind === "program" ? "Program" : "Counterparty",
+              lines: [
+                `${interactions.length.toLocaleString()} transactions`,
+                ...(times.length ? [`First ${day(Math.min(...times))} · Last ${day(Math.max(...times))}`] : []),
+              ],
+              flows: [
+                ...(outgoing ? [{ kind: "sent" as const, count: outgoing }] : []),
+                ...(incoming ? [{ kind: "received" as const, count: incoming }] : []),
+              ],
+              assets,
+              hint: node.kind === "wallet" ? "Drag to reposition" : "Click to inspect · drag to reposition",
+            });
+          } else if (edge) {
+            const times = edge.interactions.flatMap((it) => (it.time === null ? [] : [it.time]));
+            const { counterparty, sent, received } = edgePerspective(edge, latest.current.wallet, latest.current.nodesById);
+            const assets = [...new Set(edge.interactions.flatMap((it) => it.movements.map((m) => m.assetId)))].map(assetInfo);
+            place({
+              title: latest.current.names.of(counterparty),
+              kicker: edge.kind === "program" ? "Program connection" : "Wallet interaction",
+              lines: [
+                `${edge.interactions.length.toLocaleString()} ${edge.kind === "program" ? "program calls" : "transactions"}`,
+                ...(times.length ? [`First ${day(Math.min(...times))} · Last ${day(Math.max(...times))}`] : []),
+              ],
+              flows:
+                edge.kind === "interaction"
+                  ? [
+                      ...(sent ? [{ kind: "sent" as const, count: sent }] : []),
+                      ...(received ? [{ kind: "received" as const, count: received }] : []),
+                    ]
+                  : undefined,
+              assets,
+              hint: "Click for transaction details",
+            });
+          } else {
+            setHoverCard(null);
           }
         }}
         onPointerUp={() => {
@@ -344,6 +476,7 @@ export function WalletGraph({
         onPointerLeave={() => {
           if (hoverRef.current.node || hoverRef.current.edge) {
             hoverRef.current = {};
+            setHoverCard(null);
             schedule();
           }
         }}
@@ -354,6 +487,7 @@ export function WalletGraph({
           }
           const hit = hitAt(event);
           if (hit.node) {
+            if (hit.node === OMITTED_NODE_ID) return onNodeLimitChange(null);
             onSelectEdge(null);
             onSelectNode(hit.node === wallet ? null : hit.node);
           } else if (hit.edge) {
@@ -366,8 +500,84 @@ export function WalletGraph({
         }}
       />
 
+      {hoverCard && (
+        <div
+          role="tooltip"
+          className="pointer-events-none absolute z-20 w-72 rounded-lg border bg-popover/95 p-3 text-xs shadow-xl backdrop-blur"
+          style={{
+            left: hoverCard.x,
+            top: hoverCard.y,
+            transform: `translate(${hoverCard.flipX ? "calc(-100% - 12px)" : "12px"}, ${hoverCard.flipY ? "calc(-100% - 12px)" : "12px"})`,
+          }}
+        >
+          <p className="truncate font-medium text-foreground">{hoverCard.title}</p>
+          {hoverCard.kicker && <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">{hoverCard.kicker}</p>}
+          <div className="mt-2 space-y-1 text-muted-foreground">
+            {hoverCard.lines.map((line) => (
+              <p key={line}>{line}</p>
+            ))}
+          </div>
+          {hoverCard.flows && hoverCard.flows.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {hoverCard.flows.map((flow) =>
+                flow.kind === "sent" ? (
+                  <span key={flow.kind} className="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-2 py-1 font-medium text-destructive">
+                    <ArrowUpRightIcon className="size-3.5" aria-hidden /> Sent {flow.count.toLocaleString()}
+                  </span>
+                ) : (
+                  <span key={flow.kind} className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-1 font-medium text-emerald-500">
+                    <ArrowDownLeftIcon className="size-3.5" aria-hidden /> Received {flow.count.toLocaleString()}
+                  </span>
+                ),
+              )}
+            </div>
+          )}
+          {hoverCard.assets && hoverCard.assets.length > 0 && (
+            <div className="mt-2 flex items-center gap-1.5">
+              {hoverCard.assets.slice(0, 7).map((asset) => (
+                <AssetIcon key={asset.id} label={asset.label} logo={asset.logo} className="size-8 text-[9px]" />
+              ))}
+              {hoverCard.assets.length > 7 && <span className="text-[10px] text-muted-foreground">+{hoverCard.assets.length - 7}</span>}
+            </div>
+          )}
+          <p className="mt-2 border-t pt-2 text-[10px] text-muted-foreground">{hoverCard.hint}</p>
+        </div>
+      )}
+
       <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-3">
-        <div className="pointer-events-auto flex items-center gap-1 rounded-xl border bg-popover/95 p-1 shadow-lg backdrop-blur">
+        <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-1 rounded-xl border bg-popover/95 p-1 shadow-lg backdrop-blur">
+          <label className="sr-only" htmlFor="graph-ranking">
+            Rank addresses
+          </label>
+          <select
+            id="graph-ranking"
+            value={ranking}
+            onChange={(event) => onRankingChange(event.target.value as GraphRanking)}
+            className="h-7 rounded-md bg-transparent px-2 text-xs outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <option value="significant">Significant</option>
+            <option value="interactions">Most interactions</option>
+            <option value="incoming">Most incoming</option>
+            <option value="outgoing">Most outgoing</option>
+            <option value="recent">Most recent</option>
+          </select>
+          <label className="sr-only" htmlFor="graph-node-limit">
+            Address limit
+          </label>
+          <select
+            id="graph-node-limit"
+            value={nodeLimit ?? "all"}
+            onChange={(event) => onNodeLimitChange(event.target.value === "all" ? null : (Number(event.target.value) as 10 | 25 | 50 | 100))}
+            className="h-7 rounded-md bg-transparent px-2 text-xs outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {[10, 25, 50, 100].map((limit) => (
+              <option key={limit} value={limit}>
+                Top {limit}
+              </option>
+            ))}
+            <option value="all">All</option>
+          </select>
+          <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
           <Button
             variant="ghost"
             size="icon-sm"
@@ -413,22 +623,52 @@ export function WalletGraph({
             <WorkflowIcon />
             Program calls
           </Button>
+          {timeRange && (
+            <>
+              <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
+              <span className="pl-1 text-xs tabular-nums">
+                {new Date(timeRange.start).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })} –{" "}
+                {new Date(timeRange.end).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })}
+              </span>
+              <Button variant="ghost" size="icon-sm" aria-label="Clear timeline range" title="Show the full case range" onClick={onClearTimeRange}>
+                <XIcon />
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
-      <div className="pointer-events-none absolute bottom-3 left-3 flex flex-col gap-1 rounded-lg border bg-popover/90 px-2.5 py-2 text-[11px] text-muted-foreground backdrop-blur">
-        <span className="font-medium text-foreground">
-          {graph.counts.addresses.toLocaleString()} addresses · {graph.counts.connections.toLocaleString()} connections ·{" "}
-          {graph.counts.transactions.toLocaleString()} transactions
-        </span>
-        <Legend color="bg-muted-foreground">Interacted directly (one line per pair, any direction)</Legend>
-        {showPrograms ? (
-          <Legend color="border-t-2 border-dotted border-[oklch(0.7_0.14_250)] bg-transparent">Program called ({graph.counts.programConnections})</Legend>
-        ) : (
-          graph.counts.programConnections > 0 && <span>{graph.counts.programConnections.toLocaleString()} program connections hidden</span>
+      <div className="pointer-events-auto absolute bottom-3 left-3 flex flex-col gap-1 rounded-lg border bg-popover/90 px-2.5 py-2 text-[11px] text-muted-foreground backdrop-blur">
+        <div className="flex items-center gap-2">
+          <span className="font-medium text-foreground">
+            {graph.counts.addresses.toLocaleString()} addresses · {graph.counts.connections.toLocaleString()} connections ·{" "}
+            {graph.counts.transactions.toLocaleString()} transactions
+          </span>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="ml-auto"
+            aria-label={legendOpen ? "Minimize graph legend" : "Expand graph legend"}
+            aria-expanded={legendOpen}
+            onClick={() => setLegendOpen((open) => !open)}
+          >
+            {legendOpen ? <ChevronDownIcon /> : <ChevronUpIcon />}
+          </Button>
+        </div>
+        {legendOpen && (
+          <>
+            <Legend color="bg-destructive">Sent only</Legend>
+            <Legend color="bg-emerald-500">Received only</Legend>
+            <Legend color="bg-muted-foreground">Both directions</Legend>
+            {showPrograms ? (
+              <Legend color="border-t-2 border-dotted border-[oklch(0.7_0.14_250)] bg-transparent">Program called ({graph.counts.programConnections})</Legend>
+            ) : (
+              graph.counts.programConnections > 0 && <span>{graph.counts.programConnections.toLocaleString()} program connections hidden</span>
+            )}
+            <span className="pt-0.5">Click a line for its transactions · number in node: transactions · filled: mapped wallet</span>
+            {graph.omittedNodes > 0 && <span>Click Other addresses to reveal {graph.omittedNodes.toLocaleString()} more</span>}
+          </>
         )}
-        <span className="pt-0.5">Click a line for its transactions · number in node: transactions · filled: mapped wallet</span>
-        {graph.omittedNodes > 0 && <span>+{graph.omittedNodes.toLocaleString()} quieter addresses not drawn</span>}
       </div>
     </div>
   );
@@ -442,4 +682,3 @@ function Legend({ color, children }: { color: string; children: React.ReactNode 
     </span>
   );
 }
-

@@ -6,12 +6,45 @@ export type Point = { x: number; y: number };
 /** Node radius in px: mapped wallets are largest; others grow with the square root of their transaction count. */
 export const nodeRadius = (n: GraphNode) => (n.kind === "wallet" ? 20 : Math.min(18, 7 + Math.sqrt(n.txCount) * 2));
 
+function radialLayout(nodes: GraphNode[], edges: GraphEdge[], pinned: string): Map<string, Point> | null {
+  const peers = nodes.filter((n) => n.id !== pinned && n.kind !== "aggregate");
+  if (!nodes.some((n) => n.id === pinned) || edges.some((e) => e.a !== pinned && e.b !== pinned)) return null;
+  if (peers.some((n) => !edges.some((e) => (e.a === pinned && e.b === n.id) || (e.b === pinned && e.a === n.id)))) return null;
+
+  const direction = (id: string) => {
+    let incoming = false;
+    let outgoing = false;
+    for (const edge of edges) {
+      if (edge.a !== id && edge.b !== id) continue;
+      for (const movement of edge.interactions.flatMap((it) => it.movements)) {
+        incoming ||= movement.to === pinned;
+        outgoing ||= movement.from === pinned;
+      }
+    }
+    return incoming && outgoing ? 1 : incoming ? 0 : outgoing ? 2 : 3;
+  };
+  const ordered = nodes
+    .filter((n) => n.id !== pinned)
+    .sort((a, b) => (a.kind === "aggregate" ? 4 : direction(a.id)) - (b.kind === "aggregate" ? 4 : direction(b.id)) || b.txCount - a.txCount || a.id.localeCompare(b.id));
+  const radius = Math.max(180, (ordered.length * 60) / (Math.PI * 2));
+  const positions = new Map<string, Point>([[pinned, { x: 0, y: 0 }]]);
+  ordered.forEach((node, i) => {
+    const angle = -Math.PI / 2 + (i * Math.PI * 2) / Math.max(1, ordered.length);
+    positions.set(node.id, { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius });
+  });
+  return positions;
+}
+
 /**
  * Force layout with `pinned` (the selected wallet) at the origin. Runs to
  * completion up front, so the same graph always lands in the same place
  * (d3-force seeds positions deterministically).
  */
 export function layoutGraph(nodes: GraphNode[], edges: GraphEdge[], pinned?: string, ticks = 300): Map<string, Point> {
+  if (pinned) {
+    const radial = radialLayout(nodes, edges, pinned);
+    if (radial) return radial;
+  }
   type SimNode = SimulationNodeDatum & { id: string; r: number };
   const simNodes: SimNode[] = nodes.map((n) => ({ id: n.id, r: nodeRadius(n), ...(n.id === pinned ? { fx: 0, fy: 0 } : {}) }));
   // Connections are already one per pair; busier ones pull closer.

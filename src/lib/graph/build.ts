@@ -11,7 +11,7 @@ import type { EffectKind, EffectSummary } from "@/lib/state/summarize";
  * of connection (wallet ↔ program) and never join two wallets.
  */
 
-export type GraphNodeKind = "wallet" | "counterparty" | "program";
+export type GraphNodeKind = "wallet" | "counterparty" | "program" | "aggregate";
 
 /** `wallet`: a mapped wallet. `txCount`: transactions on the node's connections. */
 export type GraphNode = { id: string; kind: GraphNodeKind; txCount: number };
@@ -41,6 +41,15 @@ export type GraphEdge = {
   interactions: Interaction[];
 };
 
+/** Actual value-flow direction across an aggregate edge, independent of its alphabetic endpoint order. */
+export function edgeFlow(edge: GraphEdge) {
+  const aToB = edge.interactions.filter((it) => it.movements.some((m) => m.from === edge.a && m.to === edge.b)).length;
+  const bToA = edge.interactions.filter((it) => it.movements.some((m) => m.from === edge.b && m.to === edge.a)).length;
+  return bToA > 0 && aToB === 0
+    ? { from: edge.b, to: edge.a, forward: bToA, reverse: 0, bidirectional: false }
+    : { from: edge.a, to: edge.b, forward: aToB, reverse: bToA, bidirectional: aToB > 0 && bToA > 0 };
+}
+
 export type WalletGraph = {
   nodes: GraphNode[];
   edges: GraphEdge[];
@@ -58,7 +67,10 @@ export type WalletGraph = {
 
 export type WalletSide = { wallet: string; effects: WalletTransactionEffect[]; summaries: EffectSummary[] };
 
-export const MAX_GRAPH_NODES = 150;
+export type GraphRanking = "significant" | "interactions" | "incoming" | "outgoing" | "recent";
+
+export const MAX_GRAPH_NODES = 25;
+export const OMITTED_NODE_ID = "__other_addresses__";
 
 export const pairId = (x: string, y: string) => (x < y ? `${x}|${y}` : `${y}|${x}`);
 
@@ -71,7 +83,7 @@ const abs = (v: bigint) => (v < BigInt(0) ? -v : v);
  */
 export function buildInteractionGraph(
   sides: WalletSide[],
-  options: { hiddenAssets?: ReadonlySet<string>; showPrograms?: boolean; maxNodes?: number } = {},
+  options: { hiddenAssets?: ReadonlySet<string>; showPrograms?: boolean; maxNodes?: number; ranking?: GraphRanking } = {},
 ): WalletGraph {
   const hidden = options.hiddenAssets ?? new Set<string>();
   const maxNodes = options.maxNodes ?? MAX_GRAPH_NODES;
@@ -142,32 +154,72 @@ export function buildInteractionGraph(
   const programEdges = all.filter((e) => e.kind === "program");
   const drawn = all.filter((e) => e.kind === "interaction" || options.showPrograms);
 
-  // Nodes: every mapped wallet, then the busiest others up to the cap.
+  // Nodes: every mapped wallet, then a bounded investigative projection.
   const txs = new Map<string, Set<string>>();
+  const incoming = new Map<string, Set<string>>();
+  const outgoing = new Map<string, Set<string>>();
+  const lastSeen = new Map<string, number>();
   const programs = new Set(programEdges.flatMap((e) => (mapped.has(e.a) ? [e.b] : [e.a])));
   for (const e of drawn) {
     for (const id of [e.a, e.b]) {
       if (!txs.has(id)) txs.set(id, new Set());
-      for (const it of e.interactions) txs.get(id)!.add(it.signature);
+      for (const it of e.interactions) {
+        txs.get(id)!.add(it.signature);
+        if (it.time !== null) lastSeen.set(id, Math.max(lastSeen.get(id) ?? -Infinity, it.time));
+        if (it.movements.some((m) => m.to === id)) {
+          if (!incoming.has(id)) incoming.set(id, new Set());
+          incoming.get(id)!.add(it.signature);
+        }
+        if (it.movements.some((m) => m.from === id)) {
+          if (!outgoing.has(id)) outgoing.set(id, new Set());
+          outgoing.get(id)!.add(it.signature);
+        }
+      }
     }
   }
-  const others = [...txs.keys()]
-    .filter((id) => !mapped.has(id))
-    .sort((x, y) => txs.get(y)!.size - txs.get(x)!.size || x.localeCompare(y));
-  const kept = new Set([...mapped, ...others.slice(0, Math.max(0, maxNodes - mapped.size))]);
+  const others = [...txs.keys()].filter((id) => !mapped.has(id));
+  const by = (score: (id: string) => number) => [...others].sort((x, y) => score(y) - score(x) || x.localeCompare(y));
+  const byInteractions = by((id) => txs.get(id)!.size);
+  const rankings: Record<GraphRanking, string[]> = {
+    interactions: byInteractions,
+    // From the mapped wallet's perspective: a counterparty sending is incoming.
+    incoming: by((id) => outgoing.get(id)?.size ?? 0),
+    outgoing: by((id) => incoming.get(id)?.size ?? 0),
+    recent: by((id) => lastSeen.get(id) ?? -Infinity),
+    significant: [],
+  };
+  const capacity = Math.max(0, maxNodes - mapped.size);
+  if ((options.ranking ?? "significant") === "significant") {
+    const groups = [rankings.interactions.slice(0, 10), rankings.incoming.slice(0, 5), rankings.outgoing.slice(0, 5), rankings.recent.slice(0, 5)];
+    const picked = new Set<string>();
+    for (let i = 0; i < 10 && picked.size < capacity; i++) {
+      for (const group of groups) {
+        if (group[i]) picked.add(group[i]);
+        if (picked.size === capacity) break;
+      }
+    }
+    for (const id of byInteractions) {
+      if (picked.size === capacity) break;
+      picked.add(id);
+    }
+    rankings.significant = [...picked];
+  }
+  const kept = new Set([...mapped, ...rankings[options.ranking ?? "significant"].slice(0, capacity)]);
+  const omittedNodes = new Set([...txs.keys(), ...mapped]).size - kept.size;
   const nodes: GraphNode[] = [...kept].map((id) => ({
     id,
     kind: mapped.has(id) ? "wallet" : programs.has(id) ? "program" : "counterparty",
     txCount: txs.get(id)?.size ?? 0,
   }));
+  if (omittedNodes > 0) nodes.push({ id: OMITTED_NODE_ID, kind: "aggregate", txCount: omittedNodes });
   const shown = drawn.filter((e) => kept.has(e.a) && kept.has(e.b));
   const interactions = shown.filter((e) => e.kind === "interaction");
   return {
     nodes,
     edges: shown,
-    omittedNodes: txs.size + [...mapped].filter((m) => !txs.has(m)).length - kept.size,
+    omittedNodes,
     counts: {
-      addresses: nodes.filter((n) => n.kind !== "program").length,
+      addresses: nodes.filter((n) => n.kind !== "program" && n.kind !== "aggregate").length,
       connections: interactions.length,
       transactions: new Set(interactions.flatMap((e) => e.interactions.map((it) => it.signature))).size,
       programConnections: programEdges.length,

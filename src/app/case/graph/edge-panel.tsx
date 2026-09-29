@@ -3,7 +3,7 @@
 import { ArrowRightIcon, ChartNoAxesGanttIcon, ExternalLinkIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { GraphEdge } from "@/lib/graph/build";
+import { edgeFlow, type GraphEdge } from "@/lib/graph/build";
 import type { Names } from "@/lib/labels/labels";
 import { type Assets, assetLabel, formatUtc } from "../asset-format";
 import { PanelSection } from "../panel";
@@ -42,6 +42,7 @@ export function EdgePanel({
   );
   const times = edge.interactions.map((it) => it.time).filter((t): t is number => t !== null);
   const program = edge.kind === "program";
+  const flow = edgeFlow(edge);
 
   return (
     <>
@@ -54,11 +55,11 @@ export function EdgePanel({
         }
       >
         <div className="flex min-w-0 items-center gap-1.5 text-sm">
-          {name(edge.a)}
-          <span className="shrink-0 text-muted-foreground" aria-label="and">
-            ↔
+          {name(flow.from)}
+          <span className="shrink-0 text-muted-foreground" aria-label={program || flow.forward === 0 || flow.bidirectional ? "interacted with" : "sent to"}>
+            {program || flow.forward === 0 || flow.bidirectional ? "↔" : "→"}
           </span>
-          {name(edge.b)}
+          {name(flow.to)}
         </div>
         <p className="text-xs text-muted-foreground">
           {edge.interactions.length.toLocaleString()} {program ? "program call" : "transaction"}
