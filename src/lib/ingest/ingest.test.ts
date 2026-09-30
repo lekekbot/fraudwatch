@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { generateHighActivity } from "../../../fixtures/solana/synthetic/generate";
 import { createGenericAdapter } from "@/lib/rpc/generic-adapter";
 import { type Fixture, loadFixture, type ReplayLog, replayFetch } from "@/test/fixture-rpc";
-import { type IngestOptions, ingestWallets } from "./ingest";
+import { type IngestionProgress, type IngestOptions, ingestWallets } from "./ingest";
 
 function run(fixture: Fixture, overrides: Partial<IngestOptions> & { fetchImpl?: typeof fetch; wallets?: string[] } = {}) {
   const { fetchImpl = replayFetch(fixture), ...rest } = overrides;
@@ -117,15 +117,15 @@ describe("ingestWallets on a high-activity wallet", () => {
 
   it("reports progress through each phase", async () => {
     const phases = new Set<string>();
-    let last = { done: 0, total: 0 };
+    let last: IngestionProgress | undefined;
     await run(fixture, {
       onProgress: (p) => {
         phases.add(p.phase);
-        if (p.phase === "transactions") last = p;
+        last = p;
       },
     });
     expect(phases).toEqual(new Set(["signatures", "transactions", "token_accounts"]));
-    expect(last.done).toBe(last.total);
+    expect(last!.transactions).toEqual({ loaded: last!.signaturesFound, loading: 0, queued: 0, failed: 0 });
   });
 });
 
@@ -208,5 +208,134 @@ describe("ingestWallets failure handling", () => {
     expect(result.wallets[0].coverage.complete).toBe(false);
     expect(result.wallets[1].error).toBeUndefined();
     expect(result.wallets[1].signatures.length).toBeGreaterThan(0);
+  });
+});
+
+describe("ingestWallets transaction pipeline", () => {
+  /** Replays a fixture with an O(1) lookup per request, optional per-request latency, and overrides. */
+  function instrumented(
+    fixture: Fixture,
+    { delay = () => 0, override }: { delay?: () => number; override?: (method: string, params: unknown[]) => Response | undefined } = {},
+  ) {
+    const base = replayFetch(fixture);
+    const transactions = new Map<string, unknown>();
+    for (const call of fixture.rpc) {
+      if (call.request.method === "getTransaction") transactions.set(call.request.params[0] as string, call.response);
+    }
+    const log: Array<{ method: string; address: unknown }> = [];
+    let inFlight = 0;
+    let peak = 0;
+    const fetchImpl = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      const { method, params } = JSON.parse(String(init?.body)) as { method: string; params: unknown[] };
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      log.push({ method, address: params[0] });
+      try {
+        const ms = delay();
+        if (ms > 0) await new Promise((resolve) => setTimeout(resolve, ms));
+        init?.signal?.throwIfAborted();
+        const replaced = override?.(method, params);
+        if (replaced) return replaced;
+        if (method === "getTransaction" && transactions.has(params[0] as string)) {
+          return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, ...(transactions.get(params[0] as string) as object) }));
+        }
+        return await base(url, init);
+      } finally {
+        inFlight--;
+      }
+    }) as typeof fetch;
+    return { fetchImpl, log, peak: () => peak, inFlight: () => inFlight };
+  }
+
+  const medium = generateHighActivity({ seed: "pipeline", transactionCount: 2500 }) as unknown as Fixture;
+  const signaturesOf = (f: Fixture) => f.manifest.expected.signaturesByWallet[f.manifest.wallets[0].address];
+
+  it("starts fetching transactions before signature discovery finishes", async () => {
+    const replay = instrumented(medium);
+    const result = await run(medium, { fetchImpl: replay.fetchImpl });
+    const wallet = medium.manifest.wallets[0].address;
+    const walletPages = replay.log.flatMap((c, i) => (c.method === "getSignaturesForAddress" && c.address === wallet ? [i] : []));
+    expect(walletPages.length).toBeGreaterThan(2);
+    expect(replay.log.findIndex((c) => c.method === "getTransaction")).toBeLessThan(walletPages.at(-1)!);
+    expectMatchesManifest(medium, result);
+  });
+
+  it("never has more transaction requests in flight than the configured concurrency", async () => {
+    const replay = instrumented(medium, { delay: () => 1 });
+    const result = await run(medium, { fetchImpl: replay.fetchImpl, limits: { concurrency: 5, accountScanConcurrency: 1 } });
+    // Five transaction fetches plus the one signature page being paged alongside them.
+    expect(replay.peak()).toBeLessThanOrEqual(6);
+    expect(replay.peak()).toBeGreaterThanOrEqual(5);
+    expectMatchesManifest(medium, result);
+  });
+
+  it("produces the same result whatever order fetches finish in", async () => {
+    const sequential = await run(medium, { fetchImpl: instrumented(medium).fetchImpl, limits: { concurrency: 1 } });
+    const shuffled = await run(medium, { fetchImpl: instrumented(medium, { delay: () => Math.random() * 3 }).fetchImpl, limits: { concurrency: 16 } });
+    expect(shuffled.wallets.map((w) => w.signatures)).toEqual(sequential.wallets.map((w) => w.signatures));
+    expect(new Set(shuffled.transactions.keys())).toEqual(new Set(sequential.transactions.keys()));
+    for (const [signature, tx] of sequential.transactions) expect(shuffled.transactions.get(signature)).toEqual(tx);
+  });
+
+  it("retries rate-limited transaction requests and still loads everything", async () => {
+    const limited = new Set<string>();
+    const replay = instrumented(medium, {
+      override: (method, params) => {
+        const signature = params[0] as string;
+        // Every tenth transaction is rate limited on its first attempt.
+        if (method === "getTransaction" && signature.charCodeAt(3) % 10 === 0 && !limited.has(signature)) {
+          limited.add(signature);
+          return new Response("", { status: 429 });
+        }
+      },
+    });
+    const result = await run(medium, {
+      adapter: createGenericAdapter("https://rpc.example.com/?api-key=k", { fetchImpl: replay.fetchImpl, maxRetries: 2, sleep: async () => {} }),
+      limits: { concurrency: 8 },
+    });
+    expect(limited.size).toBeGreaterThan(0);
+    expectMatchesManifest(medium, result);
+  });
+
+  it("records a transaction that keeps failing and loads the rest", async () => {
+    const [bad] = signaturesOf(medium);
+    const replay = instrumented(medium, {
+      override: (method, params) => (method === "getTransaction" && params[0] === bad ? new Response("", { status: 500 }) : undefined),
+    });
+    const w = (await run(medium, { fetchImpl: replay.fetchImpl })).wallets[0];
+    expect(w.error).toBeUndefined();
+    expect(w.coverage.complete).toBe(false);
+    expect(w.coverage.transactionCount).toBe(w.signatures.length - 1);
+    expect(w.coverage.warnings.join(" ")).toMatch(/1 transaction request\(s\) failed \(RPC responded with HTTP 500/);
+  });
+
+  it("has nothing left running once a cancelled load returns", async () => {
+    const controller = new AbortController();
+    const replay = instrumented(medium, { delay: () => 2 });
+    let transactions = 0;
+    const fetchImpl = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (JSON.parse(String(init?.body)).method === "getTransaction" && ++transactions === 50) controller.abort();
+      return replay.fetchImpl(url, init);
+    }) as typeof fetch;
+    const result = await run(medium, { fetchImpl, signal: controller.signal, limits: { concurrency: 8 } });
+    expect(result.cancelled).toBe(true);
+    const size = result.transactions.size;
+    const calls = replay.log.length;
+    expect(replay.inFlight()).toBe(0);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(replay.log.length).toBe(calls);
+    expect(result.transactions.size).toBe(size);
+  });
+
+  it("loads a large wallet with bounded requests", { timeout: 30_000 }, async () => {
+    const large = generateHighActivity({ seed: "pipeline-large", transactionCount: 10_000 }) as unknown as Fixture;
+    const replay = instrumented(large);
+    const result = await run(large, {
+      fetchImpl: replay.fetchImpl,
+      limits: { maxSignaturesPerAddress: 20_000, concurrency: 20, accountScanConcurrency: 1 },
+    });
+    expect(replay.peak()).toBeLessThanOrEqual(21);
+    expect(result.wallets[0].signatures).toHaveLength(signaturesOf(large).length);
+    expectMatchesManifest(large, result);
   });
 });

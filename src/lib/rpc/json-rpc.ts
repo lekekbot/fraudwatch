@@ -15,16 +15,21 @@ export class RpcRequestError extends Error {
 
 export type JsonRpcOptions = {
   fetchImpl?: typeof fetch;
-  /** Retries for rate limits (429), gateway errors (502–504), and network failures. */
+  /** Retries for rate limits (429), server errors (500, 502–504), timeouts, and network failures. */
   maxRetries?: number;
+  /** Per-attempt limit; a request still pending after this is abandoned and retried. */
+  timeoutMs?: number;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+  /** Called before each retry; for instrumentation. */
+  onRetry?: (err: RpcRequestError) => void;
 };
 
 type JsonRpcResponse<T> = { jsonrpc: "2.0"; id: number; result?: T; error?: { code: number; message: string } };
 
-const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 const BASE_BACKOFF_MS = 500;
 const MAX_BACKOFF_MS = 8_000;
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 export function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -56,13 +61,15 @@ export async function rpcCall<T>(
   signal: AbortSignal,
   options: JsonRpcOptions = {},
 ): Promise<T> {
-  const { fetchImpl = fetch, maxRetries = 0, sleep = abortableSleep } = options;
+  const { fetchImpl = fetch, maxRetries = 0, timeoutMs = DEFAULT_TIMEOUT_MS, sleep = abortableSleep, onRetry } = options;
   for (let attempt = 0; ; attempt++) {
     try {
-      return await rpcCallOnce<T>(url, method, params, signal, fetchImpl);
+      return await rpcCallOnce<T>(url, method, params, signal, fetchImpl, timeoutMs);
     } catch (err) {
       if (signal.aborted || !(err instanceof RpcRequestError) || !isRetryable(err) || attempt >= maxRetries) throw err;
-      const backoff = Math.min(MAX_BACKOFF_MS, err.retryAfterMs ?? BASE_BACKOFF_MS * 2 ** attempt);
+      onRetry?.(err);
+      // Jittered so parallel requests rate-limited together don't retry in lockstep.
+      const backoff = Math.min(MAX_BACKOFF_MS, err.retryAfterMs ?? BASE_BACKOFF_MS * 2 ** attempt * (0.5 + Math.random() / 2));
       await sleep(backoff, signal);
     }
   }
@@ -74,20 +81,23 @@ async function rpcCallOnce<T>(
   params: unknown[] | Record<string, unknown>,
   signal: AbortSignal,
   fetchImpl: typeof fetch,
+  timeoutMs: number,
 ): Promise<T> {
+  const timeout = AbortSignal.timeout(timeoutMs);
   let res: Response;
   try {
     res = await fetchImpl(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-      signal,
+      signal: AbortSignal.any([signal, timeout]),
       // The RPC URL itself is the credential; never leak it via Referer.
       referrerPolicy: "no-referrer",
       credentials: "omit",
     });
   } catch (err) {
     if (signal.aborted) throw err;
+    if (timeout.aborted) throw new RpcRequestError("network_or_cors", `RPC request ${method} timed out after ${timeoutMs / 1000}s.`);
     // Browsers report CORS rejections and network failures identically.
     throw new RpcRequestError(
       "network_or_cors",
@@ -114,7 +124,9 @@ async function rpcCallOnce<T>(
   let body: JsonRpcResponse<T>;
   try {
     body = (await res.json()) as JsonRpcResponse<T>;
-  } catch {
+  } catch (err) {
+    if (signal.aborted) throw err;
+    if (timeout.aborted) throw new RpcRequestError("network_or_cors", `RPC request ${method} timed out after ${timeoutMs / 1000}s.`);
     throw new RpcRequestError("malformed", "RPC response was not valid JSON.");
   }
   if (body.error) {

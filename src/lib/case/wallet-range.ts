@@ -1,5 +1,6 @@
 import { isValidSolanaAddress } from "@/lib/solana/address";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
+import { compareTransactions } from "@/lib/state/reconstruct";
 import type { FraudWatchCase, MappedWalletConfig } from "./model";
 import type { CaseRange } from "./range";
 
@@ -27,14 +28,15 @@ export function firstInteraction(
   address: string,
   transactions: Iterable<CanonicalTransaction>,
 ): { timestamp: string; signature: string } | null {
-  let first: { timestamp: string; signature: string } | null = null;
+  let first: CanonicalTransaction | null = null;
   for (const tx of transactions) {
-    if (!tx.timestamp || (first && tx.timestamp >= first.timestamp)) continue;
+    // Ties go to chain order, so the answer doesn't depend on the order transactions were loaded in.
+    if (!tx.timestamp || (first && (tx.timestamp > first.timestamp! || (tx.timestamp === first.timestamp && compareTransactions(tx, first) >= 0)))) continue;
     const involved =
       tx.accounts.some((a) => a.address === address) || tx.tokenChanges.some((t) => t.owner === address);
-    if (involved) first = { timestamp: tx.timestamp, signature: tx.signature };
+    if (involved) first = tx;
   }
-  return first;
+  return first && { timestamp: first.timestamp!, signature: first.signature };
 }
 
 export type MapWalletInput = {

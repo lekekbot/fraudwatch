@@ -3,7 +3,8 @@ import type { CaseRange } from "@/lib/case/range";
 import { type RawParsedTransaction, SIGNATURE_PAGE_LIMIT, type SolanaRpcAdapter } from "@/lib/rpc/generic-adapter";
 import { type CanonicalTransaction, canonicalize } from "@/lib/solana/canonical";
 import { TOKEN_PROGRAMS } from "@/lib/solana/programs";
-import { mapPool } from "./pool";
+import { compareTransactions } from "@/lib/state/reconstruct";
+import { createWorkQueue, mapPool } from "./pool";
 
 export type IngestionCoverage = {
   complete: boolean;
@@ -22,19 +23,34 @@ export type IngestionLimits = {
    * range end. Busy addresses can need hundreds of pages to reach the range.
    */
   maxPagesPerAddress: number;
-  /** Parallel getTransaction requests. */
+  /**
+   * Most getTransaction requests in flight at once. Retries keep their slot, so
+   * rate limiting slows the pool down rather than adding requests.
+   */
   concurrency: number;
+  /** Token accounts whose signature history is paged at once, alongside transaction fetches. */
+  accountScanConcurrency: number;
 };
 
 export const DEFAULT_LIMITS: IngestionLimits = {
   maxSignaturesPerAddress: 5_000,
   maxPagesPerAddress: 25,
-  concurrency: 4,
+  concurrency: 8,
+  accountScanConcurrency: 2,
 };
+
+/** Fetched transactions are saved locally in batches of this size as they arrive. */
+const CACHE_WRITE_BATCH = 250;
+
+const DEV = process.env.NODE_ENV === "development";
 
 // Helius's token-account history index starts in December 2022; older ranges retain the standard RPC scan.
 const INDEXED_TOKEN_HISTORY_START = Date.parse("2022-12-01T00:00:00.000Z") / 1000;
 
+/**
+ * What signature discovery is doing. Transactions are fetched alongside it as
+ * signatures are found; "transactions" means discovery is done and fetches are finishing.
+ */
 export type IngestionPhase = "signatures" | "transactions" | "token_accounts";
 
 export type IngestionProgress = {
@@ -43,8 +59,11 @@ export type IngestionProgress = {
   walletCount: number;
   phase: IngestionPhase;
   signaturesFound: number;
-  done: number;
-  total: number;
+  /** Token accounts searched, of those found. */
+  tokenAccountsDone: number;
+  tokenAccountsTotal: number;
+  /** This wallet's transactions. `loaded` includes cached, unavailable, and failed ones: everything settled. */
+  transactions: { loaded: number; loading: number; queued: number; failed: number };
 };
 
 export type WalletIngestion = {
@@ -166,7 +185,8 @@ function splitForIndexedHistory(ranges: CaseRange[]): { indexed: CaseRange[]; st
 
 /**
  * Page getSignaturesForAddress from newest to oldest, keeping signatures whose
- * blockTime falls in the half-open range [start, end).
+ * blockTime falls in the half-open range [start, end). Each page's kept
+ * signatures are handed to `onPage` before the next page is requested.
  */
 async function scanSignatures(
   adapter: SolanaRpcAdapter,
@@ -174,7 +194,7 @@ async function scanSignatures(
   caseRange: CaseRange,
   limits: IngestionLimits,
   signal: AbortSignal,
-  onPage?: (found: number) => void,
+  onPage: (entries: SignatureEntry[]) => Promise<void>,
 ): Promise<SignatureScan> {
   const range = { start: Date.parse(caseRange.start) / 1000, end: Date.parse(caseRange.end) / 1000 };
   const scan: SignatureScan = { entries: [], reachedStart: false, limitHit: null, missingBlockTime: 0 };
@@ -185,6 +205,7 @@ async function scanSignatures(
       return scan;
     }
     const sigs = await adapter.getSignaturesForAddress(address, { before }, signal);
+    const kept = scan.entries.length;
     for (const s of sigs) {
       if (s.blockTime == null) {
         scan.missingBlockTime++;
@@ -197,11 +218,12 @@ async function scanSignatures(
       }
       if (scan.entries.length >= limits.maxSignaturesPerAddress) {
         scan.limitHit = "signatures";
-        return scan;
+        break;
       }
       scan.entries.push({ signature: s.signature, blockTime: s.blockTime });
     }
-    onPage?.(scan.entries.length);
+    await onPage(scan.entries.slice(kept));
+    if (scan.limitHit) return scan;
     if (scan.reachedStart || sigs.length < SIGNATURE_PAGE_LIMIT) {
       scan.reachedStart = true;
       return scan;
@@ -229,6 +251,12 @@ function describeLimit(what: string, scan: SignatureScan, limits: IngestionLimit
  * account (common in v0 and relayed transactions), which getSignaturesForAddress
  * on the wallet itself does not return.
  *
+ * Discovery and transaction fetching overlap: each signature page is queued
+ * for a bounded worker pool (`limits.concurrency`) as soon as it arrives, and
+ * the next page is requested while those transactions load. A signature is
+ * requested at most once per run, and a failed request is recorded without
+ * stopping the rest.
+ *
  * With a cache, only the parts of the range not already covered are fetched, and
  * cached transactions are never requested again.
  *
@@ -242,6 +270,8 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
   // Signatures the RPC returned null for (pruned history) vs. requests that failed.
   const unavailable = new Set<string>();
   const failed = new Map<string, string>();
+  /** Every signature looked up in this run (cache or RPC), so none is requested twice. */
+  const requested = new Set<string>();
   const results: WalletIngestion[] = [];
   let cancelled = false;
   let cacheWriteError: string | null = null;
@@ -265,6 +295,18 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
     }
   };
 
+  /**
+   * Tie-break for signatures sharing a block time, independent of the order
+   * fetches finished in: chain order (newest first) when both are loaded, loaded before not, then by signature.
+   */
+  const newestFirst = (a: string, b: string) => {
+    const ta = transactions.get(a);
+    const tb = transactions.get(b);
+    if (ta && tb) return compareTransactions(tb, ta);
+    if (ta || tb) return ta ? -1 : 1;
+    return a < b ? -1 : a > b ? 1 : 0;
+  };
+
   for (const [walletIndex, wallet] of wallets.entries()) {
     const range = options.ranges?.[wallet] ?? options.range;
     const signatures = new Map<string, number>();
@@ -274,14 +316,98 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
     const stats: IngestionStats = { cachedTransactions: 0, fetchedTransactions: 0, rangesFetched: [] };
     let complete = true;
     let error: string | undefined;
-    const progress = (phase: IngestionPhase, done: number, total: number, found = signatures.size) =>
-      onProgress?.({ wallet, walletIndex, walletCount: wallets.length, phase, signaturesFound: found, done, total });
+    let phase: IngestionPhase = "signatures";
+    /** This wallet's signatures whose transaction has settled: loaded, cached, unavailable, or failed. */
+    let settled = 0;
+    let failedHere = 0;
+    let accountsDone = 0;
+    const walletStartedAt = performance.now();
+    let discoveryMs = 0;
+    let fetchMs = 0;
+
+    let toSave: Array<{ tx: CanonicalTransaction; raw: RawParsedTransaction }> = [];
+    const saves: Promise<void>[] = [];
+    const flush = () => {
+      if (toSave.length === 0) return;
+      const batch = toSave;
+      toSave = [];
+      saves.push(write((c) => c.putTransactions(batch)));
+    };
+
+    const queue = createWorkQueue<string>(limits.concurrency, async (signature) => {
+      const t0 = performance.now();
+      try {
+        const raw = await adapter.getTransaction(signature, signal);
+        if (raw) {
+          const tx = canonicalize(raw);
+          transactions.set(signature, tx);
+          toSave.push({ tx, raw });
+          stats.fetchedTransactions++;
+          if (toSave.length >= CACHE_WRITE_BATCH) flush();
+        } else unavailable.add(signature);
+      } catch (err) {
+        if (signal.aborted) throw err;
+        // A failed request or unparseable response costs only this transaction.
+        failed.set(signature, (err as Error).message);
+        failedHere++;
+      }
+      fetchMs += performance.now() - t0;
+      settled++;
+      report();
+    });
+
+    // `extra` counts indexed-history transactions loaded but not yet recorded.
+    const report = (extra = 0) =>
+      onProgress?.({
+        wallet,
+        walletIndex,
+        walletCount: wallets.length,
+        phase,
+        signaturesFound: signatures.size + extra,
+        tokenAccountsDone: accountsDone,
+        tokenAccountsTotal: tokenAccounts.length,
+        transactions: { loaded: settled + extra, loading: queue.active, queued: queue.pending, failed: failedHere },
+      });
+
+    /** Add entries to this wallet's signatures, returning those it didn't have. */
+    const record = (entries: SignatureEntry[]): string[] => {
+      const added: string[] = [];
+      for (const e of entries) {
+        if (signatures.has(e.signature)) continue;
+        signatures.set(e.signature, e.blockTime);
+        newEntries.push(e);
+        added.push(e.signature);
+      }
+      return added;
+    };
+
+    /** Start loading transactions for signatures new to this wallet: from the cache when there, otherwise queued for the RPC. */
+    const hydrate = async (added: string[]) => {
+      let missing: string[] = [];
+      for (const s of added) {
+        // Requested earlier in this run (for another wallet, or via indexed history), so already settled.
+        if (requested.has(s)) settled++;
+        else {
+          requested.add(s);
+          missing.push(s);
+        }
+      }
+      if (cache && missing.length > 0) {
+        try {
+          const cached = await guard(cache.getTransactions(missing));
+          for (const [s, tx] of cached) transactions.set(s, tx);
+          settled += cached.size;
+          missing = missing.filter((s) => !cached.has(s));
+        } catch (err) {
+          // An unreadable cache only costs refetching; everything marked requested must still be queued.
+          if (err instanceof Cancelled) throw err;
+        }
+      }
+      queue.push(missing);
+      report();
+    };
 
     const addScan = (scan: SignatureScan, what: string) => {
-      for (const e of scan.entries) {
-        if (!signatures.has(e.signature)) newEntries.push(e);
-        signatures.set(e.signature, e.blockTime);
-      }
       const limit = describeLimit(what, scan, limits);
       if (limit) {
         complete = false;
@@ -293,45 +419,17 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
       }
     };
 
-    const fetchMissing = async () => {
-      let missing = [...signatures.keys()].filter((s) => !transactions.has(s) && !unavailable.has(s) && !failed.has(s));
-      if (cache && missing.length > 0) {
-        const cached = await guard(cache.getTransactions(missing));
-        for (const [s, tx] of cached) transactions.set(s, tx);
-        missing = missing.filter((s) => !cached.has(s));
-      }
-      let done = 0;
-      const toSave: Array<{ tx: CanonicalTransaction; raw: RawParsedTransaction }> = [];
-      progress("transactions", done, missing.length);
-      try {
-        await mapPool(missing, limits.concurrency, async (signature) => {
-          try {
-            const raw = await adapter.getTransaction(signature, signal);
-            if (raw) {
-              const tx = canonicalize(raw);
-              transactions.set(signature, tx);
-              toSave.push({ tx, raw });
-              stats.fetchedTransactions++;
-            } else unavailable.add(signature);
-          } catch (err) {
-            if (signal.aborted) throw err;
-            failed.set(signature, (err as Error).message);
-          }
-          progress("transactions", ++done, missing.length);
-        });
-      } finally {
-        // Keep whatever arrived, even if cancelled part-way.
-        if (toSave.length > 0) await write((c) => c.putTransactions(toSave));
-      }
-    };
-
     let gaps: CaseRange[] = [range];
     try {
       if (signal.aborted) throw new Cancelled();
 
+      const known: string[] = [];
       if (cache) {
         gaps = missingRanges(await guard(cache.getCoverage(wallet)), range);
-        for (const e of await guard(cache.getWalletSignatures(wallet, range))) signatures.set(e.signature, e.blockTime);
+        for (const e of await guard(cache.getWalletSignatures(wallet, range))) {
+          signatures.set(e.signature, e.blockTime);
+          known.push(e.signature);
+        }
       }
       stats.rangesFetched = gaps;
 
@@ -346,18 +444,24 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
               scanIndexedHistory(
                 (paginationToken) => adapter.getTransactionsForAddress!(wallet, rangeSeconds, paginationToken, signal),
                 limits,
-                (found) => progress("transactions", found, found),
+                (found) => {
+                  phase = "transactions";
+                  report(found);
+                },
               ),
             );
-            const toSave: Array<{ tx: CanonicalTransaction; raw: RawParsedTransaction }> = [];
             for (const entry of scan.entries) {
-              if (!signatures.has(entry.signature)) newEntries.push(entry);
+              if (!signatures.has(entry.signature)) {
+                newEntries.push(entry);
+                settled++;
+              }
               signatures.set(entry.signature, entry.blockTime);
+              requested.add(entry.signature);
               transactions.set(entry.signature, entry.tx);
               toSave.push({ tx: entry.tx, raw: entry.raw });
               stats.fetchedTransactions++;
             }
-            if (toSave.length > 0) await write((c) => c.putTransactions(toSave));
+            flush();
             if (scan.limitHit) {
               complete = false;
               warnings.push(
@@ -378,25 +482,30 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
         }
       }
 
+      // Signatures already indexed locally start loading right away.
+      await hydrate(known);
+
       if (standardGaps.length > 0) {
-        progress("signatures", 0, 0);
+        phase = "signatures";
+        report();
+        const t0 = performance.now();
         try {
           for (const gap of standardGaps) {
-            const base = signatures.size;
-            const scan = await guard(
-              scanSignatures(adapter, wallet, gap, limits, signal, (found) => progress("signatures", 0, 0, base + found)),
-            );
-            addScan(scan, "Wallet history");
+            addScan(await guard(scanSignatures(adapter, wallet, gap, limits, signal, (entries) => hydrate(record(entries)))), "Wallet history");
           }
         } catch (err) {
           if (err instanceof Cancelled) throw err;
           error = `Could not load wallet history: ${(err as Error).message}`;
           throw err;
+        } finally {
+          discoveryMs += performance.now() - t0;
         }
-        progress("signatures", 0, 0);
       }
 
-      await guard(fetchMissing());
+      // Token accounts are found from the wallet's own transactions, so those must finish first.
+      phase = "transactions";
+      report();
+      await guard(queue.drain());
 
       if (standardGaps.length > 0) {
         // Currently owned token accounts, plus any this wallet owned in the loaded
@@ -418,22 +527,31 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
         }
 
         tokenAccounts.push(...owned);
-        progress("token_accounts", 0, tokenAccounts.length);
-        let accountsDone = 0;
-        await mapPool(tokenAccounts, limits.concurrency, async (account) => {
+        phase = "token_accounts";
+        report();
+        const t0 = performance.now();
+        await mapPool(tokenAccounts, limits.accountScanConcurrency, async (account) => {
           try {
             for (const gap of standardGaps) {
-              addScan(await guard(scanSignatures(adapter, account, gap, limits, signal)), `Token account ${account}`);
+              addScan(
+                await guard(scanSignatures(adapter, account, gap, limits, signal, (entries) => hydrate(record(entries)))),
+                `Token account ${account}`,
+              );
             }
           } catch (err) {
             if (err instanceof Cancelled) throw err;
             complete = false;
             warnings.push(`Token account ${account}: history unavailable (${(err as Error).message}).`);
           }
-          progress("token_accounts", ++accountsDone, tokenAccounts.length);
+          accountsDone++;
+          report();
+        }).finally(() => {
+          discoveryMs += performance.now() - t0;
         });
 
-        await guard(fetchMissing());
+        phase = "transactions";
+        report();
+        await guard(queue.drain());
       }
     } catch (err) {
       complete = false;
@@ -444,6 +562,11 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
         error = `Loading stopped: ${(err as Error).message}`;
       }
     }
+
+    // Nothing may still be running once this wallet's result is built, even after an error or cancel.
+    await queue.drain().catch(() => {});
+    flush();
+    await Promise.all(saves);
 
     const pruned = [...signatures.keys()].filter((s) => unavailable.has(s)).length;
     if (pruned > 0) {
@@ -470,13 +593,23 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
       }
     }
 
-    const ordered = [...signatures].sort(([, a], [, b]) => b - a).map(([s]) => s);
+    const ordered = [...signatures].sort(([sa, a], [sb, b]) => b - a || newestFirst(sa, sb)).map(([s]) => s);
     // Everything this wallet has that wasn't fetched for it: from the local cache, or already loaded for another wallet.
     stats.cachedTransactions = ordered.filter((s) => transactions.has(s)).length - stats.fetchedTransactions;
     const timestamps = ordered
       .map((s) => transactions.get(s)?.timestamp)
       .filter((t): t is string => t != null)
       .sort();
+    if (DEV) {
+      const fetches = stats.fetchedTransactions + failedHere;
+      console.debug(
+        `[ingest] ${wallet}: ${((performance.now() - walletStartedAt) / 1000).toFixed(1)}s total, ` +
+          `signature discovery ${(discoveryMs / 1000).toFixed(1)}s; ` +
+          `${stats.fetchedTransactions} fetched, ${failedHere} failed, ${settled - fetches} reused; ` +
+          `avg latency ${fetches ? Math.round(fetchMs / fetches) : 0}ms, peak concurrency ${queue.peak}/${limits.concurrency}`,
+      );
+    }
+
     results.push({
       wallet,
       signatures: ordered,

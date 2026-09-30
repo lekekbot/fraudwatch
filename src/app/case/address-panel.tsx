@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CopyIcon, ExternalLinkIcon, EyeIcon, EyeOffIcon, FilterIcon, GitBranchPlusIcon, StarIcon, UnlinkIcon, XIcon } from "lucide-react";
+import { ChevronDownIcon, CopyIcon, ExternalLinkIcon, EyeIcon, EyeOffIcon, FilterIcon, GitBranchPlusIcon, StarIcon, UnlinkIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -46,6 +46,7 @@ export function AddressPanel({
   lane,
   onFilterTo,
   bookmark,
+  beforeAnnotations,
 }: {
   caseId: string;
   address: string;
@@ -63,6 +64,7 @@ export function AddressPanel({
   /** Narrow the views to transactions involving this address. */
   onFilterTo?: { active: boolean; toggle: () => void };
   bookmark?: { on: boolean; toggle: () => void };
+  beforeAnnotations?: React.ReactNode;
 }) {
   const [name, setName] = useState(label?.name ?? "");
   const [note, setNote] = useState(label?.note ?? "");
@@ -175,8 +177,14 @@ export function AddressPanel({
         )}
       </PanelSection>
 
-      <PanelSection title="Your label">
-        <div className="flex flex-col gap-2">
+      {beforeAnnotations}
+
+      <details className="group mt-auto border-b">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 p-3 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
+          Label &amp; annotations
+          <ChevronDownIcon className="size-3.5 transition-transform group-open:rotate-180" aria-hidden />
+        </summary>
+        <div className="flex flex-col gap-2 px-3 pb-3">
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Name
             <Input
@@ -239,7 +247,7 @@ export function AddressPanel({
           </label>
           <p className="text-xs text-muted-foreground">Saved in this browser, for this case only.</p>
         </div>
-      </PanelSection>
+      </details>
     </>
   );
 }

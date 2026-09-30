@@ -59,7 +59,7 @@ export function CounterpartyList({ rows, names, selected, onSelect }: {
         </ul>
       )}
       {rows.length > SHOWN && (
-        <Button variant="ghost" size="xs" className="self-start" onClick={() => setShowAll((s) => !s)}>
+        <Button variant="ghost" size="xs" className="w-full" onClick={() => setShowAll((s) => !s)}>
           {showAll ? "Show fewer" : `Show all ${rows.length}`}
         </Button>
       )}

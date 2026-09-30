@@ -24,7 +24,10 @@ describe("rpcCall", () => {
       sleep: async (ms) => void sleeps.push(ms),
     });
     expect(result).toBe(42);
-    expect(sleeps).toEqual([2000, 1000]);
+    expect(sleeps[0]).toBe(2000);
+    // Exponential backoff for the second attempt (1s), jittered down to at most half.
+    expect(sleeps[1]).toBeGreaterThanOrEqual(500);
+    expect(sleeps[1]).toBeLessThanOrEqual(1000);
   });
 
   it("gives up after maxRetries", async () => {
@@ -52,6 +55,26 @@ describe("rpcCall", () => {
     controller.abort();
     await expect(pending).rejects.toThrow();
     expect(fetchImpl.calls).toBe(1);
+  });
+
+  it("abandons and retries a request that exceeds the timeout", async () => {
+    let calls = 0;
+    const fetchImpl = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+      if (++calls === 1) {
+        return new Promise<Response>((_, reject) => init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason)));
+      }
+      return ok(7)();
+    }) as typeof fetch;
+    const retried: string[] = [];
+    const result = await rpcCall<number>(URL, "getTransaction", [], new AbortController().signal, {
+      fetchImpl,
+      maxRetries: 1,
+      timeoutMs: 10,
+      sleep: async () => {},
+      onRetry: (err) => retried.push(err.message),
+    });
+    expect(result).toBe(7);
+    expect(retried[0]).toMatch(/timed out/);
   });
 
   it("never puts the RPC URL in error messages", async () => {

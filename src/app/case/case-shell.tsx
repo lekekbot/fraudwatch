@@ -51,6 +51,7 @@ import { assetLabel, assetLogo, formatAssetAmount } from "./asset-format";
 import { WalletStateSummary, WalletStateTable } from "./wallet-state-view";
 
 const NO_SUMMARIES: EffectSummary[] = [];
+const SHOWN_WALLETS = 50;
 
 async function copy(text: string, what: string) {
   try {
@@ -244,6 +245,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
 
   // Lane order: saved order, else primary then first appearance. Focus narrows without changing it.
   const [focus, setFocus] = useState<ReadonlySet<string>>(new Set());
+  const [showAllWallets, setShowAllWallets] = useState(false);
   const order = useMemo(() => {
     const firstSeen = new Map<string, number>();
     for (const ws of walletStates?.states ?? []) {
@@ -252,6 +254,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     }
     return laneOrder(c, firstSeen);
   }, [c, walletStates]);
+  const listedWallets = showAllWallets ? order : order.slice(0, SHOWN_WALLETS);
   const shownLanes = useMemo(() => visibleLanes(order, c.hiddenLanes ?? [], focus), [order, c.hiddenLanes, focus]);
   const lanes = useMemo<WalletLane[]>(
     () =>
@@ -453,7 +456,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     return `from ${r.start.slice(0, 16).replace("T", " ")} UTC${how} to the case end`;
   };
 
-  const panelFor = (address: string) => (
+  const panelFor = (address: string, beforeAnnotations?: React.ReactNode) => (
     <AddressPanel
       key={address}
       caseId={c.id}
@@ -462,6 +465,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
       label={names.label(address)}
       entry={registry.lookup(address)}
       transactionCount={address === selectedWallet ? undefined : counterparties.find((r) => r.address === address)?.count}
+      beforeAnnotations={beforeAnnotations}
       onMap={() => {
         setMapError(null);
         setMapTarget(address);
@@ -487,15 +491,13 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   // The inspector shows the last thing selected; an address stays until something else is picked.
   const addressPanel = selectedAddress && panelFor(selectedAddress);
 
-  const walletInspector = (
-    <>
-      {panelFor(selectedWallet)}
-      {walletState && walletStates && (
-        <PanelSection title="Wallet state">
-          <WalletStateSummary state={walletState} assets={walletStates.assets} />
-        </PanelSection>
-      )}
-    </>
+  const walletInspector = panelFor(
+    selectedWallet,
+    walletState && walletStates && (
+      <PanelSection title="Wallet state">
+        <WalletStateSummary state={walletState} assets={walletStates.assets} />
+      </PanelSection>
+    ),
   );
 
   // The interaction map covers every visible lane, from the same filtered transactions as the timeline.
@@ -757,7 +759,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
               }
             >
               <ul className="-mx-1 flex flex-col">
-                {order.map((address, position) => {
+                {listedWallets.map((address, position) => {
                   const w = c.mappedWallets.find((m) => m.address === address)!;
                   const s = walletStates?.states.find((st) => st.wallet === address);
                   const flagged = s && (s.mismatches.length > 0 || s.openingStatus !== "OBSERVED");
@@ -840,6 +842,17 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                   );
                 })}
               </ul>
+              {order.length > SHOWN_WALLETS && (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="self-start"
+                  aria-expanded={showAllWallets}
+                  onClick={() => setShowAllWallets((shown) => !shown)}
+                >
+                  {showAllWallets ? "Show fewer" : `Show +${(order.length - SHOWN_WALLETS).toLocaleString()} more`}
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"

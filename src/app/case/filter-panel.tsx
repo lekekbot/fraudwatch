@@ -54,6 +54,7 @@ function Heading({ children }: { children: React.ReactNode }) {
 const protocolName = (id: string) => registry.protocols.get(id)?.name ?? id;
 
 const DAY = 86_400_000;
+const SHOWN_ASSETS = 25;
 const dateInput = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
 /** Left-panel section: choose which transactions appear on the map and in the table. */
@@ -85,6 +86,7 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
   const tagRows = [...tagCounts].sort((a, b) => b[1] - a[1]);
 
   // Minimum amount: typed text and asset, applied when it parses.
+  const [showAllAssets, setShowAllAssets] = useState(false);
   const [minText, setMinText] = useState("");
   const [minAsset, setMinAsset] = useState<string>(filter.minAmount?.assetId ?? assetRows[0]?.[0] ?? "SOL");
   const applyMin = (text: string, assetId: string) => {
@@ -186,7 +188,7 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
 
           <Heading>Assets moved</Heading>
           <div className="-mx-1 flex flex-col" role="group" aria-label="Assets">
-            {assetRows.map(([assetId, count]) => (
+            {(showAllAssets ? assetRows : assetRows.slice(0, SHOWN_ASSETS)).map(([assetId, count]) => (
               <Toggle
                 key={assetId}
                 on={!filter.hiddenAssets.has(assetId)}
@@ -199,6 +201,17 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
               </Toggle>
             ))}
           </div>
+          {assetRows.length > SHOWN_ASSETS && (
+            <Button
+              variant="ghost"
+              size="xs"
+              className="self-start"
+              aria-expanded={showAllAssets}
+              onClick={() => setShowAllAssets((shown) => !shown)}
+            >
+              {showAllAssets ? "Show fewer" : `Show +${(assetRows.length - SHOWN_ASSETS).toLocaleString()} more`}
+            </Button>
+          )}
           <p className="text-xs text-muted-foreground">A transaction is hidden only when every asset it moves is hidden.</p>
         </>
       )}

@@ -12,7 +12,7 @@ import { PanelSection } from "./panel";
 
 function ProgressLines({ progress, names }: { progress: IngestionProgress | null; names: Names }) {
   if (!progress) return <p className="text-sm">Starting…</p>;
-  const { phase, done, total, signaturesFound } = progress;
+  const { phase, signaturesFound, transactions: tx } = progress;
   return (
     <div className="flex flex-col gap-1 text-sm" aria-live="polite">
       {progress.walletCount > 1 && (
@@ -25,14 +25,24 @@ function ProgressLines({ progress, names }: { progress: IngestionProgress | null
         {phase === "signatures" ? "Loading signatures…" : "Signatures"}{" "}
         <span className="text-muted-foreground">{signaturesFound.toLocaleString()} found</span>
       </p>
-      {phase === "transactions" && (
-        <p>
-          Fetching transactions… <span className="tabular-nums">{done.toLocaleString()} / {total.toLocaleString()}</span>
-        </p>
-      )}
       {phase === "token_accounts" && (
         <p>
-          Token account history… <span className="tabular-nums">{done} / {total}</span>
+          Token account history…{" "}
+          <span className="tabular-nums">
+            {progress.tokenAccountsDone} / {progress.tokenAccountsTotal}
+          </span>
+        </p>
+      )}
+      {signaturesFound > 0 && (
+        <p>
+          {phase === "transactions" ? "Fetching transactions…" : "Transactions"}{" "}
+          <span className="tabular-nums">
+            {tx.loaded.toLocaleString()} / {signaturesFound.toLocaleString()}
+          </span>
+          {tx.loading + tx.queued > 0 && (
+            <span className="text-muted-foreground"> · {(tx.loading + tx.queued).toLocaleString()} pending</span>
+          )}
+          {tx.failed > 0 && <span className="text-destructive"> · {tx.failed.toLocaleString()} failed</span>}
         </p>
       )}
     </div>

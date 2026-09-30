@@ -15,6 +15,9 @@ export type IngestionState =
   | { status: "done"; result: IngestionResult; source: "cache" | "rpc"; lastLoadedAt: string | null }
   | { status: "error"; error: string };
 
+/** Progress repaints at most this often; ingestion itself reports every transaction. */
+const PROGRESS_INTERVAL_MS = 200;
+
 /**
  * Shows a case's cached history on open, and loads the rest from the RPC on
  * request. Only ranges the cache doesn't cover are fetched. Unmounting cancels
@@ -68,18 +71,33 @@ export function useIngestion(c: FraudWatchCase) {
         db = null;
       }
 
+      let latest: IngestionProgress | null = null;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const retries = { total: 0, rateLimited: 0 };
       try {
         const result = await ingestWallets({
-          adapter: createIngestionAdapter(rpcUrl),
+          adapter: createIngestionAdapter(rpcUrl, {
+            onRetry: (err) => {
+              retries.total++;
+              if (err.status === 429) retries.rateLimited++;
+            },
+          }),
           wallets: config.mappedWallets.map((w) => w.address),
           range: config.range,
           ranges: walletRanges(config),
           signal: current.signal,
           cache: db ? createDbIngestionCache(db) : undefined,
           onProgress: (progress) => {
-            if (controller.current === current) setState({ status: "running", progress });
+            latest = progress;
+            timer ??= setTimeout(() => {
+              timer = null;
+              if (controller.current === current) setState({ status: "running", progress: latest });
+            }, PROGRESS_INTERVAL_MS);
           },
         });
+        if (process.env.NODE_ENV === "development") {
+          console.debug(`[ingest] ${retries.total} RPC retries, ${retries.rateLimited} after HTTP 429`);
+        }
         const finishedAt = new Date();
         if (db) await saveIngestionJob(db, config.id, config.range, result, finishedAt).catch(() => {});
         if (controller.current === current) {
@@ -90,6 +108,7 @@ export function useIngestion(c: FraudWatchCase) {
           setState({ status: "error", error: err instanceof Error ? err.message : "Loading failed." });
         }
       } finally {
+        if (timer) clearTimeout(timer);
         if (controller.current === current) {
           running.current = false;
           generation.current++;
