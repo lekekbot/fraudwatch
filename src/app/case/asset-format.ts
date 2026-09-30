@@ -1,4 +1,5 @@
 import type { AssetMetadata } from "@/lib/assets/assets";
+import { NATIVE_SOL } from "@/lib/assets/assets";
 import { formatBaseUnits } from "@/lib/solana/amount";
 import { shortenAddress } from "@/lib/solana/address";
 import type { WalletState } from "@/lib/state/reconstruct";
@@ -8,6 +9,19 @@ export type Assets = Map<string, AssetMetadata>;
 export function assetLabel(assetId: string, assets: Assets): string {
   const meta = assets.get(assetId);
   return meta?.symbol || meta?.name || shortenAddress(assetId, 4);
+}
+
+const BONK = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263";
+
+/** Stored metadata wins; the registry CDN covers common SPL tokens without another API request. */
+export function assetLogo(assetId: string, assets: Assets): string | undefined {
+  const stored = assets.get(assetId)?.logo;
+  if (stored?.startsWith("https://")) return stored;
+  if (assetId === NATIVE_SOL) return "https://assets-cdn.trustwallet.com/blockchains/solana/info/logo.png";
+  if (assetId === BONK) return "https://coin-images.coingecko.com/coins/images/28600/large/bonk.jpg";
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(assetId)
+    ? `https://assets-cdn.trustwallet.com/blockchains/solana/assets/${assetId}/logo.png`
+    : undefined;
 }
 
 /** Base-unit amount as a decimal, using the decimals the transactions reported. */

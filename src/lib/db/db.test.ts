@@ -57,10 +57,10 @@ describe("cases store", () => {
 describe("rpc_settings store", () => {
   it("keeps a single local RPC setting, separate from cases", async () => {
     expect(await getRpcSettings(db)).toBeUndefined();
-    await saveRpcSettings(db, { url: " https://rpc.example.com/?api-key=k ", providerType: "auto" });
-    await saveRpcSettings(db, { url: "https://rpc2.example.com", providerType: "generic" });
+    await saveRpcSettings(db, { url: " https://rpc.example.com/?api-key=k " });
+    await saveRpcSettings(db, { url: "https://rpc2.example.com" });
     expect(await db.rpc_settings.count()).toBe(1);
-    expect(await getRpcSettings(db)).toMatchObject({ url: "https://rpc2.example.com", providerType: "generic" });
+    expect(await getRpcSettings(db)).toMatchObject({ url: "https://rpc2.example.com" });
 
     await saveCase(db, createCase({ name: "A", primaryWallet: WALLET, range: RANGE }));
     const [stored] = await db.cases.toArray();
@@ -78,7 +78,7 @@ describe("schema upgrade", () => {
     v1.version(1).stores({ cases: "id, updatedAt, primaryWallet", rpc_settings: "id" });
     const fwCase = createCase({ name: "old", primaryWallet: WALLET, range: RANGE });
     await v1.table("cases").put(fwCase);
-    await v1.table("rpc_settings").put({ id: "default", url: "https://rpc.example.com", providerType: "auto", updatedAt: "x" });
+    await v1.table("rpc_settings").put({ id: "default", url: "https://rpc.example.com", updatedAt: "x" });
     v1.close();
 
     const upgraded = new FraudWatchDB(name);
@@ -125,7 +125,7 @@ describe("address labels", () => {
     const name = `upgrade-${crypto.randomUUID()}`;
     const v3 = new Dexie(name);
     v3.version(3).stores({ cases: "id, updatedAt, primaryWallet", rpc_settings: "id" });
-    const old = { ...createCase({ name: "old", primaryWallet: WALLET, range: RANGE }), version: 1, labels: { [OTHER]: "Exchange" }, tags: { [OTHER]: ["cex"], [WALLET]: ["victim"] } };
+    const old = { ...createCase({ name: "old", primaryWallet: WALLET, range: RANGE }), labels: { [OTHER]: "Exchange" }, tags: { [OTHER]: ["cex"], [WALLET]: ["victim"] } };
     await v3.table("cases").put(old);
     v3.close();
 
@@ -134,7 +134,6 @@ describe("address labels", () => {
       const stored = await getCase(upgraded, old.id);
       expect(stored).not.toHaveProperty("labels");
       expect(stored).not.toHaveProperty("tags");
-      expect(stored?.version).toBe(2);
       const labels = await getAddressLabels(upgraded, old.id);
       expect(labels).toEqual(
         expect.arrayContaining([

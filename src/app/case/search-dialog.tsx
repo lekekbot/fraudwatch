@@ -4,7 +4,7 @@ import { useState } from "react";
 import { CoinsIcon, HashIcon, LayersIcon, SearchIcon, TagIcon, UserIcon, WalletIcon } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { type SearchItem, type SearchKind, searchItems } from "@/lib/search";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 
 const ICON: Record<SearchKind, typeof WalletIcon> = {
   wallet: WalletIcon,

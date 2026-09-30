@@ -124,6 +124,7 @@ Do not use force-directed positioning for the main graph.
 | 08A | Minimap, trackpad gestures, add wallet by address |
 | 09 | Scaling, filters, aggregation, navigation |
 | 09A | Graph tab as a wallet interaction map |
+| 09B | Repository reliability cleanup |
 | 10 | Boundary context, case portability, export/import |
 | 11 | Reliability, privacy, deployment, private beta |
 

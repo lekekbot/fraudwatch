@@ -43,7 +43,6 @@ export type MapWalletInput = {
   /** Required for first_interaction and custom. */
   start?: string;
   addedFromWallet?: string;
-  addedFromTransaction?: string;
 };
 
 export class MappingError extends Error {}
@@ -61,11 +60,9 @@ export function mapWallet(c: FraudWatchCase, input: MapWalletInput, now = new Da
   }
   const added: MappedWalletConfig = {
     address: input.address,
-    role: "mapped",
     rangeMode: input.rangeMode,
     ...(customStart ? { customStart } : {}),
     ...(input.addedFromWallet ? { addedFromWallet: input.addedFromWallet } : {}),
-    ...(input.addedFromTransaction ? { addedFromTransaction: input.addedFromTransaction } : {}),
   };
   return { ...c, mappedWallets: [...c.mappedWallets, added], updatedAt: now.toISOString() };
 }
@@ -74,7 +71,7 @@ export function mapWallet(c: FraudWatchCase, input: MapWalletInput, now = new Da
 export function unmapWallet(c: FraudWatchCase, address: string, now = new Date()): FraudWatchCase {
   const target = c.mappedWallets.find((w) => w.address === address);
   if (!target) throw new MappingError("This wallet isn't mapped.");
-  if (target.role === "primary") throw new MappingError("The primary wallet can't be removed from the case.");
+  if (address === c.primaryWallet) throw new MappingError("The primary wallet can't be removed from the case.");
   return { ...c, mappedWallets: c.mappedWallets.filter((w) => w.address !== address), updatedAt: now.toISOString() };
 }
 

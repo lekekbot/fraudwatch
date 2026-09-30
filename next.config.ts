@@ -1,8 +1,7 @@
 import type { NextConfig } from "next";
 
-// FraudWatch ships as a static bundle: no server, no API routes, no app database.
+// The Next server only delivers the UI; case data and RPC access stay in the browser.
 const nextConfig: NextConfig = {
-  output: "export",
   trailingSlash: true,
   images: { unoptimized: true },
 };

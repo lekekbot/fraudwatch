@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 
 /** A docked side panel of the case workspace, scrolling independently of the canvas. */
 export function SidePanel({ side, label, className, children }: {

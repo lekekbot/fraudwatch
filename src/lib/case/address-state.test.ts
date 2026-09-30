@@ -7,8 +7,8 @@ const MAPPED = "4VWKf8NrCT5gK3f1YwPRspArUU7KZNKBvYqF8rxVZVCi";
 const c = {
   primaryWallet: PRIMARY,
   mappedWallets: [
-    { address: PRIMARY, role: "primary" as const, rangeMode: "case" as const },
-    { address: MAPPED, role: "mapped" as const, rangeMode: "case" as const },
+    { address: PRIMARY, rangeMode: "case" as const },
+    { address: MAPPED, rangeMode: "case" as const },
   ],
 };
 

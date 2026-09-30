@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import type { MappedWalletConfig } from "@/lib/case/model";
 import { type CaseRange, datesFromRange } from "@/lib/case/range";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 import { formatUtc } from "./asset-format";
 
 export type MapWalletChoice = { rangeMode: MappedWalletConfig["rangeMode"]; start?: string };

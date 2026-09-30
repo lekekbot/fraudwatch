@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { WalletTransactionEffect } from "@/lib/state/reconstruct";
 import type { EffectSummary } from "@/lib/state/summarize";
-import { buildInteractionGraph, pairId } from "./build";
+import { buildInteractionGraph, edgeFlow, OMITTED_NODE_ID, pairId } from "./build";
 
 const A = "A-wallet";
 const B = "B-counterparty";
@@ -56,6 +56,18 @@ describe("buildInteractionGraph", () => {
       ["a3", [{ from: A, to: B, assetId: "USDC", amount: "75" }]],
       ["back", [{ from: B, to: A, assetId: "USDC", amount: "40" }]],
     ]);
+    expect(edgeFlow(lines[0])).toEqual({ from: A, to: B, forward: 3, reverse: 1, bidirectional: true });
+    expect(lines[0].summary).toMatchObject({
+      totalInteractions: 4,
+      aToB: 3,
+      bToA: 1,
+      activeDays: 4,
+      activityPattern: "Long-running",
+      assets: [
+        { assetId: "USDC", txCount: 3 },
+        { assetId: "SOL", txCount: 1 },
+      ],
+    });
     expect(g.counts).toMatchObject({ connections: 1, transactions: 4 });
   });
 
@@ -127,6 +139,7 @@ describe("buildInteractionGraph", () => {
       },
     ]);
     expect(g.edges[0].interactions[0].movements).toEqual([{ from: B, to: A, assetId: "asset1", amount: "1" }]);
+    expect(edgeFlow(g.edges[0])).toEqual({ from: B, to: A, forward: 1, reverse: 0, bidirectional: false });
   });
 
   it("keeps every mapped wallet and the busiest others under the node cap", () => {
@@ -138,8 +151,27 @@ describe("buildInteractionGraph", () => {
       },
     ];
     const g = buildInteractionGraph(sides, { maxNodes: 2 });
-    expect(g.nodes.map((n) => n.id)).toEqual([A, B]);
+    expect(g.nodes.map((n) => n.id)).toEqual([A, B, OMITTED_NODE_ID]);
     expect(g.omittedNodes).toBe(1);
     expect(g.edges.map((e) => e.id)).toEqual([pairId(A, B)]);
+  });
+
+  it("keeps recent and directional relationships in the significant projection and exposes omitted addresses", () => {
+    const D = "D-counterparty";
+    const sides = [
+      {
+        wallet: A,
+        effects: [effect(A, "busy-1", 1), effect(A, "busy-2", 2), effect(A, "recent", 9), effect(A, "incoming", 3)],
+        summaries: [
+          summary({ counterparties: [cp(B, "SOL", "1")] }),
+          summary({ counterparties: [cp(B, "SOL", "1")] }),
+          summary({ counterparties: [cp(C, "SOL", "1")] }),
+          summary({ kind: "RECEIVE", counterparties: [cp(D, "SOL", "-1")] }),
+        ],
+      },
+    ];
+    const g = buildInteractionGraph(sides, { maxNodes: 3 });
+    expect(g.nodes.map((n) => n.id)).toEqual([A, B, D, OMITTED_NODE_ID]);
+    expect(g.nodes.at(-1)).toMatchObject({ kind: "aggregate", txCount: 1 });
   });
 });

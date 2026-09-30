@@ -7,7 +7,7 @@
   - From case start.
   - Custom start: a UTC day.
   - Confirming saves the case and loads every mapped wallet. Already-covered wallets come from the cache, so in practice only the new one hits the RPC. The new wallet is selected.
-- **Model** (`src/lib/case/wallet-range.ts`, tested): `mapWallet` appends `{ role: "mapped", rangeMode, customStart, addedFromWallet, addedFromTransaction }`.
+- **Model** (`src/lib/case/wallet-range.ts`, tested): `mapWallet` appends `{ address, rangeMode, customStart, addedFromWallet }`.
   - It rejects duplicates and starts at or after the case end, and clamps starts before the case start.
   - `walletRange` gives each wallet its own range, ending at the case end.
   - `unmapWallet` removes a mapped wallet but never the primary.

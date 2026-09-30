@@ -20,8 +20,9 @@ import type { AssetChange, WalletTransactionEffect } from "./reconstruct";
  * observed deltas.
  */
 /**
- * SEND / RECEIVE / SWAP come from the wallet's balance changes. A transaction
- * that moved none of the wallet's value is typed by what it did instead:
+ * SEND / RECEIVE / SWAP come from the wallet's balance changes, except when a
+ * token instruction gives the movement a more precise meaning (such as BURN).
+ * A transaction that moved none of the wallet's value is typed by what it did instead:
  * APPROVAL (token delegate or authority change), STAKE, ACCOUNT (token
  * account setup or close), or PROGRAM (a call to any other program). There is
  * deliberately no catch-all "other".
@@ -35,6 +36,7 @@ export type EffectKind =
   | "NFT_MINT"
   | "NFT_SWAP"
   | "NFT_TRANSFER"
+  | "BURN"
   | "APPROVAL"
   | "STAKE"
   | "ACCOUNT"
@@ -150,6 +152,7 @@ function counterpartiesFor(wallet: string, tx: CanonicalTransaction, changes: Va
 const INFRASTRUCTURE = new Set<string>([COMPUTE_BUDGET_PROGRAM, ...MEMO_PROGRAMS]);
 const TOKEN = new Set<string>(TOKEN_PROGRAMS);
 const APPROVALS = new Set(["approve", "approveChecked", "revoke", "setAuthority"]);
+const BURNS = new Set(["burn", "burnChecked"]);
 const SYSTEM_SETUP = new Set(["createAccount", "createAccountWithSeed", "allocate", "allocateWithSeed", "assign", "assignWithSeed"]);
 const TOKEN_SETUP = new Set(["initializeAccount", "initializeAccount2", "initializeAccount3", "initializeImmutableOwner", "closeAccount", "syncNative", "getAccountDataSize"]);
 
@@ -159,6 +162,22 @@ const isSetup = (ix: CanonicalInstruction) =>
   (TOKEN.has(ix.programId) && TOKEN_SETUP.has(ix.type ?? ""));
 
 const toAction = (ix: CanonicalInstruction): TxAction => ({ programId: ix.programId, program: ix.program, instruction: ix.type });
+
+/** A parsed SPL burn that consumed tokens owned by this wallet. */
+function burnInstruction(wallet: string, tx: CanonicalTransaction | undefined): CanonicalInstruction | null {
+  if (!tx) return null;
+  const burned = tx.tokenChanges.filter((change) => change.owner === wallet && BigInt(change.delta) < ZERO);
+  if (burned.length === 0) return null;
+  return (
+    [...tx.instructions, ...tx.innerInstructions].find((ix) => {
+      if (!TOKEN.has(ix.programId) || !BURNS.has(ix.type ?? "")) return false;
+      const info = typeof ix.info === "object" && ix.info !== null ? (ix.info as { account?: unknown; mint?: unknown }) : {};
+      const account = typeof info.account === "string" ? info.account : null;
+      const mint = typeof info.mint === "string" ? info.mint : null;
+      return (account !== null || mint !== null) && burned.some((change) => (!account || change.account === account) && (!mint || change.mint === mint));
+    }) ?? null
+  );
+}
 
 /** Types a transaction that moved none of the wallet's value, from its instructions. */
 export function classifyInstructions(tx: CanonicalTransaction | undefined): { kind: EffectKind; action: TxAction | null } {
@@ -297,10 +316,13 @@ export function summarizeEffect(
   const inflows = changes.filter((c) => !c.delta.startsWith("-"));
   const classified = classifyInstructions(tx);
   const counterparties = tx ? counterpartiesFor(effect.wallet, tx, changes) : [];
-  const nft = effect.success ? nftTrade(effect, tx, changes, counterparties, nfts) : null;
+  const burnAction = effect.success ? burnInstruction(effect.wallet, tx) : null;
+  const nft = effect.success && !burnAction ? nftTrade(effect, tx, changes, counterparties, nfts) : null;
   const kind: EffectKind = !effect.success
     ? "FAILED"
-    : nft
+    : burnAction
+      ? "BURN"
+      : nft
       ? nft.kind
       : outflows.length > 0 && inflows.length > 0
         ? "SWAP"
@@ -315,7 +337,7 @@ export function summarizeEffect(
     outflows,
     inflows,
     counterparties,
-    action: classified.action,
+    action: burnAction ? toAction(burnAction) : classified.action,
     actor: feePayer && feePayer !== effect.wallet ? feePayer : null,
     ...(nft ? { nft: nft.nft } : {}),
   };

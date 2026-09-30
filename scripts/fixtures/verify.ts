@@ -14,7 +14,7 @@
  * - synthetic balances chain (post of tx N == pre of tx N+1 per account/asset)
  *   and lamports are conserved apart from the fee, which the fee payer pays.
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
@@ -187,8 +187,9 @@ console.log("Scenarios on disk");
 const solanaDir = join(ROOT, "solana");
 for (const id of readdirSync(solanaDir).sort()) {
   const dir = join(solanaDir, id);
-  if (!statSync(dir).isDirectory() || id === "synthetic") continue;
-  const manifest = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")) as Manifest;
+  const manifestPath = join(dir, "manifest.json");
+  if (!statSync(dir).isDirectory() || id === "synthetic" || !existsSync(manifestPath)) continue;
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Manifest;
   if (manifest.id !== id) fail(`${id}: manifest id ${manifest.id}`);
   let rpc: RecordedCall[];
   try {

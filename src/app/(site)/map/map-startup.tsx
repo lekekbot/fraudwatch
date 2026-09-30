@@ -8,6 +8,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { findDuplicateCases } from "@/lib/db/cases";
 import { getDb } from "@/lib/db/db";
 import { parseMapParams } from "@/lib/routing/map-params";
+import { buildCasePath } from "@/lib/routing/case-path";
 
 /**
  * /map?wallet=&from=&to= — simple startup link.
@@ -32,7 +33,7 @@ export function MapStartup() {
         if (cancelled) return;
         if (matches.length > 0) {
           const newest = [...matches].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-          router.replace(`/case/?id=${encodeURIComponent(newest.id)}`);
+          router.replace(buildCasePath(newest.id, "timeline"));
         } else {
           router.replace(`/cases/new/?${search}`);
         }

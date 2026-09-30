@@ -21,7 +21,7 @@
 │          │                 │            │
 │  ┌───────▼───────┐ ┌──────▼─────────┐  │
 │  │ IndexedDB     │ │ RPC Adapter     │  │
-│  │ local cache   │ │ generic/enhanced│  │
+│  │ local cache   │ │ standard JSON-RPC│ │
 │  └───────────────┘ └──────┬─────────┘  │
 └────────────────────────────┼────────────┘
                              │

@@ -71,7 +71,7 @@ export type RawInstruction = {
 };
 
 export type SolanaRpcAdapter = {
-  kind: "generic";
+  kind: "generic" | "helius";
   getSignaturesForAddress(address: string, opts: { before?: string }, signal: AbortSignal): Promise<SignatureInfo[]>;
   getTransaction(signature: string, signal: AbortSignal): Promise<RawParsedTransaction | null>;
   getTokenAccountsByOwner(owner: string, programId: string, signal: AbortSignal): Promise<TokenAccountInfo[]>;
@@ -79,6 +79,13 @@ export type SolanaRpcAdapter = {
   getBalance(address: string, signal: AbortSignal): Promise<number>;
   getTokenAccountBalance(address: string, signal: AbortSignal): Promise<{ amount: string; decimals: number }>;
   getLatestBlockhash(signal: AbortSignal): Promise<{ blockhash: string; slot: number }>;
+  /** Provider fast path: full wallet history, including owned token accounts. */
+  getTransactionsForAddress?(
+    address: string,
+    range: { start: number; end: number },
+    paginationToken: string | undefined,
+    signal: AbortSignal,
+  ): Promise<{ data: RawParsedTransaction[]; paginationToken?: string | null }>;
   /**
    * Digital Asset Standard `getAsset` (not a standard Solana RPC method; Helius
    * and some others provide it). Used only to name compressed NFTs; resolves

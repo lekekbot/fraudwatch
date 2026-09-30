@@ -7,7 +7,7 @@ import { getDb } from "@/lib/db/db";
 import { readCachedIngestion, saveIngestionJob } from "@/lib/db/ingestion-jobs";
 import { createDbIngestionCache } from "@/lib/db/transaction-cache";
 import { type IngestionProgress, type IngestionResult, ingestWallets } from "@/lib/ingest/ingest";
-import { createGenericAdapter } from "@/lib/rpc/generic-adapter";
+import { createIngestionAdapter } from "@/lib/rpc/helius-adapter";
 
 export type IngestionState =
   | { status: "idle" }
@@ -70,7 +70,7 @@ export function useIngestion(c: FraudWatchCase) {
 
       try {
         const result = await ingestWallets({
-          adapter: createGenericAdapter(rpcUrl),
+          adapter: createIngestionAdapter(rpcUrl),
           wallets: config.mappedWallets.map((w) => w.address),
           range: config.range,
           ranges: walletRanges(config),

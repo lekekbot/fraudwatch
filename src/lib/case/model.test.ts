@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CASE_SCHEMA_VERSION, completeRange, createCase, validateNewCaseInput } from "./model";
+import { completeRange, createCase, validateNewCaseInput } from "./model";
 
 const WALLET = "dLm61Lvpigiaig9ZHcdh6iE7mFp7WmfqzkFMrDdf5Vo";
 
@@ -31,18 +31,16 @@ describe("validateNewCaseInput", () => {
 });
 
 describe("createCase", () => {
-  it("creates a versioned case with the primary wallet mapped", () => {
+  it("creates a case with the primary wallet mapped", () => {
     const now = new Date("2026-09-24T00:00:00.000Z");
     const range = { start: "2026-06-01T00:00:00.000Z", end: "2026-09-17T00:00:00.000Z" };
     const fwCase = createCase({ name: "Grant trace", primaryWallet: WALLET, range }, { id: "case-1", now });
     expect(fwCase).toEqual({
       id: "case-1",
-      version: CASE_SCHEMA_VERSION,
       name: "Grant trace",
-      chain: "solana",
       primaryWallet: WALLET,
       range,
-      mappedWallets: [{ address: WALLET, role: "primary", rangeMode: "case" }],
+      mappedWallets: [{ address: WALLET, rangeMode: "case" }],
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
     });
