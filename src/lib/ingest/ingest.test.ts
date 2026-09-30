@@ -129,6 +129,33 @@ describe("ingestWallets on a high-activity wallet", () => {
   });
 });
 
+describe("ingestWallets with indexed provider history", () => {
+  it("loads full wallet and token-account history without per-account RPC calls", async () => {
+    const fixture = loadFixture("simple-transfers");
+    const fetchImpl = replayFetch(fixture);
+    const base = createGenericAdapter("https://rpc.example.com/?api-key=k", { fetchImpl, maxRetries: 0 });
+    const signatures = fixture.manifest.expected.signaturesByWallet[fixture.manifest.wallets[0].address];
+    const rows = await Promise.all(signatures.map((signature) => base.getTransaction(signature, new AbortController().signal)));
+    const data = rows.filter((tx): tx is NonNullable<typeof tx> => tx !== null);
+    let indexedCalls = 0;
+
+    const result = await run(fixture, {
+      adapter: {
+        ...base,
+        kind: "helius",
+        getTransactionsForAddress: async () => {
+          indexedCalls++;
+          return { data };
+        },
+      },
+    });
+
+    expectMatchesManifest(fixture, result);
+    expect(indexedCalls).toBe(1);
+    expect(result.wallets[0].tokenAccounts).toEqual([]);
+  });
+});
+
 describe("ingestWallets failure handling", () => {
   it("returns partial, incomplete results when cancelled", async () => {
     const fixture = loadFixture("a-to-b-to-c");

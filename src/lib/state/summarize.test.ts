@@ -118,3 +118,39 @@ describe("summarizeEffect actor", () => {
     expect(summarizeEffect({ ...effect, wallet: "Payer" }, tx([ix(UNKNOWN)])).actor).toBeNull();
   });
 });
+
+describe("summarizeEffect token operations", () => {
+  it("classifies a wallet's parsed SPL burn instead of treating it as a send", () => {
+    const wallet = "Burner";
+    const mint = "BurnedMint";
+    const account = "BurnerTokenAccount";
+    const burnTx: CanonicalTransaction = {
+      ...tx([]),
+      accounts: [{ address: wallet, signer: true, writable: true, source: "transaction" }],
+      tokenChanges: [{ account, owner: wallet, mint, programId: TOKEN_PROGRAM, decimals: 0, pre: "1", post: "0", delta: "-1" }],
+      innerInstructions: [
+        {
+          ...ix(TOKEN_PROGRAM, "burnChecked", "spl-token"),
+          info: { account, mint, authority: wallet, tokenAmount: { amount: "1", decimals: 0 } },
+        },
+      ],
+    };
+    const effect = {
+      wallet,
+      signature: "sig",
+      slot: 1,
+      timestamp: null,
+      success: true,
+      assetChanges: [{ assetId: mint, delta: "-1" }],
+      feeLamports: "0",
+    };
+
+    expect(summarizeEffect(effect, burnTx)).toMatchObject({
+      kind: "BURN",
+      action: { programId: TOKEN_PROGRAM, instruction: "burnChecked" },
+      outflows: [{ assetId: mint, delta: "-1" }],
+    });
+
+    expect(summarizeEffect(effect, { ...burnTx, innerInstructions: [] })).toMatchObject({ kind: "SEND" });
+  });
+});

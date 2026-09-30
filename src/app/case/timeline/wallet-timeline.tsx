@@ -40,7 +40,7 @@ function headline(summary: EffectSummary, state: WalletState, assets: Assets, na
 
 /** How value moved for one wallet, to orient connectors between lanes. */
 function flowOf(s: EffectSummary): Flow {
-  if (s.kind === "SEND" || s.kind === "NFT_BUY" || s.kind === "NFT_MINT") return "out";
+  if (s.kind === "SEND" || s.kind === "BURN" || s.kind === "NFT_BUY" || s.kind === "NFT_MINT") return "out";
   if (s.kind === "RECEIVE" || s.kind === "NFT_SELL") return "in";
   if (s.kind === "NFT_TRANSFER" && s.nft) return s.nft.received.length > 0 ? "in" : "out";
   return "none";

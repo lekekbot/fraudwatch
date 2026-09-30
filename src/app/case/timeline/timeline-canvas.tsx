@@ -89,7 +89,7 @@ type Hit =
   | { type: "event"; x0: number; y0: number; x1: number; y1: number; first: number; last: number; lane: number; label?: string }
   | { type: "lane"; x0: number; y0: number; x1: number; y1: number; lane: number };
 
-type Palette = Record<"fg" | "muted" | "border" | "card" | "bg" | "send" | "receive" | "swap" | "nft" | "approval" | "neutral" | "failed", string>;
+type Palette = Record<"fg" | "muted" | "border" | "card" | "bg" | "send" | "receive" | "swap" | "nft" | "burn" | "approval" | "neutral" | "failed", string>;
 
 function readPalette(el: HTMLElement): Palette {
   const css = getComputedStyle(el);
@@ -104,6 +104,7 @@ function readPalette(el: HTMLElement): Palette {
     receive: "oklch(0.72 0.16 155)",
     swap: "oklch(0.7 0.14 250)",
     nft: "oklch(0.72 0.16 310)",
+    burn: "oklch(0.72 0.17 50)",
     approval: "oklch(0.8 0.15 80)",
     neutral: v("--muted-foreground", "#999"),
     failed: v("--destructive", "#e5484d"),
@@ -119,6 +120,7 @@ const KIND_COLOR: Partial<Record<EffectKind, keyof Palette>> = {
   NFT_MINT: "nft",
   NFT_SWAP: "nft",
   NFT_TRANSFER: "nft",
+  BURN: "burn",
   APPROVAL: "approval",
   FAILED: "failed",
 };
@@ -156,6 +158,7 @@ const KIND_WORD: Partial<Record<EffectKind, string>> = {
   NFT_MINT: "NFT mint",
   NFT_SWAP: "NFT swap",
   NFT_TRANSFER: "NFT transfer",
+  BURN: "burn",
   APPROVAL: "approval",
   STAKE: "stake",
   ACCOUNT: "account setup",

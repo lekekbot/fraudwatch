@@ -7,8 +7,8 @@ import { ArrowDownLeftIcon, ArrowUpRightIcon, ChevronDownIcon, ChevronUpIcon, Ma
 import { Button } from "@/components/ui/button";
 import type { AddressState } from "@/lib/case/address-state";
 import { graphWheelAction } from "@/lib/gestures";
-import { edgeFlow, OMITTED_NODE_ID, type GraphEdge, type GraphRanking, type WalletGraph as Graph } from "@/lib/graph/build";
-import { layoutGraph, nodeRadius, type Point } from "@/lib/graph/layout";
+import { edgeFlow, OMITTED_NODE_ID, type GraphEdge, type GraphNode, type GraphRanking, type WalletGraph as Graph } from "@/lib/graph/build";
+import { classifyLayout, layoutGraph, nodeRadius, type Point } from "@/lib/graph/layout";
 import type { Names } from "@/lib/labels/labels";
 import { AssetIcon } from "../asset-icon";
 
@@ -29,7 +29,7 @@ function readPalette(el: HTMLElement): Palette {
   };
 }
 
-type Segment = { edge: GraphEdge; from: Point; to: Point };
+type Segment = { edge: GraphEdge; from: Point; to: Point; control?: Point };
 type HoverAsset = { id: string; label: string; logo?: string };
 type HoverFlow = { kind: "sent" | "received"; count: number };
 type HoverCard = {
@@ -73,6 +73,69 @@ function distanceToSegment(p: Point, a: Point, b: Point): number {
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
+function pointOnPath(segment: Segment, progress: number): Point {
+  if (!segment.control) return { x: segment.from.x + (segment.to.x - segment.from.x) * progress, y: segment.from.y + (segment.to.y - segment.from.y) * progress };
+  const inverse = 1 - progress;
+  return {
+    x: inverse * inverse * segment.from.x + 2 * inverse * progress * segment.control.x + progress * progress * segment.to.x,
+    y: inverse * inverse * segment.from.y + 2 * inverse * progress * segment.control.y + progress * progress * segment.to.y,
+  };
+}
+
+function pathTangent(segment: Segment, progress: number): Point {
+  if (!segment.control) return { x: segment.to.x - segment.from.x, y: segment.to.y - segment.from.y };
+  return {
+    x: 2 * ((1 - progress) * (segment.control.x - segment.from.x) + progress * (segment.to.x - segment.control.x)),
+    y: 2 * ((1 - progress) * (segment.control.y - segment.from.y) + progress * (segment.to.y - segment.control.y)),
+  };
+}
+
+function distanceToPath(point: Point, segment: Segment) {
+  if (!segment.control) return distanceToSegment(point, segment.from, segment.to);
+  let distance = Infinity;
+  let previous = segment.from;
+  for (let i = 1; i <= 12; i++) {
+    const next = pointOnPath(segment, i / 12);
+    distance = Math.min(distance, distanceToSegment(point, previous, next));
+    previous = next;
+  }
+  return distance;
+}
+
+function routeControl(edge: GraphEdge, from: Point, to: Point, nodes: GraphNode[], positions: ReadonlyMap<string, Point>): Point | undefined {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = Math.hypot(dx, dy);
+  if (length < 90) return undefined;
+  const middle = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+  const obstruction = nodes.find((node) => {
+    if (node.id === edge.a || node.id === edge.b) return false;
+    const point = positions.get(node.id);
+    if (!point) return false;
+    const progress = ((point.x - from.x) * dx + (point.y - from.y) * dy) / (length * length);
+    const clearance = node.kind === "wallet" ? 42 : node.kind === "aggregate" ? 65 : 22;
+    return progress > 0.12 && progress < 0.88 && distanceToSegment(point, from, to) < clearance;
+  });
+  if (!obstruction) return undefined;
+  const point = positions.get(obstruction.id)!;
+  const cross = dx * (point.y - middle.y) - dy * (point.x - middle.x);
+  const fallback = [...edge.id].reduce((hash, char) => hash + char.charCodeAt(0), 0) % 2 ? 1 : -1;
+  const side = cross === 0 ? fallback : -Math.sign(cross);
+  const offset = obstruction.kind === "wallet" ? 46 : 32;
+  return { x: middle.x + (-dy / length) * offset * side, y: middle.y + (dx / length) * offset * side };
+}
+
+function outwardText(pos: Point, radius: number, gap = 7): { x: number; y: number; align: CanvasTextAlign; baseline: CanvasTextBaseline } {
+  const distance = Math.hypot(pos.x, pos.y);
+  if (!distance) return { x: pos.x, y: pos.y + radius + gap, align: "center", baseline: "top" };
+  const x = pos.x / distance;
+  const y = pos.y / distance;
+  if (Math.abs(x) > Math.abs(y)) {
+    return { x: pos.x + x * (radius + gap), y: pos.y, align: x > 0 ? "left" : "right", baseline: "middle" };
+  }
+  return { x: pos.x, y: pos.y + y * (radius + gap), align: "center", baseline: y > 0 ? "top" : "bottom" };
+}
+
 /**
  * Wallet interaction map: one node per address, one calm undirected line per
  * pair that directly exchanged value. Transaction detail (direction, amounts,
@@ -83,6 +146,7 @@ function distanceToSegment(p: Point, a: Point, b: Point): number {
 export function WalletGraph({
   graph,
   wallet,
+  primaryWallet,
   names,
   assetInfo,
   stateOf,
@@ -100,6 +164,8 @@ export function WalletGraph({
   onClearTimeRange,
 }: {
   graph: Graph;
+  /** Case primary. `wallet` may change as investigator focuses another mapped wallet. */
+  primaryWallet: string;
   wallet: string;
   names: Names;
   assetInfo: (assetId: string) => HoverAsset;
@@ -121,6 +187,7 @@ export function WalletGraph({
   const zoomRef = useRef<ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
   const transformRef = useRef<ZoomTransform>(zoomIdentity);
   const sizeRef = useRef({ width: 800, height: 600 });
+  const [layoutSize, setLayoutSize] = useState({ width: 800, height: 600 });
   const frameRef = useRef<number | null>(null);
   const hoverRef = useRef<{ node?: string; edge?: string }>({});
   const dragRef = useRef<{ id: string; x: number; y: number; moved: boolean } | null>(null);
@@ -128,10 +195,11 @@ export function WalletGraph({
   const [hoverCard, setHoverCard] = useState<HoverCard | null>(null);
   const [legendOpen, setLegendOpen] = useState(false);
 
-  const layout = useMemo(() => layoutGraph(graph.nodes, graph.edges, wallet), [graph, wallet]);
+  const layout = useMemo(() => layoutGraph(graph.nodes, graph.edges, primaryWallet, layoutSize), [graph, primaryWallet, layoutSize]);
   // Positions start from the layout; dragging moves them without re-running it.
   const positions = useRef(new Map<string, Point>());
   const nodesById = useMemo(() => new Map(graph.nodes.map((n) => [n.id, n])), [graph]);
+  const layoutRoles = useMemo(() => classifyLayout(graph.nodes, graph.edges), [graph]);
   const relationshipsByNode = useMemo(
     () =>
       new Map(
@@ -143,18 +211,19 @@ export function WalletGraph({
     [graph, wallet],
   );
 
-  const latest = useRef({ graph, wallet, names, stateOf, selectedNode, selectedEdge, nodesById, relationshipsByNode });
+  const latest = useRef({ graph, wallet, primaryWallet, names, stateOf, selectedNode, selectedEdge, nodesById, layoutRoles, relationshipsByNode });
   // Drawing reads props through this ref; refresh it before any effect or frame uses it.
   useLayoutEffect(() => {
-    latest.current = { graph, wallet, names, stateOf, selectedNode, selectedEdge, nodesById, relationshipsByNode };
+    latest.current = { graph, wallet, primaryWallet, names, stateOf, selectedNode, selectedEdge, nodesById, layoutRoles, relationshipsByNode };
   });
 
   const segments = useCallback((): Segment[] => {
     const out: Segment[] = [];
-    for (const edge of latest.current.graph.edges) {
+    const { graph } = latest.current;
+    for (const edge of graph.edges) {
       const from = positions.current.get(edge.a);
       const to = positions.current.get(edge.b);
-      if (from && to) out.push({ edge, from, to });
+      if (from && to) out.push({ edge, from, to, control: routeControl(edge, from, to, graph.nodes, positions.current) });
     }
     return out;
   }, []);
@@ -164,7 +233,7 @@ export function WalletGraph({
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
-    const { names, stateOf, selectedNode, selectedEdge, graph, wallet, nodesById, relationshipsByNode } = latest.current;
+    const { names, stateOf, selectedNode, selectedEdge, graph, wallet, primaryWallet, nodesById, layoutRoles } = latest.current;
     const { width, height } = sizeRef.current;
     const dpr = window.devicePixelRatio || 1;
     const t = transformRef.current;
@@ -182,7 +251,7 @@ export function WalletGraph({
     const line = 1.25 / t.k;
     const now = performance.now();
     const aggregate = positions.current.get(OMITTED_NODE_ID);
-    const primary = positions.current.get(latest.current.wallet);
+    const primary = positions.current.get(primaryWallet);
     if (aggregate && primary) {
       ctx.globalAlpha = 0.65;
       ctx.strokeStyle = p.muted;
@@ -195,14 +264,17 @@ export function WalletGraph({
       ctx.setLineDash([]);
       ctx.globalAlpha = 1;
     }
-    for (const { edge, from, to } of segments()) {
+    for (const segment of segments()) {
+      const { edge, from, to, control } = segment;
       const on = lit(edge);
       const selected = edge.id === selectedEdge;
+      const coreEdge = layoutRoles.get(edge.a) === "core" && layoutRoles.get(edge.b) === "core";
+      const bridgeEdge = layoutRoles.get(edge.a) === "bridge" || layoutRoles.get(edge.b) === "bridge";
       const perspective = edgePerspective(edge, wallet, nodesById);
       const { sent, received } = perspective;
       const sentOnly = sent > 0 && received === 0;
       const receivedOnly = received > 0 && sent === 0;
-      const intensity = Math.min(0.8, 0.45 + Math.log1p(edge.interactions.length) / 15);
+      const intensity = coreEdge ? Math.min(0.85, 0.72 + Math.log1p(edge.interactions.length) / 40) : bridgeEdge ? 0.52 : Math.min(0.48, 0.3 + Math.log1p(edge.interactions.length) / 24);
       ctx.globalAlpha = on ? (selected ? 1 : intensity) : 0.12;
       ctx.strokeStyle =
         edge.kind === "program"
@@ -214,13 +286,14 @@ export function WalletGraph({
               : selected || (on && (focusEdge || focusNode))
                 ? p.fg
                 : p.muted;
-      ctx.lineWidth = selected ? 2 / t.k : line;
+      ctx.lineWidth = selected ? 2 / t.k : coreEdge ? 1.5 / t.k : line;
       const dotted = edge.kind === "program";
       ctx.setLineDash(dotted ? [2 / t.k, 4 / t.k] : []);
       ctx.lineCap = dotted ? "round" : "butt";
       ctx.beginPath();
       ctx.moveTo(from.x, from.y);
-      ctx.lineTo(to.x, to.y);
+      if (control) ctx.quadraticCurveTo(control.x, control.y, to.x, to.y);
+      else ctx.lineTo(to.x, to.y);
       ctx.stroke();
       if (edge.kind === "interaction") {
         const { reference, counterparty } = perspective;
@@ -233,16 +306,16 @@ export function WalletGraph({
           const target = positions.current.get(flow.target);
           const targetNode = nodesById.get(flow.target);
           if (!source || !target) continue;
-          const dx = target.x - source.x;
-          const dy = target.y - source.y;
-          const length = Math.hypot(dx, dy) || 1;
-          const ux = dx / length;
-          const uy = dy / length;
-          const inset = (targetNode ? nodeRadius(targetNode) : 10) + 1 / t.k;
+          const flowSegment: Segment = { edge, from: source, to: target, control };
+          const tangent = pathTangent(flowSegment, 1);
+          const length = Math.hypot(tangent.x, tangent.y) || 1;
+          const ux = tangent.x / length;
+          const uy = tangent.y / length;
+          const inset = (targetNode ? nodeRadius(targetNode) + (layoutRoles.get(targetNode.id) === "bridge" ? 3 : 0) : 10) + 1 / t.k;
           const tipX = target.x - ux * inset;
           const tipY = target.y - uy * inset;
           const arrow = (selected ? 7 : 5.5) / t.k;
-          ctx.globalAlpha = on ? (selected || focusEdge === edge.id || focusNode ? 0.95 : 0.65) : 0.1;
+          ctx.globalAlpha = on ? (selected || focusEdge === edge.id || focusNode ? 0.95 : 0.48) : 0.1;
           ctx.fillStyle = flow.color;
           ctx.beginPath();
           ctx.moveTo(tipX, tipY);
@@ -255,11 +328,35 @@ export function WalletGraph({
           const phase = (edge.id.length % 17) / 17;
           for (let i = 0; i < particles; i++) {
             const progress = (now / 5000 + phase + i / particles) % 1;
+            const point = pointOnPath(flowSegment, progress);
             ctx.beginPath();
-            ctx.arc(source.x + dx * progress, source.y + dy * progress, (selected ? 2.3 : 1.7) / t.k, 0, Math.PI * 2);
+            ctx.arc(point.x, point.y, (selected ? 2.3 : 1.7) / t.k, 0, Math.PI * 2);
             ctx.fill();
           }
         }
+      }
+      if (edge.kind === "interaction" && (coreEdge || selected || focusEdge === edge.id)) {
+        const point = pointOnPath(segment, 0.72);
+        const tangent = pathTangent(segment, 0.72);
+        const length = Math.hypot(tangent.x, tangent.y) || 1;
+        const side = [...edge.id].reduce((hash, char) => hash + char.charCodeAt(0), 0) % 2 ? 1 : -1;
+        const badgeX = point.x + (-tangent.y / length) * (10 / t.k) * side;
+        const badgeY = point.y + (tangent.x / length) * (10 / t.k) * side;
+        const count = edge.interactions.length.toLocaleString();
+        ctx.font = `600 ${9 / t.k}px ui-sans-serif, system-ui, sans-serif`;
+        const badgeWidth = ctx.measureText(count).width + 8 / t.k;
+        ctx.globalAlpha = on ? (selected ? 1 : 0.9) : 0.12;
+        ctx.fillStyle = p.bg;
+        ctx.strokeStyle = p.border;
+        ctx.lineWidth = 1 / t.k;
+        ctx.beginPath();
+        ctx.roundRect(badgeX - badgeWidth / 2, badgeY - 6.5 / t.k, badgeWidth, 13 / t.k, 4 / t.k);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = p.fg;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(count, badgeX, badgeY);
       }
     }
     ctx.setLineDash([]);
@@ -287,57 +384,76 @@ export function WalletGraph({
     for (const n of drawNodes) {
       const pos = positions.current.get(n.id);
       if (!pos) continue;
-      const r = nodeRadius(n);
+      const role = layoutRoles.get(n.id) ?? "peripheral";
+      const r = nodeRadius(n) + (role === "bridge" ? 3 : 0);
       const known = n.kind === "aggregate" ? undefined : names.known(n.id);
       const label = nodeLabel(n, names);
-      const relationship = relationshipsByNode.get(n.id);
-      const relationshipFlow = relationship ? edgePerspective(relationship, wallet, nodesById) : undefined;
       const infrastructure = n.kind === "program" || (n.kind === "counterparty" && stateOf(n.id) === "INFRASTRUCTURE");
-      ctx.globalAlpha = litNodes.size > 0 && !litNodes.has(n.id) ? 0.3 : 1;
-      ctx.beginPath();
-      if (infrastructure || n.kind === "aggregate") ctx.roundRect(pos.x - r, pos.y - r, r * 2, r * 2, 4);
-      else ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = n.kind === "wallet" ? p.fg : p.card;
-      ctx.fill();
-      ctx.lineWidth = n.id === nodeFocus ? 2.5 : 1.5;
-      ctx.strokeStyle = n.id === nodeFocus ? p.fg : n.kind === "program" ? p.program : n.kind === "wallet" || n.kind === "aggregate" ? p.fg : p.muted;
-      ctx.stroke();
-      if (!far && n.kind !== "wallet" && n.kind !== "aggregate" && n.txCount > 0) {
-        const count = n.txCount.toLocaleString();
-        ctx.font = "600 9px ui-sans-serif, system-ui, sans-serif";
-        const badgeWidth = ctx.measureText(count).width + 8;
-        ctx.fillStyle = p.bg;
-        ctx.strokeStyle = p.border;
-        ctx.lineWidth = 1;
+      const primaryNode = n.id === primaryWallet;
+      const restingAlpha = role === "core" ? 1 : role === "bridge" ? 0.88 : role === "aggregate" ? 0.58 : 0.66;
+      const nodeAlpha = litNodes.size > 0 && !litNodes.has(n.id) ? 0.18 : restingAlpha;
+      ctx.globalAlpha = nodeAlpha;
+      if (n.kind === "aggregate") {
         ctx.beginPath();
-        ctx.roundRect(pos.x - badgeWidth / 2, pos.y - r - 15, badgeWidth, 13, 4);
+        ctx.roundRect(pos.x - 58, pos.y - 21, 116, 42, 7);
+        ctx.fillStyle = p.card;
         ctx.fill();
+        ctx.lineWidth = n.id === nodeFocus ? 2.5 : 1.5;
+        ctx.strokeStyle = n.id === nodeFocus ? p.fg : p.muted;
         ctx.stroke();
-        ctx.fillStyle = p.fg;
-        ctx.textAlign = "center";
+        ctx.font = "600 10px ui-sans-serif, system-ui, sans-serif";
+        ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        ctx.fillText(count, pos.x, pos.y - r - 8.5);
+        ctx.fillStyle = p.fg;
+        ctx.fillText("Other addresses", pos.x - 47, pos.y - 6);
+        ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
+        ctx.fillStyle = p.muted;
+        ctx.fillText(`${n.txCount.toLocaleString()} wallets`, pos.x - 47, pos.y + 8);
+        continue;
       }
-      const showLabel = !far && (close || n.kind === "wallet" || n.kind === "aggregate" || names.label(n.id) || topLabels.has(n.id));
-      if (!showLabel) continue;
-      ctx.font = known || n.kind === "wallet" || n.kind === "aggregate" ? "500 11px ui-sans-serif, system-ui, sans-serif" : "11px ui-monospace, monospace";
+      if (primaryNode) {
+        ctx.globalAlpha = nodeAlpha * 0.14;
+        ctx.fillStyle = p.fg;
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, r + 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = nodeAlpha;
+      }
+      ctx.beginPath();
+      if (infrastructure) ctx.roundRect(pos.x - r, pos.y - r, r * 2, r * 2, 4);
+      else ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = primaryNode ? p.fg : p.card;
+      ctx.fill();
+      ctx.lineWidth = n.id === nodeFocus ? 2.5 : role === "core" || role === "bridge" ? 2 : 1.5;
+      ctx.strokeStyle = n.id === nodeFocus ? p.fg : n.kind === "program" ? p.program : role === "core" || role === "bridge" ? p.fg : p.muted;
+      ctx.stroke();
+      const count = n.txCount.toLocaleString();
+      const countSize = Math.max(5, Math.min(10, (r * 1.55) / (count.length * 0.62)));
+      ctx.font = `600 ${countSize}px ui-sans-serif, system-ui, sans-serif`;
       ctx.textAlign = "center";
-      ctx.textBaseline = "top";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = primaryNode ? p.bg : p.fg;
+      ctx.fillText(count, pos.x, pos.y);
+      if (!far && primaryNode) {
+        ctx.font = "700 8px ui-sans-serif, system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        ctx.fillStyle = p.muted;
+        ctx.fillText("PRIMARY", pos.x, pos.y - r - 8);
+      }
+      const showLabel = !far && (close || role === "core" || role === "bridge" || names.label(n.id) || topLabels.has(n.id));
+      if (!showLabel) continue;
+      ctx.font = primaryNode ? "600 12px ui-sans-serif, system-ui, sans-serif" : known || n.kind === "wallet" ? "500 11px ui-sans-serif, system-ui, sans-serif" : "11px ui-monospace, monospace";
+      const labelPosition = primaryNode ? { x: pos.x, y: pos.y + r + 7, align: "center" as const, baseline: "top" as const } : outwardText(pos, r);
+      ctx.textAlign = labelPosition.align;
+      ctx.textBaseline = labelPosition.baseline;
       // A halo in the background colour keeps labels readable over lines.
       ctx.lineJoin = "round";
       ctx.lineWidth = 4;
       ctx.strokeStyle = p.bg;
-      ctx.strokeText(label, pos.x, pos.y + r + 4);
-      ctx.fillStyle = known || n.kind === "wallet" || n.kind === "aggregate" ? p.fg : p.muted;
-      ctx.fillText(label, pos.x, pos.y + r + 4);
-      if (relationshipFlow) {
-        const total = relationshipFlow.sent + relationshipFlow.received;
-        const sentRatio = total ? relationshipFlow.sent / total : 0;
-        const direction = relationshipFlow.sent === 0 ? `← ${Math.round((relationshipFlow.received / total) * 100)}%` : relationshipFlow.received === 0 ? `→ ${Math.round(sentRatio * 100)}%` : sentRatio >= 0.6 ? `→ ${Math.round(sentRatio * 100)}%` : sentRatio <= 0.4 ? `← ${Math.round((1 - sentRatio) * 100)}%` : "↔ reciprocal";
-        ctx.font = "500 9px ui-sans-serif, system-ui, sans-serif";
-        ctx.fillStyle = relationshipFlow.sent === 0 ? p.receive : relationshipFlow.received === 0 ? p.send : p.muted;
-        ctx.fillText(direction, pos.x, pos.y + r + 18);
-      }
+      ctx.strokeText(label, labelPosition.x, labelPosition.y);
+      ctx.fillStyle = known || n.kind === "wallet" ? p.fg : p.muted;
+      ctx.fillText(label, labelPosition.x, labelPosition.y);
     }
     ctx.globalAlpha = 1;
   }, [segments]);
@@ -346,17 +462,23 @@ export function WalletGraph({
     if (frameRef.current === null) frameRef.current = requestAnimationFrame(draw);
   }, [draw]);
 
-  const fit = useCallback(() => {
+  const fit = useCallback((source: ReadonlyMap<string, Point> = positions.current) => {
     const canvas = canvasRef.current;
-    if (!canvas || !zoomRef.current || positions.current.size === 0) return;
-    const pts = [...positions.current.values()];
-    const pad = 60;
+    if (!canvas || !zoomRef.current || source.size === 0) return;
+    const { graph, primaryWallet, selectedNode, selectedEdge } = latest.current;
+    const important = new Set<string>([primaryWallet, ...graph.nodes.filter((node) => node.kind === "wallet").map((node) => node.id)]);
+    if (selectedNode) important.add(selectedNode);
+    const selected = selectedEdge ? graph.edges.find((edge) => edge.id === selectedEdge) : undefined;
+    if (selected) important.add(selected.a).add(selected.b);
+    const pts = [...important].flatMap((id) => (source.get(id) ? [source.get(id)!] : []));
+    if (pts.length === 0) return;
+    const pad = 90;
     const x0 = Math.min(...pts.map((q) => q.x)) - pad;
     const x1 = Math.max(...pts.map((q) => q.x)) + pad;
     const y0 = Math.min(...pts.map((q) => q.y)) - pad;
     const y1 = Math.max(...pts.map((q) => q.y)) + pad;
     const { width, height } = sizeRef.current;
-    const k = Math.min(2, width / (x1 - x0), height / (y1 - y0));
+    const k = Math.min(1.15, Math.max(0.65, Math.min(width / (x1 - x0), height / (y1 - y0))));
     const t = zoomIdentity.translate(width / 2 - (k * (x0 + x1)) / 2, height / 2 - (k * (y0 + y1)) / 2).scale(k);
     select(canvas).call(zoomRef.current.transform, t);
   }, []);
@@ -379,6 +501,7 @@ export function WalletGraph({
       const width = canvas.parentElement?.clientWidth ?? 800;
       const height = canvas.parentElement?.clientHeight ?? 600;
       sizeRef.current = { width, height };
+      setLayoutSize((current) => (current.width === width && current.height === height ? current : { width, height }));
       const dpr = window.devicePixelRatio || 1;
       canvas.width = Math.round(width * dpr);
       canvas.height = Math.round(height * dpr);
@@ -406,7 +529,7 @@ export function WalletGraph({
   const hitAt = useCallback(
     (event: { clientX: number; clientY: number }): { node?: string; edge?: string } => {
       const w = toWorld(event);
-      const { graph, selectedNode, selectedEdge, wallet, nodesById } = latest.current;
+      const { graph, selectedNode, selectedEdge, wallet, nodesById, layoutRoles } = latest.current;
       const selectedRelationship = selectedEdge ? graph.edges.find((edge) => edge.id === selectedEdge) : undefined;
       const focused = hoverRef.current.node ?? selectedNode ?? (selectedRelationship ? edgePerspective(selectedRelationship, wallet, nodesById).counterparty : undefined);
       const hitNodes = [...graph.nodes].sort((a, b) => Number(a.id === focused) - Number(b.id === focused));
@@ -414,12 +537,14 @@ export function WalletGraph({
         const n = hitNodes[i];
         const pos = positions.current.get(n.id);
         if (!pos) continue;
-        if (Math.hypot(pos.x - w.x, pos.y - w.y) <= nodeRadius(n) + 4) return { node: n.id };
+        const radius = nodeRadius(n) + (layoutRoles.get(n.id) === "bridge" ? 3 : 0);
+        if (n.kind === "aggregate" ? Math.abs(pos.x - w.x) <= 62 && Math.abs(pos.y - w.y) <= 25 : Math.hypot(pos.x - w.x, pos.y - w.y) <= radius + 4) return { node: n.id };
       }
-      const tolerance = 6 / transformRef.current.k;
       let best: { id: string; d: number } | null = null;
       for (const sgm of segments()) {
-        const d = distanceToSegment(w, sgm.from, sgm.to);
+        const coreEdge = layoutRoles.get(sgm.edge.a) === "core" && layoutRoles.get(sgm.edge.b) === "core";
+        const tolerance = (coreEdge ? 9 : 6) / transformRef.current.k;
+        const d = distanceToPath(w, sgm);
         if (d < tolerance && (!best || d < best.d)) best = { id: sgm.edge.id, d };
       }
       return best ? { edge: best.id } : {};
@@ -473,13 +598,39 @@ export function WalletGraph({
     return () => canvas.removeEventListener("wheel", onWheel);
   }, []);
 
-  // New graph: start from the layout and frame it. Declared after the size and
-  // zoom effects so both exist on the first fit.
+  // Move existing nodes to new topology targets instead of abruptly rebuilding the graph.
   useEffect(() => {
-    positions.current = new Map(layout);
-    fit();
-    schedule();
-  }, [layout, fit, schedule]);
+    if (positions.current.size === 0) {
+      positions.current = new Map(layout);
+      fit(layout);
+      schedule();
+      return;
+    }
+    const from = new Map(positions.current);
+    for (const [id, target] of layout) {
+      if (from.has(id)) continue;
+      const edge = graph.edges.find((item) => item.a === id || item.b === id);
+      const parent = edge ? from.get(edge.a === id ? edge.b : edge.a) : undefined;
+      from.set(id, parent ?? target);
+    }
+    fit(layout);
+    const started = performance.now();
+    let animation = 0;
+    const step = (now: number) => {
+      const progress = Math.min(1, (now - started) / 320);
+      const eased = 1 - (1 - progress) ** 3;
+      positions.current = new Map(
+        [...layout].map(([id, target]) => {
+          const start = from.get(id) ?? target;
+          return [id, { x: start.x + (target.x - start.x) * eased, y: start.y + (target.y - start.y) * eased }];
+        }),
+      );
+      schedule();
+      if (progress < 1) animation = requestAnimationFrame(step);
+    };
+    animation = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(animation);
+  }, [graph.edges, layout, fit, schedule]);
 
   return (
     <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -530,6 +681,17 @@ export function WalletGraph({
           } else if (edge) {
             const { counterparty, sent, received } = edgePerspective(edge, latest.current.wallet, latest.current.nodesById);
             const assets = (edge.summary?.assets.map((asset) => asset.assetId) ?? [...new Set(edge.interactions.flatMap((it) => it.movements.map((m) => m.assetId)))]).map(assetInfo);
+            const flowTotal = sent + received;
+            const flowSummary =
+              edge.kind !== "interaction" || flowTotal === 0
+                ? undefined
+                : sent === 0
+                  ? "Incoming only · 100%"
+                  : received === 0
+                    ? "Outgoing only · 100%"
+                    : sent >= received
+                      ? `Mostly outgoing · ${Math.round((sent / flowTotal) * 100)}%`
+                      : `Mostly incoming · ${Math.round((received / flowTotal) * 100)}%`;
             place({
               title: latest.current.names.of(counterparty),
               kicker: edge.kind === "program" ? "Program connection" : "Wallet interaction",
@@ -541,6 +703,7 @@ export function WalletGraph({
                 ...(edge.summary?.assets.length
                   ? [edge.summary.assets.slice(0, 3).map((asset) => `${assetInfo(asset.assetId).label} ${asset.txCount.toLocaleString()} tx`).join(" · ")]
                   : []),
+                ...(flowSummary ? [flowSummary] : []),
               ],
               flows:
                 edge.kind === "interaction"
@@ -684,7 +847,7 @@ export function WalletGraph({
           >
             <PlusIcon />
           </Button>
-          <Button variant="ghost" size="icon-sm" aria-label="Fit graph" title="Fit graph" onClick={fit}>
+          <Button variant="ghost" size="icon-sm" aria-label="Fit graph" title="Fit graph" onClick={() => fit()}>
             <MaximizeIcon />
           </Button>
           <Button

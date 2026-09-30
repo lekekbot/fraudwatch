@@ -534,6 +534,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
           <WalletGraph
             graph={graph}
             wallet={graphWallet}
+            primaryWallet={c.primaryWallet}
             names={names}
             assetInfo={(assetId) => ({ id: assetId, label: assetLabel(assetId, walletStates.assets), logo: assetLogo(assetId, walletStates.assets) })}
             stateOf={(address) => addressState(address, c, registry, programs)}

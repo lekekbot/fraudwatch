@@ -32,6 +32,9 @@ export const DEFAULT_LIMITS: IngestionLimits = {
   concurrency: 4,
 };
 
+// Helius's token-account history index starts in December 2022; older ranges retain the standard RPC scan.
+const INDEXED_TOKEN_HISTORY_START = Date.parse("2022-12-01T00:00:00.000Z") / 1000;
+
 export type IngestionPhase = "signatures" | "transactions" | "token_accounts";
 
 export type IngestionProgress = {
@@ -107,6 +110,59 @@ type SignatureScan = {
   limitHit: "signatures" | "pages" | null;
   missingBlockTime: number;
 };
+
+type IndexedHistoryScan = {
+  entries: Array<{ signature: string; blockTime: number; tx: CanonicalTransaction; raw: RawParsedTransaction }>;
+  limitHit: "signatures" | "pages" | null;
+  missingBlockTime: number;
+};
+
+async function scanIndexedHistory(
+  fetchPage: (paginationToken?: string) => Promise<{ data: RawParsedTransaction[]; paginationToken?: string | null }>,
+  limits: IngestionLimits,
+  onPage?: (found: number) => void,
+): Promise<IndexedHistoryScan> {
+  const scan: IndexedHistoryScan = { entries: [], limitHit: null, missingBlockTime: 0 };
+  let paginationToken: string | undefined;
+  for (let page = 0; ; page++) {
+    if (page >= limits.maxPagesPerAddress) {
+      scan.limitHit = "pages";
+      return scan;
+    }
+    const result = await fetchPage(paginationToken);
+    for (const raw of result.data) {
+      if (raw.blockTime == null) {
+        scan.missingBlockTime++;
+        continue;
+      }
+      if (scan.entries.length >= limits.maxSignaturesPerAddress) {
+        scan.limitHit = "signatures";
+        return scan;
+      }
+      const tx = canonicalize(raw);
+      scan.entries.push({ signature: tx.signature, blockTime: raw.blockTime, tx, raw });
+    }
+    onPage?.(scan.entries.length);
+    if (!result.paginationToken) return scan;
+    paginationToken = result.paginationToken;
+  }
+}
+
+function splitForIndexedHistory(ranges: CaseRange[]): { indexed: CaseRange[]; standard: CaseRange[] } {
+  const indexed: CaseRange[] = [];
+  const standard: CaseRange[] = [];
+  for (const range of ranges) {
+    const start = Date.parse(range.start) / 1000;
+    const end = Date.parse(range.end) / 1000;
+    if (start < INDEXED_TOKEN_HISTORY_START) {
+      standard.push({ ...range, end: new Date(Math.min(end, INDEXED_TOKEN_HISTORY_START) * 1000).toISOString() });
+    }
+    if (end > INDEXED_TOKEN_HISTORY_START) {
+      indexed.push({ ...range, start: new Date(Math.max(start, INDEXED_TOKEN_HISTORY_START) * 1000).toISOString() });
+    }
+  }
+  return { indexed, standard };
+}
 
 /**
  * Page getSignaturesForAddress from newest to oldest, keeping signatures whose
@@ -279,10 +335,53 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
       }
       stats.rangesFetched = gaps;
 
-      if (gaps.length > 0) {
+      let standardGaps = gaps;
+      if (gaps.length > 0 && adapter.getTransactionsForAddress) {
+        const split = splitForIndexedHistory(gaps);
+        standardGaps = split.standard;
+        for (const gap of split.indexed) {
+          const rangeSeconds = { start: Date.parse(gap.start) / 1000, end: Date.parse(gap.end) / 1000 };
+          try {
+            const scan = await guard(
+              scanIndexedHistory(
+                (paginationToken) => adapter.getTransactionsForAddress!(wallet, rangeSeconds, paginationToken, signal),
+                limits,
+                (found) => progress("transactions", found, found),
+              ),
+            );
+            const toSave: Array<{ tx: CanonicalTransaction; raw: RawParsedTransaction }> = [];
+            for (const entry of scan.entries) {
+              if (!signatures.has(entry.signature)) newEntries.push(entry);
+              signatures.set(entry.signature, entry.blockTime);
+              transactions.set(entry.signature, entry.tx);
+              toSave.push({ tx: entry.tx, raw: entry.raw });
+              stats.fetchedTransactions++;
+            }
+            if (toSave.length > 0) await write((c) => c.putTransactions(toSave));
+            if (scan.limitHit) {
+              complete = false;
+              warnings.push(
+                scan.limitHit === "signatures"
+                  ? `Indexed wallet history: stopped at the safety limit of ${limits.maxSignaturesPerAddress.toLocaleString()} transactions.`
+                  : `Indexed wallet history: stopped after ${limits.maxPagesPerAddress.toLocaleString()} pages.`,
+              );
+            }
+            if (scan.missingBlockTime > 0) {
+              complete = false;
+              warnings.push(`Indexed wallet history: ${scan.missingBlockTime} transaction(s) had no block time.`);
+            }
+          } catch (err) {
+            if (err instanceof Cancelled) throw err;
+            // Paid Helius history may be unavailable on this key; preserve correctness with standard RPC.
+            standardGaps.push(gap);
+          }
+        }
+      }
+
+      if (standardGaps.length > 0) {
         progress("signatures", 0, 0);
         try {
-          for (const gap of gaps) {
+          for (const gap of standardGaps) {
             const base = signatures.size;
             const scan = await guard(
               scanSignatures(adapter, wallet, gap, limits, signal, (found) => progress("signatures", 0, 0, base + found)),
@@ -299,7 +398,7 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
 
       await guard(fetchMissing());
 
-      if (gaps.length > 0) {
+      if (standardGaps.length > 0) {
         // Currently owned token accounts, plus any this wallet owned in the loaded
         // transactions (covers accounts closed since).
         const owned = new Set<string>();
@@ -320,9 +419,10 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
 
         tokenAccounts.push(...owned);
         progress("token_accounts", 0, tokenAccounts.length);
-        for (const [i, account] of tokenAccounts.entries()) {
+        let accountsDone = 0;
+        await mapPool(tokenAccounts, limits.concurrency, async (account) => {
           try {
-            for (const gap of gaps) {
+            for (const gap of standardGaps) {
               addScan(await guard(scanSignatures(adapter, account, gap, limits, signal)), `Token account ${account}`);
             }
           } catch (err) {
@@ -330,8 +430,8 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
             complete = false;
             warnings.push(`Token account ${account}: history unavailable (${(err as Error).message}).`);
           }
-          progress("token_accounts", i + 1, tokenAccounts.length);
-        }
+          progress("token_accounts", ++accountsDone, tokenAccounts.length);
+        });
 
         await guard(fetchMissing());
       }
