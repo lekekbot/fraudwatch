@@ -34,6 +34,7 @@ import { getRpcSettings } from "@/lib/db/rpc-settings";
 import { findActivitySpan } from "@/lib/ingest/activity-span";
 import { createGenericAdapter } from "@/lib/rpc/generic-adapter";
 import { parseMapParams } from "@/lib/routing/map-params";
+import { buildCasePath } from "@/lib/routing/case-path";
 
 type Pending = { value: { name: string; primaryWallet: string; range: CaseRange }; duplicates: FraudWatchCase[] };
 
@@ -75,7 +76,7 @@ export function NewCaseForm() {
     try {
       const fwCase = createCase(value);
       await saveCase(getDb(), fwCase);
-      router.push(`/case/?id=${encodeURIComponent(fwCase.id)}`);
+      router.push(buildCasePath(fwCase.id, "timeline"));
     } catch (err) {
       setSaving(false);
       toast.error(err instanceof Error ? err.message : "Could not save the case.");
@@ -269,7 +270,7 @@ export function NewCaseForm() {
             {pending?.duplicates.map((d) => (
               <li key={d.id}>
                 <Link
-                  href={`/case/?id=${encodeURIComponent(d.id)}`}
+                  href={buildCasePath(d.id, "timeline")}
                   className={buttonVariants({ variant: "outline", className: "w-full justify-between" })}
                 >
                   <span className="truncate">{d.name}</span>

@@ -9,7 +9,7 @@ import { registry } from "@/lib/protocols/registry";
 import { parseUnits } from "@/lib/solana/amount";
 import type { EffectKind } from "@/lib/state/summarize";
 import { type FilterableTx, type TxFilter, EMPTY_FILTER, isFilterActive, movedAssets, toggled } from "@/lib/timeline/filter";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 import { type Assets, assetLabel } from "./asset-format";
 import { PanelSection } from "./panel";
 

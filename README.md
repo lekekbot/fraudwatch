@@ -10,7 +10,7 @@ FraudWatch maps Solana wallet transactions in time order, across several wallets
 - lets you label, tag and bookmark addresses and transactions;
 - recognises known protocols from a versioned JSON registry (`protocols/`).
 
-The app runs entirely in the browser. It has no server, no API routes and no application database. Transactions, cases and labels are stored locally in IndexedDB. Your RPC endpoint stays on your machine and is never put in URLs or exports.
+The investigation data stays entirely in the browser. FraudWatch has no API routes or application database: transactions, cases and labels are stored locally in IndexedDB, while Next serves the UI and deep links. Your RPC endpoint stays on your machine and is never put in URLs.
 
 ## Getting started
 
@@ -28,8 +28,8 @@ Open the app, add your Solana RPC endpoint in settings and create a case for a w
 | Command | What it does |
 |---|---|
 | `pnpm dev` | Start the dev server |
-| `pnpm build` | Build the static export into `out/` |
-| `pnpm preview` | Serve the built `out/` folder |
+| `pnpm build` | Build the production app |
+| `pnpm preview` | Serve the production build |
 | `pnpm test` | Run the Vitest suite |
 | `pnpm typecheck` | Generate Next route types and run `tsc` |
 | `pnpm lint` | Run ESLint |

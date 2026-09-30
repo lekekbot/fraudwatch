@@ -57,6 +57,17 @@ describe("buildInteractionGraph", () => {
       ["back", [{ from: B, to: A, assetId: "USDC", amount: "40" }]],
     ]);
     expect(edgeFlow(lines[0])).toEqual({ from: A, to: B, forward: 3, reverse: 1, bidirectional: true });
+    expect(lines[0].summary).toMatchObject({
+      totalInteractions: 4,
+      aToB: 3,
+      bToA: 1,
+      activeDays: 4,
+      activityPattern: "Long-running",
+      assets: [
+        { assetId: "USDC", txCount: 3 },
+        { assetId: "SOL", txCount: 1 },
+      ],
+    });
     expect(g.counts).toMatchObject({ connections: 1, transactions: 4 });
   });
 

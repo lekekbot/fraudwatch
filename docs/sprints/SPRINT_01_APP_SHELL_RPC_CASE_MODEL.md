@@ -2,7 +2,7 @@
 
 **Status:** ✅ Complete (checked 2026-09-24)
 
-- Screens: home (`src/app/home-view.tsx`), new case (`src/app/cases/new/`), RPC settings (`src/app/settings/rpc/`), case shell (`src/app/case/`), `/map` startup (`src/app/map/`).
+- Screens: home (`src/app/(site)/home-view.tsx`), new case (`src/app/(site)/cases/new/`), RPC settings (`src/app/(site)/settings/rpc/`), case shell (`src/app/case/`), `/map` startup (`src/app/(site)/map/`).
 - Model and storage: `src/lib/case/model.ts`, Dexie `cases` + `rpc_settings` stores in `src/lib/db/`.
 - Validation: Solana address, range, RPC URL scheme, connection test (`getVersion` + `getLatestBlockhash`), duplicate-case prompt.
 - `pnpm test` (33 tests), `pnpm typecheck`, `pnpm lint` all pass.
@@ -38,7 +38,7 @@ Inputs:
 
 ```text
 RPC URL
-provider type: auto / generic / enhanced
+provider: standard Solana JSON-RPC
 test connection
 save locally
 ```
@@ -53,7 +53,6 @@ type FraudWatchCase = {
   version: number;
   name: string;
 
-  chain: "solana";
 
   primaryWallet: string;
 
@@ -77,10 +76,8 @@ type FraudWatchCase = {
 ```ts
 type MappedWalletConfig = {
   address: string;
-  role: "primary" | "mapped";
 
   addedFromWallet?: string;
-  addedFromTransaction?: string;
 
   rangeMode:
     | "case"

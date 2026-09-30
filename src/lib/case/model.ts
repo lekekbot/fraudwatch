@@ -1,15 +1,10 @@
 import { isValidSolanaAddress, shortenAddress } from "@/lib/solana/address";
 import { type CaseRange, isValidRange, rangeFromDates } from "./range";
 
-/** v2 (Sprint 06): labels and tags live in the `address_labels` table, not the case. */
-export const CASE_SCHEMA_VERSION = 2;
-
 export type MappedWalletConfig = {
   address: string;
-  role: "primary" | "mapped";
 
   addedFromWallet?: string;
-  addedFromTransaction?: string;
 
   rangeMode: "case" | "first_interaction" | "custom";
 
@@ -31,10 +26,7 @@ export type Bookmark = {
 
 export type FraudWatchCase = {
   id: string;
-  version: number;
   name: string;
-
-  chain: "solana";
 
   primaryWallet: string;
 
@@ -132,12 +124,10 @@ export function createCase(
   const timestamp = (deps.now ?? new Date()).toISOString();
   return {
     id: deps.id ?? crypto.randomUUID(),
-    version: CASE_SCHEMA_VERSION,
     name: value.name,
-    chain: "solana",
     primaryWallet: value.primaryWallet,
     range: value.range,
-    mappedWallets: [{ address: value.primaryWallet, role: "primary", rangeMode: "case" }],
+    mappedWallets: [{ address: value.primaryWallet, rangeMode: "case" }],
     createdAt: timestamp,
     updatedAt: timestamp,
   };

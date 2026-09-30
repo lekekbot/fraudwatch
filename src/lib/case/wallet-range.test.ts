@@ -30,15 +30,12 @@ describe("mapWallet", () => {
       rangeMode: "first_interaction",
       start: "2026-07-12T13:59:48.000Z",
       addedFromWallet: A,
-      addedFromTransaction: "sig",
     });
     expect(c.mappedWallets[1]).toEqual({
       address: B,
-      role: "mapped",
       rangeMode: "first_interaction",
       customStart: "2026-07-12T13:59:48.000Z",
       addedFromWallet: A,
-      addedFromTransaction: "sig",
     });
     expect(walletRange(c, c.mappedWallets[1])).toEqual({ start: "2026-07-12T13:59:48.000Z", end: RANGE.end });
     expect(walletRanges(c)[A]).toEqual(RANGE);

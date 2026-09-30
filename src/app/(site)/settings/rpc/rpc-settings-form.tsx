@@ -8,24 +8,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useLocalQuery } from "@/hooks/use-local-db";
 import { getDb } from "@/lib/db/db";
 import { clearRpcSettings, getRpcSettings, saveRpcSettings } from "@/lib/db/rpc-settings";
-import { type RpcProviderType } from "@/lib/rpc/settings";
 import { type RpcTestResult, testRpcConnection } from "@/lib/rpc/test-connection";
 import { validateRpcUrl } from "@/lib/rpc/url";
-
-const PROVIDER_ITEMS: { value: RpcProviderType; label: string; description: string }[] = [
-  { value: "auto", label: "Auto", description: "Detect capabilities (full detection arrives in a later sprint)." },
-  { value: "generic", label: "Generic", description: "Standard Solana JSON-RPC methods only." },
-  { value: "enhanced", label: "Enhanced", description: "Provider with enhanced history APIs, e.g. Helius." },
-];
 
 export function RpcSettingsForm() {
   const stored = useLocalQuery((db) => getRpcSettings(db), []);
   const [url, setUrl] = useState("");
-  const [providerType, setProviderType] = useState<RpcProviderType>("auto");
   const [urlError, setUrlError] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<RpcTestResult | null>(null);
@@ -39,7 +30,6 @@ export function RpcSettingsForm() {
     setHydrated(true);
     if (stored.data) {
       setUrl(stored.data.url);
-      setProviderType(stored.data.providerType);
     }
   }, [stored, hydrated]);
 
@@ -78,7 +68,7 @@ export function RpcSettingsForm() {
           }
         : undefined;
     try {
-      await saveRpcSettings(getDb(), { url: valid, providerType, lastTest });
+      await saveRpcSettings(getDb(), { url: valid, lastTest });
       toast.success(lastTest?.ok ? "RPC saved locally." : "RPC saved locally (connection not verified).");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not save RPC settings.");
@@ -88,7 +78,6 @@ export function RpcSettingsForm() {
   async function clear() {
     await clearRpcSettings(getDb());
     setUrl("");
-    setProviderType("auto");
     setTestResult(null);
     toast.success("RPC settings cleared from this browser.");
   }
@@ -141,27 +130,6 @@ export function RpcSettingsForm() {
               ) : (
                 <FieldDescription>Include any API key your provider requires. Must use https://.</FieldDescription>
               )}
-            </Field>
-
-            <Field>
-              <FieldLabel htmlFor="rpc-provider">Provider type</FieldLabel>
-              <Select
-                items={PROVIDER_ITEMS}
-                value={providerType}
-                onValueChange={(value) => value && setProviderType(value as RpcProviderType)}
-              >
-                <SelectTrigger id="rpc-provider" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PROVIDER_ITEMS.map((item) => (
-                    <SelectItem key={item.value} value={item.value}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <FieldDescription>{PROVIDER_ITEMS.find((i) => i.value === providerType)?.description}</FieldDescription>
             </Field>
 
             {testResult && <TestResultAlert result={testResult} />}

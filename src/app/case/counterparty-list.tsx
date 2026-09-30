@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { AddressState } from "@/lib/case/address-state";
 import type { Names } from "@/lib/labels/labels";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 import { PanelSection } from "./panel";
 
 export type CounterpartyRow = { address: string; count: number; state: AddressState };

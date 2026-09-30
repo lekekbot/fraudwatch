@@ -1,15 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { FolderOpenIcon, PlusIcon, ServerIcon, UploadIcon } from "lucide-react";
+import { FolderOpenIcon, PlusIcon, ServerIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { useLocalQuery } from "@/hooks/use-local-db";
 import { formatRange } from "@/lib/case/range";
 import { listRecentCases } from "@/lib/db/cases";
 import { getRpcSettings } from "@/lib/db/rpc-settings";
+import { buildCasePath } from "@/lib/routing/case-path";
 import { redactRpcUrl } from "@/lib/rpc/url";
 import { shortenAddress } from "@/lib/solana/address";
 
@@ -34,7 +34,7 @@ export function HomeView() {
         </Alert>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2">
         <Link href="/cases/new/" className={buttonVariants({ size: "lg", className: "h-auto justify-start gap-3 py-4" })}>
           <PlusIcon />
           New case
@@ -51,13 +51,6 @@ export function HomeView() {
             </span>
           </span>
         </Link>
-        <Button variant="outline" size="lg" className="h-auto justify-start gap-3 py-4" disabled title="Arrives in Sprint 10">
-          <UploadIcon />
-          <span className="flex flex-col items-start">
-            Import case
-            <span className="text-xs font-normal text-muted-foreground">Coming soon</span>
-          </span>
-        </Button>
       </div>
 
       <Card>
@@ -75,7 +68,7 @@ export function HomeView() {
               {cases.data.map((c) => (
                 <li key={c.id}>
                   <Link
-                    href={`/case/?id=${encodeURIComponent(c.id)}`}
+                    href={buildCasePath(c.id, "timeline")}
                     className="flex items-center justify-between gap-4 py-3 hover:bg-muted/50"
                   >
                     <span className="flex min-w-0 flex-col">

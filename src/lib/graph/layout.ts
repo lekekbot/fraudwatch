@@ -3,8 +3,8 @@ import type { GraphEdge, GraphNode } from "./build";
 
 export type Point = { x: number; y: number };
 
-/** Node radius in px: mapped wallets are largest; others grow with the square root of their transaction count. */
-export const nodeRadius = (n: GraphNode) => (n.kind === "wallet" ? 20 : Math.min(18, 7 + Math.sqrt(n.txCount) * 2));
+/** Wallet identity stays primary; interaction volume is shown in a separate badge. */
+export const nodeRadius = (n: GraphNode) => (n.kind === "wallet" ? 16 : n.kind === "aggregate" ? 13 : n.kind === "program" ? 6 : 8);
 
 function radialLayout(nodes: GraphNode[], edges: GraphEdge[], pinned: string): Map<string, Point> | null {
   const peers = nodes.filter((n) => n.id !== pinned && n.kind !== "aggregate");

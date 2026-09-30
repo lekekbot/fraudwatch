@@ -114,10 +114,6 @@ export function IngestionPanel({
           {state.lastLoadedAt.slice(0, 16).replace("T", " ")} UTC
         </span>
       )}
-      {rpc?.providerType === "enhanced" && (
-        <span className="text-xs text-muted-foreground">Enhanced provider APIs are not used yet; loading with standard RPC.</span>
-      )}
-
       {state.status === "running" && <ProgressLines progress={state.progress} names={names} />}
 
       {state.status === "error" && (

@@ -116,7 +116,6 @@ export class FraudWatchDB extends Dexie {
           .modify((c: V1Case) => {
             delete c.labels;
             delete c.tags;
-            c.version = 2;
           });
       });
   }

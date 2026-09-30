@@ -8,7 +8,7 @@
 - Ingestion: `src/lib/ingest/ingest.ts`. Order: wallet signatures → transactions → token accounts (currently owned under both token programs, plus any the wallet owned in loaded transactions) → their signatures → missing transactions. Signatures are deduplicated per wallet and transactions across wallets. Safety limits (`DEFAULT_LIMITS`): 5,000 in-range signatures and 25 pages per address, 4 parallel `getTransaction` calls.
 - UI: "Transactions" card on the case page (`src/app/case/ingestion-panel.tsx`) with progress, a Cancel button, per-wallet coverage and warnings, and a partial-history banner.
 - Tests replay the recorded mainnet fixtures, including the transfer reachable only via a token account and the 1,000-transaction generated wallet. A live mainnet run of the A → B → C wallets matched the fixture.
-- Not yet: results are held in memory only (the cache is Sprint 03); `enhanced` provider type falls back to standard RPC; safety limits aren't exposed in the UI.
+- Not yet: results are held in memory only (the cache is Sprint 03); safety limits aren't exposed in the UI.
 
 **Goal:** Retrieve bounded wallet history using standard Solana RPC methods.
 
@@ -58,7 +58,7 @@ retrieve relevant signatures when necessary
 merge + deduplicate
 ```
 
-Keep this adapter separate from enhanced providers.
+Keep provider-specific methods out of this adapter.
 
 ## Canonical transaction
 

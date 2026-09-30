@@ -31,6 +31,18 @@ export type Interaction = {
   movements: Movement[];
 };
 
+export type RelationshipSummary = {
+  totalInteractions: number;
+  aToB: number;
+  bToA: number;
+  assets: { assetId: string; txCount: number }[];
+  transactionTypes: { kind: EffectKind; count: number }[];
+  firstInteraction: number | null;
+  lastInteraction: number | null;
+  activeDays: number;
+  activityPattern: "One-off" | "Single burst" | "Recurring" | "Long-running";
+};
+
 export type GraphEdge = {
   /** Order-independent: the same for A–B and B–A. */
   id: string;
@@ -39,7 +51,46 @@ export type GraphEdge = {
   kind: "interaction" | "program";
   /** Chronological. */
   interactions: Interaction[];
+  /** Precomputed once when the filtered graph is built; shared by every graph view. */
+  summary?: RelationshipSummary;
 };
+
+export function summarizeRelationship(edge: Pick<GraphEdge, "a" | "b" | "interactions">): RelationshipSummary {
+  const assets = new Map<string, Set<string>>();
+  const kinds = new Map<EffectKind, number>();
+  const days = new Set<string>();
+  const times: number[] = [];
+  let aToB = 0;
+  let bToA = 0;
+  for (const interaction of edge.interactions) {
+    kinds.set(interaction.kind, (kinds.get(interaction.kind) ?? 0) + 1);
+    if (interaction.time !== null) {
+      times.push(interaction.time);
+      days.add(new Date(interaction.time).toISOString().slice(0, 10));
+    }
+    if (interaction.movements.some((movement) => movement.from === edge.a && movement.to === edge.b)) aToB++;
+    if (interaction.movements.some((movement) => movement.from === edge.b && movement.to === edge.a)) bToA++;
+    for (const movement of interaction.movements) {
+      if (!assets.has(movement.assetId)) assets.set(movement.assetId, new Set());
+      assets.get(movement.assetId)!.add(interaction.signature);
+    }
+  }
+  const firstInteraction = times.length ? Math.min(...times) : null;
+  const lastInteraction = times.length ? Math.max(...times) : null;
+  const spanDays = firstInteraction === null || lastInteraction === null ? 0 : (lastInteraction - firstInteraction) / 86_400_000;
+  const totalInteractions = edge.interactions.length;
+  return {
+    totalInteractions,
+    aToB,
+    bToA,
+    assets: [...assets].map(([assetId, signatures]) => ({ assetId, txCount: signatures.size })).sort((x, y) => y.txCount - x.txCount || x.assetId.localeCompare(y.assetId)),
+    transactionTypes: [...kinds].map(([kind, count]) => ({ kind, count })).sort((x, y) => y.count - x.count || x.kind.localeCompare(y.kind)),
+    firstInteraction,
+    lastInteraction,
+    activeDays: days.size,
+    activityPattern: totalInteractions <= 1 ? "One-off" : days.size <= 1 ? "Single burst" : spanDays >= 30 && days.size >= 3 ? "Recurring" : "Long-running",
+  };
+}
 
 /** Actual value-flow direction across an aggregate edge, independent of its alphabetic endpoint order. */
 export function edgeFlow(edge: GraphEdge) {
@@ -144,13 +195,17 @@ export function buildInteractionGraph(
     });
   }
 
-  const all: GraphEdge[] = [...edges.values()].map((edge) => ({
-    id: edge.id,
-    a: edge.a,
-    b: edge.b,
-    kind: edge.kind,
-    interactions: [...edge.interactions].sort((x, y) => (x.time ?? 0) - (y.time ?? 0) || x.signature.localeCompare(y.signature)),
-  }));
+  const all: GraphEdge[] = [...edges.values()].map((edge) => {
+    const built: GraphEdge = {
+      id: edge.id,
+      a: edge.a,
+      b: edge.b,
+      kind: edge.kind,
+      interactions: [...edge.interactions].sort((x, y) => (x.time ?? 0) - (y.time ?? 0) || x.signature.localeCompare(y.signature)),
+    };
+    built.summary = summarizeRelationship(built);
+    return built;
+  });
   const programEdges = all.filter((e) => e.kind === "program");
   const drawn = all.filter((e) => e.kind === "interaction" || options.showPrograms);
 

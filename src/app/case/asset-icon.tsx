@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 
 /** Remote token artwork with a readable symbol fallback when metadata is absent or broken. */
 export function AssetIcon({ label, logo, className }: { label: string; logo?: string; className?: string }) {
