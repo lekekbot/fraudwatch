@@ -11,7 +11,7 @@ import type { EffectKind } from "@/lib/state/summarize";
 import { type FilterableTx, type TxFilter, EMPTY_FILTER, isFilterActive, movedAssets, toggled } from "@/lib/timeline/filter";
 import { cn } from "cn";
 import { type Assets, assetLabel } from "./asset-format";
-import { PanelSection } from "./panel";
+import { PanelSection, ShowMoreList } from "./panel";
 
 const KINDS: { kind: EffectKind; label: string; dot: string }[] = [
   { kind: "SEND", label: "Send", dot: "bg-destructive" },
@@ -86,7 +86,6 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
   const tagRows = [...tagCounts].sort((a, b) => b[1] - a[1]);
 
   // Minimum amount: typed text and asset, applied when it parses.
-  const [showAllAssets, setShowAllAssets] = useState(false);
   const [minText, setMinText] = useState("");
   const [minAsset, setMinAsset] = useState<string>(filter.minAmount?.assetId ?? assetRows[0]?.[0] ?? "SOL");
   const applyMin = (text: string, assetId: string) => {
@@ -187,31 +186,24 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
           {minInvalid && <p className="text-xs text-destructive">Not a valid amount for this asset.</p>}
 
           <Heading>Assets moved</Heading>
-          <div className="-mx-1 flex flex-col" role="group" aria-label="Assets">
-            {(showAllAssets ? assetRows : assetRows.slice(0, SHOWN_ASSETS)).map(([assetId, count]) => (
-              <Toggle
-                key={assetId}
-                on={!filter.hiddenAssets.has(assetId)}
-                onClick={() => onChange({ ...filter, hiddenAssets: toggled(filter.hiddenAssets, assetId) })}
-              >
-                <span className="flex-1 truncate" title={assetId}>
-                  {assetLabel(assetId, assets)}
-                </span>
-                <span className="tabular-nums">{count}</span>
-              </Toggle>
-            ))}
-          </div>
-          {assetRows.length > SHOWN_ASSETS && (
-            <Button
-              variant="ghost"
-              size="xs"
-              className="self-start"
-              aria-expanded={showAllAssets}
-              onClick={() => setShowAllAssets((shown) => !shown)}
-            >
-              {showAllAssets ? "Show fewer" : `Show +${(assetRows.length - SHOWN_ASSETS).toLocaleString()} more`}
-            </Button>
-          )}
+          <ShowMoreList items={assetRows} limit={SHOWN_ASSETS}>
+            {(visible) => (
+              <div className="-mx-1 flex flex-col" role="group" aria-label="Assets">
+                {visible.map(([assetId, count]) => (
+                  <Toggle
+                    key={assetId}
+                    on={!filter.hiddenAssets.has(assetId)}
+                    onClick={() => onChange({ ...filter, hiddenAssets: toggled(filter.hiddenAssets, assetId) })}
+                  >
+                    <span className="flex-1 truncate" title={assetId}>
+                      {assetLabel(assetId, assets)}
+                    </span>
+                    <span className="tabular-nums">{count}</span>
+                  </Toggle>
+                ))}
+              </div>
+            )}
+          </ShowMoreList>
           <p className="text-xs text-muted-foreground">A transaction is hidden only when every asset it moves is hidden.</p>
         </>
       )}

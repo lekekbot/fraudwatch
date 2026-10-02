@@ -44,7 +44,7 @@ import { type MapWalletChoice, MapWalletDialog } from "./map-wallet-dialog";
 import { EdgePanel } from "./graph/edge-panel";
 import { WalletGraph } from "./graph/wallet-graph";
 import { IngestionPanel } from "./ingestion-panel";
-import { PanelSection, SidePanel } from "./panel";
+import { PanelSection, ShowMoreList, SidePanel } from "./panel";
 import { type WalletLane, WalletTimeline, type WalletTimelineHandle } from "./timeline/wallet-timeline";
 import { SearchDialog } from "./search-dialog";
 import { assetLabel, assetLogo, formatAssetAmount } from "./asset-format";
@@ -245,7 +245,6 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
 
   // Lane order: saved order, else primary then first appearance. Focus narrows without changing it.
   const [focus, setFocus] = useState<ReadonlySet<string>>(new Set());
-  const [showAllWallets, setShowAllWallets] = useState(false);
   const order = useMemo(() => {
     const firstSeen = new Map<string, number>();
     for (const ws of walletStates?.states ?? []) {
@@ -254,7 +253,6 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     }
     return laneOrder(c, firstSeen);
   }, [c, walletStates]);
-  const listedWallets = showAllWallets ? order : order.slice(0, SHOWN_WALLETS);
   const shownLanes = useMemo(() => visibleLanes(order, c.hiddenLanes ?? [], focus), [order, c.hiddenLanes, focus]);
   const lanes = useMemo<WalletLane[]>(
     () =>
@@ -758,6 +756,8 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                 )
               }
             >
+              <ShowMoreList items={order} limit={SHOWN_WALLETS}>
+                {(listedWallets) => (
               <ul className="-mx-1 flex flex-col">
                 {listedWallets.map((address, position) => {
                   const w = c.mappedWallets.find((m) => m.address === address)!;
@@ -842,17 +842,8 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                   );
                 })}
               </ul>
-              {order.length > SHOWN_WALLETS && (
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  className="self-start"
-                  aria-expanded={showAllWallets}
-                  onClick={() => setShowAllWallets((shown) => !shown)}
-                >
-                  {showAllWallets ? "Show fewer" : `Show +${(order.length - SHOWN_WALLETS).toLocaleString()} more`}
-                </Button>
-              )}
+                )}
+              </ShowMoreList>
               <Button
                 variant="outline"
                 size="sm"

@@ -1,3 +1,7 @@
+"use client";
+
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import { cn } from "cn";
 
 /** A docked side panel of the case workspace, scrolling independently of the canvas. */
@@ -34,5 +38,25 @@ export function PanelSection({ title, action, children }: {
       </div>
       {children}
     </section>
+  );
+}
+
+/** A list cut to its first `limit` items, faded where it's cut, with a "Show +N more" toggle. */
+export function ShowMoreList<T>({ items, limit, children }: {
+  items: T[];
+  limit: number;
+  children: (visible: T[]) => React.ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const cut = items.length > limit && !expanded;
+  return (
+    <>
+      <div className={cn(cut && "mask-b-from-[calc(100%-4rem)]")}>{children(cut ? items.slice(0, limit) : items)}</div>
+      {items.length > limit && (
+        <Button variant="ghost" size="xs" className="w-full" aria-expanded={expanded} onClick={() => setExpanded((e) => !e)}>
+          {expanded ? "Show fewer" : `Show +${(items.length - limit).toLocaleString()} more`}
+        </Button>
+      )}
+    </>
   );
 }

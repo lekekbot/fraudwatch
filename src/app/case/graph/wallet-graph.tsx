@@ -427,13 +427,6 @@ export function WalletGraph({
       ctx.lineWidth = n.id === nodeFocus ? 2.5 : role === "core" || role === "bridge" ? 2 : 1.5;
       ctx.strokeStyle = n.id === nodeFocus ? p.fg : n.kind === "program" ? p.program : role === "core" || role === "bridge" ? p.fg : p.muted;
       ctx.stroke();
-      const count = n.txCount.toLocaleString();
-      const countSize = Math.max(5, Math.min(10, (r * 1.55) / (count.length * 0.62)));
-      ctx.font = `600 ${countSize}px ui-sans-serif, system-ui, sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = primaryNode ? p.bg : p.fg;
-      ctx.fillText(count, pos.x, pos.y);
       if (!far && primaryNode) {
         ctx.font = "700 8px ui-sans-serif, system-ui, sans-serif";
         ctx.textAlign = "center";
@@ -678,6 +671,13 @@ export function WalletGraph({
           event.currentTarget.style.cursor = node?.kind === "aggregate" ? "pointer" : hit.node ? "grab" : hit.edge ? "pointer" : "";
           if (node?.kind === "aggregate") {
             place({ title: `Other addresses (${node.txCount.toLocaleString()})`, lines: ["Lower-ranked counterparties are collapsed here."], hint: "Click to reveal all addresses" });
+          } else if (node) {
+            place({
+              title: latest.current.names.of(node.id),
+              kicker: node.id === latest.current.primaryWallet ? "Primary wallet" : node.kind === "wallet" ? "Mapped wallet" : node.kind === "program" ? "Program" : "Address",
+              lines: [`${node.txCount.toLocaleString()} ${node.kind === "program" ? "program calls" : "transactions"}`],
+              hint: node.id === latest.current.wallet ? "Drag to reposition" : "Click for transaction details · drag to reposition",
+            });
           } else if (edge) {
             const { counterparty, sent, received } = edgePerspective(edge, latest.current.wallet, latest.current.nodesById);
             const assets = (edge.summary?.assets.map((asset) => asset.assetId) ?? [...new Set(edge.interactions.flatMap((it) => it.movements.map((m) => m.assetId)))]).map(assetInfo);
