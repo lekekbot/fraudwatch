@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RpcRequestError, rpcCall } from "./json-rpc";
 
 const URL = "https://rpc.example.com/?api-key=k";
@@ -36,6 +36,20 @@ describe("rpcCall", () => {
       rpcCall(URL, "getBalance", [], new AbortController().signal, { fetchImpl, maxRetries: 2, sleep: async () => {} }),
     ).rejects.toMatchObject({ kind: "http", status: 429 });
     expect(fetchImpl.calls).toBe(3);
+  });
+
+  it("pauses every request for at least one second after a rate limit", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(10_000);
+    const sleeps: number[] = [];
+    const rateLimit = { until: 0 };
+    const fetchImpl = sequenceFetch([() => new Response("", { status: 429 }), ok(42)]);
+    const options = { fetchImpl, maxRetries: 0, rateLimit, sleep: async (ms: number) => void sleeps.push(ms) };
+
+    await expect(rpcCall(URL, "getBalance", [], new AbortController().signal, options)).rejects.toMatchObject({ status: 429 });
+    await expect(rpcCall(URL, "getBalance", [], new AbortController().signal, options)).resolves.toBe(42);
+
+    expect(sleeps).toEqual([1000]);
+    now.mockRestore();
   });
 
   it("does not retry JSON-RPC errors", async () => {

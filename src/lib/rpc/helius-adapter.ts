@@ -11,9 +11,9 @@ export function isHeliusRpcUrl(url: string): boolean {
 
 /** Add Helius's indexed history call while retaining every standard RPC method as a fallback. */
 export function createIngestionAdapter(url: string, options: JsonRpcOptions = {}): SolanaRpcAdapter {
-  const generic = createGenericAdapter(url, options);
+  const opts: JsonRpcOptions = { maxRetries: 4, ...options, rateLimit: options.rateLimit ?? { until: 0 } };
+  const generic = createGenericAdapter(url, opts);
   if (!isHeliusRpcUrl(url)) return generic;
-  const opts: JsonRpcOptions = { maxRetries: 4, ...options };
 
   return {
     ...generic,

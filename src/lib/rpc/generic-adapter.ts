@@ -105,7 +105,7 @@ type ParsedTokenAccount = {
 };
 
 export function createGenericAdapter(url: string, options: JsonRpcOptions = {}): SolanaRpcAdapter {
-  const opts: JsonRpcOptions = { maxRetries: 4, ...options };
+  const opts: JsonRpcOptions = { maxRetries: 4, ...options, rateLimit: options.rateLimit ?? { until: 0 } };
   const call = <T>(method: string, params: unknown[] | Record<string, unknown>, signal: AbortSignal) =>
     rpcCall<T>(url, method, params, signal, opts);
 

@@ -22,6 +22,8 @@ export type JsonRpcOptions = {
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   /** Called before each retry; for instrumentation. */
   onRetry?: (err: RpcRequestError) => void;
+  /** Shared by one adapter so an HTTP 429 pauses every request, not only its retry. */
+  rateLimit?: { until: number };
 };
 
 type JsonRpcResponse<T> = { jsonrpc: "2.0"; id: number; result?: T; error?: { code: number; message: string } };
@@ -29,6 +31,7 @@ type JsonRpcResponse<T> = { jsonrpc: "2.0"; id: number; result?: T; error?: { co
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 const BASE_BACKOFF_MS = 500;
 const MAX_BACKOFF_MS = 8_000;
+const RATE_LIMIT_PAUSE_MS = 1_000;
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 export function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -61,11 +64,16 @@ export async function rpcCall<T>(
   signal: AbortSignal,
   options: JsonRpcOptions = {},
 ): Promise<T> {
-  const { fetchImpl = fetch, maxRetries = 0, timeoutMs = DEFAULT_TIMEOUT_MS, sleep = abortableSleep, onRetry } = options;
+  const { fetchImpl = fetch, maxRetries = 0, timeoutMs = DEFAULT_TIMEOUT_MS, sleep = abortableSleep, onRetry, rateLimit } = options;
   for (let attempt = 0; ; attempt++) {
+    const pausedFor = (rateLimit?.until ?? 0) - Date.now();
+    if (pausedFor > 0) await sleep(pausedFor, signal);
     try {
       return await rpcCallOnce<T>(url, method, params, signal, fetchImpl, timeoutMs);
     } catch (err) {
+      if (err instanceof RpcRequestError && err.status === 429 && rateLimit) {
+        rateLimit.until = Math.max(rateLimit.until, Date.now() + Math.max(RATE_LIMIT_PAUSE_MS, err.retryAfterMs ?? 0));
+      }
       if (signal.aborted || !(err instanceof RpcRequestError) || !isRetryable(err) || attempt >= maxRetries) throw err;
       onRetry?.(err);
       // Jittered so parallel requests rate-limited together don't retry in lockstep.
