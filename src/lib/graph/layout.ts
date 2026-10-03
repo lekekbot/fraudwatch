@@ -15,7 +15,12 @@ export type LayoutViewport = { width: number; height: number };
 export type LayoutRole = "core" | "bridge" | "peripheral" | "aggregate";
 
 /** Wallet identity stays primary; interaction volume is shown on relationships. */
-export const nodeRadius = (node: GraphNode) => (node.kind === "wallet" ? 16 : node.kind === "aggregate" ? 13 : node.kind === "program" ? 6 : 8);
+/**
+ * A counterparty's size says how many transactions it has, on a log scale (1 tx → 6, 10 → 11, 100 → 16, capped
+ * at 21 from 1,000) so one busy address can't dwarf the rest. Absolute, so filtering doesn't resize nodes.
+ */
+export const nodeRadius = (node: GraphNode) =>
+  node.kind === "wallet" ? 16 : node.kind === "aggregate" ? 13 : node.kind === "program" ? 6 : Math.min(21, 6 + 5 * Math.log10(Math.max(1, node.txCount)));
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const interactionCount = (edge: GraphEdge) => edge.summary?.totalInteractions ?? edge.interactions.length;

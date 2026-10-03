@@ -64,8 +64,9 @@ describe("buildInteractionGraph", () => {
       activeDays: 4,
       activityPattern: "Long-running",
       assets: [
-        { assetId: "USDC", txCount: 3 },
-        { assetId: "SOL", txCount: 1 },
+        // 250 + 75 out, 40 back; the totals run each way between the pair.
+        { assetId: "USDC", txCount: 3, aToB: "325", bToA: "40" },
+        { assetId: "SOL", txCount: 1, aToB: "1000", bToA: "0" },
       ],
     });
     expect(g.counts).toMatchObject({ connections: 1, transactions: 4 });

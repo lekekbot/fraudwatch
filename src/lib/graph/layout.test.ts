@@ -87,4 +87,11 @@ describe("layoutGraph", () => {
     expect(Math.hypot(pos.get("S")!.x - center.x, pos.get("S")!.y - center.y)).toBeGreaterThan(coreExtent);
     expect(Math.hypot(pos.get("X")!.x - center.x, pos.get("X")!.y - center.y)).toBeLessThan(Math.hypot(pos.get("S")!.x - center.x, pos.get("S")!.y - center.y));
   });
+
+  it("sizes counterparties by transaction count on a capped log scale", () => {
+    const cp = (txCount: number) => nodeRadius({ id: "x", kind: "counterparty", txCount });
+    expect([cp(1), cp(10), cp(100)]).toEqual([6, 11, 16]);
+    expect(cp(50)).toBeGreaterThan(cp(40));
+    expect(cp(1_000_000)).toBe(21);
+  });
 });

@@ -35,7 +35,8 @@ export type RelationshipSummary = {
   totalInteractions: number;
   aToB: number;
   bToA: number;
-  assets: { assetId: string; txCount: number }[];
+  /** Per asset: how many transactions moved it, and the base units that moved each way. */
+  assets: { assetId: string; txCount: number; aToB: string; bToA: string }[];
   transactionTypes: { kind: EffectKind; count: number }[];
   firstInteraction: number | null;
   lastInteraction: number | null;
@@ -56,7 +57,7 @@ export type GraphEdge = {
 };
 
 export function summarizeRelationship(edge: Pick<GraphEdge, "a" | "b" | "interactions">): RelationshipSummary {
-  const assets = new Map<string, Set<string>>();
+  const assets = new Map<string, { signatures: Set<string>; aToB: bigint; bToA: bigint }>();
   const kinds = new Map<EffectKind, number>();
   const days = new Set<string>();
   const times: number[] = [];
@@ -71,8 +72,12 @@ export function summarizeRelationship(edge: Pick<GraphEdge, "a" | "b" | "interac
     if (interaction.movements.some((movement) => movement.from === edge.a && movement.to === edge.b)) aToB++;
     if (interaction.movements.some((movement) => movement.from === edge.b && movement.to === edge.a)) bToA++;
     for (const movement of interaction.movements) {
-      if (!assets.has(movement.assetId)) assets.set(movement.assetId, new Set());
-      assets.get(movement.assetId)!.add(interaction.signature);
+      let asset = assets.get(movement.assetId);
+      if (!asset) assets.set(movement.assetId, (asset = { signatures: new Set(), aToB: BigInt(0), bToA: BigInt(0) }));
+      asset.signatures.add(interaction.signature);
+      // A movement on this connection always runs between its two endpoints.
+      if (movement.to === edge.b) asset.aToB += BigInt(movement.amount);
+      else asset.bToA += BigInt(movement.amount);
     }
   }
   const firstInteraction = times.length ? Math.min(...times) : null;
@@ -83,7 +88,9 @@ export function summarizeRelationship(edge: Pick<GraphEdge, "a" | "b" | "interac
     totalInteractions,
     aToB,
     bToA,
-    assets: [...assets].map(([assetId, signatures]) => ({ assetId, txCount: signatures.size })).sort((x, y) => y.txCount - x.txCount || x.assetId.localeCompare(y.assetId)),
+    assets: [...assets]
+      .map(([assetId, a]) => ({ assetId, txCount: a.signatures.size, aToB: a.aToB.toString(), bToA: a.bToA.toString() }))
+      .sort((x, y) => y.txCount - x.txCount || x.assetId.localeCompare(y.assetId)),
     transactionTypes: [...kinds].map(([kind, count]) => ({ kind, count })).sort((x, y) => y.count - x.count || x.kind.localeCompare(y.kind)),
     firstInteraction,
     lastInteraction,

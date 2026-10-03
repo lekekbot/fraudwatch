@@ -179,7 +179,8 @@ export function AddressPanel({
 
       {beforeAnnotations}
 
-      <details className="group mt-auto border-b">
+      {/* Sticks to the inspector's bottom while scrolling, so labelling is always one click away. */}
+      <details className="group sticky bottom-0 z-10 border-t bg-background">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-2 p-3 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
           Label &amp; annotations
           <ChevronDownIcon className="size-3.5 transition-transform group-open:rotate-180" aria-hidden />

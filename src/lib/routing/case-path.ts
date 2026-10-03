@@ -11,3 +11,9 @@ export function parseCasePath(pathname: string): { caseId: string; view: CaseVie
 export function buildCasePath(caseId: string, view: CaseView, wallet?: string | null): string {
   return `/case/${encodeURIComponent(caseId)}/${view}${view === "table" && wallet ? `/${encodeURIComponent(wallet)}` : ""}`;
 }
+
+/** Route segments after /case: a case id, a view, and a wallet only on the table view. */
+export function isCaseRoute(segments: readonly string[]): boolean {
+  const [caseId, view, wallet, extra] = segments;
+  return Boolean(caseId) && VIEWS.includes(view as CaseView) && extra === undefined && (!wallet || view === "table");
+}

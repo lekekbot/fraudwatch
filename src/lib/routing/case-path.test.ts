@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCasePath, parseCasePath } from "./case-path";
+import { buildCasePath, isCaseRoute, parseCasePath } from "./case-path";
 
 describe("case paths", () => {
   it("round-trips views and the optional table wallet", () => {
@@ -9,5 +9,14 @@ describe("case paths", () => {
       view: "table",
       wallet: "Wallet123",
     });
+  });
+
+  it("accepts a case and view, and a wallet only on the table", () => {
+    expect(isCaseRoute(["c1", "graph"])).toBe(true);
+    expect(isCaseRoute(["c1", "table", "W"])).toBe(true);
+    expect(isCaseRoute(["c1", "graph", "W"])).toBe(false);
+    expect(isCaseRoute(["c1", "nope"])).toBe(false);
+    expect(isCaseRoute(["c1"])).toBe(false);
+    expect(isCaseRoute(["c1", "table", "W", "x"])).toBe(false);
   });
 });

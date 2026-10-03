@@ -1,6 +1,6 @@
 {
   "$schema": "./schema.json",
-  "version": 1,
+  "version": 2,
   "protocols": {
     "solana": {
       "name": "Solana",
@@ -148,7 +148,9 @@
       "category": "bridge",
       "addresses": {
         "worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth": { "role": "program", "label": "Wormhole Core" },
-        "wormDTUJ6AWPNvk59vGQbDvGJmqbDTdgWgAqcLBCgUb": { "role": "program", "label": "Wormhole Token Bridge" }
+        "wormDTUJ6AWPNvk59vGQbDvGJmqbDTdgWgAqcLBCgUb": { "role": "program", "label": "Wormhole Token Bridge" },
+        "WnFt12ZrnzZrFZkt2xsNsaNWoQribnuQ5B5FrDbwDhD": { "role": "program", "label": "Wormhole NFT Bridge" },
+        "EtZMZM22ViKMo4r5y4Anovs3wKQ2owUmDpjygnMMcdEX": { "role": "program", "label": "Wormhole Message Shim" }
       }
     },
     "cctp": {
@@ -159,6 +161,150 @@
         "CCTPmbSD7gX1bxKPAmg77w8oFzNFpaQiQUWD43TKaecd": { "role": "program", "label": "CCTP Message Transmitter" },
         "CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe": { "role": "program", "label": "CCTP v2 Token Messenger" },
         "CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC": { "role": "program", "label": "CCTP v2 Message Transmitter" }
+      }
+    },
+    "debridge": {
+      "name": "deBridge DLN",
+      "category": "bridge",
+      "website": "https://debridge.finance",
+      "addresses": {
+        "src5qyZHqTqecJV4aY6Cb6zDZLMDzrDKKezs22MPHr4": { "role": "program", "label": "DLN Source" },
+        "dst5MGcFPoBeREFAA5E3tU5ij8m5uVYwkzkSAbsLbNo": { "role": "program", "label": "DLN Destination" },
+        "DEbrdGj3HsRsAzx6uH4MKyREKxVAfBydijLUF3ygsFfh": { "role": "program", "label": "deBridge" },
+        "DeSetTwWhjZq6Pz9Kfdo1KoS5NqtsM6G8ERbX4SSCSft": { "role": "program", "label": "deBridge Settings" },
+        "exe59FS5cojZkPJVDFDV8RnXCC7wd6yoBjsUtqH7Zai": { "role": "program", "label": "DLN Hook Executor" }
+      }
+    },
+    "mayan": {
+      "name": "Mayan Finance",
+      "category": "bridge",
+      "website": "https://mayan.finance",
+      "addresses": {
+        "FC4eXxkyrMPTjiYUpp4EAnkmwMbQyZ6NDCh1kfLn6vsf": { "role": "program", "label": "Mayan" },
+        "8QJmxZcEzwuYmCPy6XqgN2sHcYCcFq6AEfBMJZZuLo5a": { "role": "program", "label": "Mayan Auction" },
+        "dkpZqrxHFrhziEMQ931GLtfy11nFkCsfMftH9u6QwBU": { "role": "program", "label": "Mayan MCTP" },
+        "Gx9rivpS3YR8pBFwMuP6omYqVxunpLvLkNn7ubNyuZZ5": { "role": "program", "label": "Mayan Fast MCTP" },
+        "BLZRi6frs4X4DNLw56V4EXai1b6QVESN1BhHBTYM9VcY": { "role": "program", "label": "Mayan Swift" },
+        "mayan34VedncxdK2XobtvWFDXQASUTBXhUVzt2kKgny": { "role": "program", "label": "Mayan Swift v2" },
+        "5VtQHnhs2pfVEr68qQsbTRwKh4JV5GTu9mBHgHFxpHeQ": { "role": "program", "label": "Mayan Fee Manager" },
+        "GFRP4yXUjvcQemf2zRJN8w9sPNaDk5PyBUQdPHD1AzLp": { "role": "program", "label": "Mayan MPS" },
+        "B96dV3Luxzo6SokJx3xt8i5y8Mb7HRR6Eec8hCjJDT69": { "role": "program", "label": "Mayan SPL Utils" },
+        "DwMLtdtJqJQkHzNcrdTBuWHJByJfgpKBnvFvzyKdy3cU": { "role": "program", "label": "Mayan Payload Writer" },
+        "D8C8iW6zmoKg5TRr8nQ7h14TMWqQX8FiBdj2ju5MF3wa": { "role": "program", "label": "Mayan CPI Proxy" }
+      }
+    },
+    "allbridge": {
+      "name": "Allbridge",
+      "category": "bridge",
+      "website": "https://allbridge.io",
+      "addresses": {
+        "BrdgN2RPzEMWF96ZbnnJaUtQDQx7VRXYaHHbYCBvceWB": { "role": "program", "label": "Allbridge Core" },
+        "BBbD1WSjbHKfyE3TSFWF6vx1JV51c8msKSQy4ess6pXp": { "role": "program", "label": "Allbridge Classic (deprecated)" },
+        "va1udM9Gg22vcEbcuu4bsAu6tipRR8KSCHTGbaAhYQk": { "role": "program", "label": "Allbridge Classic Validator (deprecated)" }
+      }
+    },
+    "across": {
+      "name": "Across",
+      "category": "bridge",
+      "website": "https://across.to",
+      "addresses": {
+        "DLv3NggMiSaef97YCkew5xKUHDh13tVGZ7tydt3ZeAru": { "role": "program", "label": "Across SVM SpokePool" }
+      }
+    },
+    "chainflip": {
+      "name": "Chainflip",
+      "category": "bridge",
+      "website": "https://chainflip.io",
+      "addresses": {
+        "AusZPVXPoUM8QJJ2SL4KwvRGCQ22cDg6Y4rg7EvFrxi7": { "role": "program", "label": "Chainflip Vault" },
+        "J88B7gmadHzTNGiy54c9Ms8BsEXNdB2fntFyhKpk3qoT": { "role": "program", "label": "Chainflip Swap Endpoint" }
+      }
+    },
+    "relay": {
+      "name": "Relay",
+      "category": "bridge",
+      "website": "https://relay.link",
+      "addresses": {
+        "99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2": { "role": "program", "label": "Relay Depository v2" }
+      }
+    },
+    "chainlink_ccip": {
+      "name": "Chainlink CCIP",
+      "category": "bridge",
+      "website": "https://chain.link/cross-chain",
+      "addresses": {
+        "Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C": { "role": "program", "label": "CCIP Router" },
+        "FeeQPGkKDeRV1MgoYfMH6L8o3KeuYjwUZrgn4LRKfjHi": { "role": "program", "label": "CCIP Fee Quoter" },
+        "41FGToCmdaWa1dgZLKFAjvmx6e6AjVTX7SVRibvsMGVB": { "role": "program", "label": "CCIP Burn/Mint Token Pool" },
+        "8eqh8wppT9c5rw4ERqNCffvU6cNFJWff9WmkcYtmGiqC": { "role": "program", "label": "CCIP Lock/Release Token Pool" },
+        "RmnXLft1mSEwDgMKu2okYuHkiazxntFFcZFrrcXxYg7": { "role": "program", "label": "CCIP RMN Remote" },
+        "offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm": { "role": "program", "label": "CCIP OffRamp" }
+      }
+    },
+    "hyperlane": {
+      "name": "Hyperlane",
+      "category": "bridge",
+      "website": "https://hyperlane.xyz",
+      "addresses": {
+        "E588QtVUvresuXq2KoNEwAmoifCzYGpRBdHByN9KQMbi": { "role": "program", "label": "Hyperlane Mailbox / Merkle Tree Hook" },
+        "BhNcatUDC2D5JTyeaqrdSukiVFsEHK7e3hVmKMztwefv": { "role": "program", "label": "Hyperlane Interchain Gas Paymaster" },
+        "JAvHW21tYXE9dtdG83DReqU2b4LUexFuCbtJT5tF8X6M": { "role": "fee_account", "label": "Hyperlane Interchain Gas Paymaster Account" },
+        "CaLiNiZpuWz9ddBqthAdX22QMRELEiw2pm1UQnsRnC91": { "role": "program", "label": "Hyperlane Interchain Security Module" },
+        "LwNfVYMDzAe5dCJgA5CipTZcT34Eyf74zLr81K91jxk": { "role": "program", "label": "Hyperlane Message ID Multisig ISM" },
+        "2CttnaLkYbNHbaFDFnQ8PMCnzUwTGrKnskBxPM4TRWGp": { "role": "program", "label": "Hyperlane Universal Router" },
+        "pRgs5vN4Pj7WvFbxf6QDHizo2njq2uksqEUbaSghVA8": { "role": "program", "label": "Hyperlane Validator Announce" }
+      }
+    },
+    "layerzero": {
+      "name": "LayerZero",
+      "category": "bridge",
+      "website": "https://layerzero.network",
+      "addresses": {
+        "76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6": { "role": "program", "label": "LayerZero Endpoint v2" },
+        "6doghB248px58JSSwG4qejQ46kFMW4AMj7vzJnWZHNZn": { "role": "program", "label": "LayerZero Executor" },
+        "8ahPGPjEbpgGaZx2NV1iG5Shj7TDwvsjkEDcGWjt94TP": { "role": "program", "label": "LayerZero Price Feed" },
+        "7a4WjyR8VZ7yZz5XJAKm39BUGn5iT9CKcv2pmG9tdXVH": { "role": "program", "label": "LayerZero ULN" },
+        "2XrYqmhBMPJgDsb4SVbjV1PnJBprurd5bzRCkHwiFCJB": { "role": "program", "label": "LayerZero Blocked Message Library" },
+        "HtEYV4xB4wvsj5fgTkcfuChYpvGYzgzwvNhgDZQNh7wW": { "role": "program", "label": "LayerZero Default DVN" }
+      }
+    },
+    "near_omni_bridge": {
+      "name": "NEAR Omni Bridge",
+      "category": "bridge",
+      "website": "https://near.org",
+      "addresses": {
+        "dahPEoZGXfyV58JqqH85okdHmpN8U2q8owgPUXSCPxe": { "role": "program", "label": "NEAR Omni Bridge" }
+      }
+    },
+    "wanchain": {
+      "name": "Wanchain",
+      "category": "bridge",
+      "website": "https://bridge.wanchain.org",
+      "addresses": {
+        "E3iKvJgGNycXrmsh2aryY25z29PpU4dvo4CBuXCKQiGB": { "role": "program", "label": "WanBridge" },
+        "7jYCM8k5Nvwg5vyPpLk2yjivQhexPDMXuK8CSbUKqL6B": { "role": "program", "label": "WanBridge Admin Board" },
+        "dFYBRAFvZKq9F4mYGkLQu8DbfZRFrmi5dNSTDfwC3a8": { "role": "program", "label": "WanBridge Fee" }
+      }
+    },
+    "base_bridge": {
+      "name": "Base Bridge",
+      "category": "bridge",
+      "website": "https://github.com/base/bridge",
+      "addresses": {
+        "HNCne2FkVaNghhjKXapxJzPaBvAKDG1Ge3gqhZyfVWLM": { "role": "program", "label": "Base Bridge" },
+        "g1et5VenhfJHJwsdJsDbxWZuotD5H4iELNG61kS4fb9": { "role": "program", "label": "Base Relayer" }
+      }
+    },
+    "axelar": {
+      "name": "Axelar",
+      "category": "bridge",
+      "website": "https://app.axelar.network",
+      "addresses": {
+        "gtwqvLL93XK7pC2eMvfGamqokvs19AytzaVhrL2iKiz": { "role": "program", "label": "Axelar Gateway" },
+        "gaszjG8797GGm8oACCzH2KLLifGp2nugKkLwaecwBjT": { "role": "program", "label": "Axelar Gas Service" },
+        "opre2VP8uvjq3YS15NRhRagsWvsY5DybitvCeLPAwbK": { "role": "program", "label": "Axelar Operators" },
+        "memtaCuA26EANM26matPAhiQGPnvsrYdJYrYcK8wcon": { "role": "program", "label": "Axelar Memo" },
+        "itsAUdHnV2K99ppbM6d6WUDac8MD54RAE7dUKHnw1Eg": { "role": "program", "label": "Axelar Interchain Token Service" }
       }
     }
   }

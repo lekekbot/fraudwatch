@@ -131,6 +131,10 @@ const formatUtc = (options: Intl.DateTimeFormatOptions) => {
   return (date: Date) => formatter.format(date);
 };
 const dayFormat = formatUtc({ day: "numeric", month: "short" });
+const dayWithYear = formatUtc({ day: "numeric", month: "short", year: "numeric" });
+const currentYear = new Date().getUTCFullYear();
+/** Node label: the year only when it isn't this one, so current cases stay compact. */
+const nodeDay = (date: Date) => (date.getUTCFullYear() === currentYear ? dayFormat(date) : dayWithYear(date));
 
 /** Axis labels in 24-hour UTC, coarsest unit that the tick doesn't round to. */
 const axisFormats = {
@@ -473,12 +477,12 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
     const formatPill = (firstGlobal: number, lastGlobal: number, count: number): [string, string] => {
       const t0 = new Date(items[firstGlobal].time);
       const t1 = new Date(items[lastGlobal].time);
-      const sameDay = dayFormat(t0) === dayFormat(t1);
+      const sameDay = nodeDay(t0) === nodeDay(t1);
       const when = sameDay
         ? bucketMs < DAY
-          ? `${dayFormat(t0)} ${timeFormat(t0)}`
-          : dayFormat(t0)
-        : `${dayFormat(t0)} – ${dayFormat(t1)}`;
+          ? `${nodeDay(t0)} ${timeFormat(t0)}`
+          : nodeDay(t0)
+        : `${nodeDay(t0)} – ${nodeDay(t1)}`;
       return [`${count.toLocaleString()} tx`, when];
     };
     const inView = (x0: number, x1: number) => x1 >= -CARD_W && x0 <= width + CARD_W;

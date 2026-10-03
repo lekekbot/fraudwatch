@@ -63,13 +63,14 @@ export function HomeView() {
           {cases.status === "ready" && cases.data.length === 0 && (
             <p className="text-sm text-muted-foreground">No cases yet. Create one to get started.</p>
           )}
+          {/* Separated rows with their own margin, instead of dividers running them together. */}
           {cases.status === "ready" && cases.data.length > 0 && (
-            <ul className="divide-y">
+            <ul className="flex flex-col gap-1">
               {cases.data.map((c) => (
                 <li key={c.id}>
                   <Link
                     href={buildCasePath(c.id, "timeline")}
-                    className="flex items-center justify-between gap-4 py-3 hover:bg-muted/50"
+                    className="flex items-center justify-between gap-4 rounded-md border border-transparent px-3 py-3 hover:border-border hover:bg-muted/50"
                   >
                     <span className="flex min-w-0 flex-col">
                       <span className="truncate font-medium">{c.name}</span>

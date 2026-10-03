@@ -174,6 +174,16 @@ export function TransactionDetails({
           >
             <CopyIcon />
           </Button>
+          <a
+            href={`https://solscan.io/tx/${effect.signature}`}
+            target="_blank"
+            rel="noreferrer noopener"
+            aria-label="Open in explorer"
+            title="Open in explorer (Solscan)"
+            className={buttonVariants({ variant: "ghost", size: "icon-xs" })}
+          >
+            <ExternalLinkIcon />
+          </a>
         </dd>
         <dt className="text-muted-foreground">Time</dt>
         <dd className="tabular-nums">{formatUtc(effect.timestamp)} UTC</dd>
@@ -361,16 +371,6 @@ export function TransactionDetails({
           <RawJson tx={tx} />
         </Section>
       )}
-
-      <a
-        href={`https://solscan.io/tx/${effect.signature}`}
-        target="_blank"
-        rel="noreferrer noopener"
-        className={buttonVariants({ variant: "outline", size: "sm" })}
-      >
-        <ExternalLinkIcon />
-        Open in explorer
-      </a>
     </section>
   );
 }

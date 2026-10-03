@@ -27,16 +27,18 @@ import { getRpcSettings } from "@/lib/db/rpc-settings";
 import { createNames } from "@/lib/labels/labels";
 import { enrichTransaction, protocolsUsed, registry } from "@/lib/protocols/registry";
 import { buildMapSearch } from "@/lib/routing/map-params";
-import { buildCasePath, parseCasePath, type CaseView } from "@/lib/routing/case-path";
+import { buildCasePath, isCaseRoute, parseCasePath, type CaseView } from "@/lib/routing/case-path";
 import type { RpcSettings } from "@/lib/rpc/settings";
 import { shortenAddress } from "@/lib/solana/address";
 import { collectCounterparties } from "@/lib/state/counterparties";
 import { type EffectSummary, type NftCatalog, summarizeEffect } from "@/lib/state/summarize";
+import { counterpartyRows, type TransactedRow, transactedOverview } from "@/lib/state/volume";
 import { EMPTY_FILTER, type FilterableTx, type TxFilter, involvedAddresses, movedAssets, passesFilter, toggled } from "@/lib/timeline/filter";
 import type { SearchItem } from "@/lib/search";
 import { eventTimes } from "@/lib/timeline/layout";
 import { cn } from "cn";
 import { AddressPanel } from "./address-panel";
+import { AssetFlows } from "./asset-flows";
 import { CounterpartyList } from "./counterparty-list";
 import { DeleteCaseButton } from "./delete-case-button";
 import { FilterPanel } from "./filter-panel";
@@ -48,7 +50,8 @@ import { PanelSection, ShowMoreList, SidePanel } from "./panel";
 import { type WalletLane, WalletTimeline, type WalletTimelineHandle } from "./timeline/wallet-timeline";
 import { SearchDialog } from "./search-dialog";
 import { assetLabel, assetLogo, formatAssetAmount } from "./asset-format";
-import { WalletStateSummary, WalletStateTable } from "./wallet-state-view";
+import { TransactionDetails } from "./timeline/transaction-details";
+import { type TableNav, WalletStateSummary, WalletStateTable } from "./wallet-state-view";
 
 const NO_SUMMARIES: EffectSummary[] = [];
 const SHOWN_WALLETS = 50;
@@ -62,8 +65,18 @@ async function copy(text: string, what: string) {
   }
 }
 
+/**
+ * Hosted by the case layout, not the page: the page segment is keyed by its
+ * params, so switching view would remount it and drop the workspace's state.
+ */
 export function CaseShell() {
-  const id = parseCasePath(usePathname()).caseId;
+  const pathname = usePathname();
+  // Invalid paths get the page's not-found instead.
+  if (!isCaseRoute(pathname.split("/").filter(Boolean).slice(1))) return null;
+  return <CaseLoader id={parseCasePath(pathname).caseId} />;
+}
+
+function CaseLoader({ id }: { id: string }) {
   const fwCase = useLocalQuery((db) => getCase(db, id), [id]);
   const rpc = useLocalQuery((db) => getRpcSettings(db), []);
   const found = fwCase.status === "ready" && fwCase.data !== undefined;
@@ -113,6 +126,8 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   const [rightOpen, setRightOpen] = useState(true);
   const view = route.view;
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
+  /** Transaction open from the table view. */
+  const [tableTx, setTableTx] = useState<string | null>(null);
   /** Transaction to open the timeline on, from the graph's "Show on timeline". */
   const [focusSignature, setFocusSignature] = useState<string | undefined>(undefined);
   /** Moment to open the timeline on, from a date bookmark. */
@@ -343,6 +358,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     setSelectedWallet(address);
     setSelectedAddress(null);
     setSelectedEdge(null);
+    setTableTx(null);
     timelineRef.current?.clearSelection();
   }
 
@@ -446,6 +462,46 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     }
   }
 
+  const formatAmount = (amount: string, assetId: string, signed = false) => {
+    if (!walletStates || !walletState) return amount;
+    const source = walletStates.states.find((st) => assetId in st.decimals) ?? walletState;
+    return formatAssetAmount(amount, assetId, source, walletStates.assets, signed);
+  };
+  // One mapped wallet's side of the filtered transactions the views show; effects and summaries are filtered in lockstep.
+  const walletRows = (address: string): TransactedRow[] => {
+    const data = perWallet.get(address);
+    if (!data) return [];
+    const rows: TransactedRow[] = [];
+    const { effects } = data.state;
+    data.summaries.forEach((summary, i) => {
+      const effect = effects[i];
+      if (effect) rows.push({ signature: effect.signature, time: effect.timestamp ? Date.parse(effect.timestamp) : null, summary });
+    });
+    return rows;
+  };
+  // Any other address (a clicked graph node or counterparty) is read from the visible lanes' transactions with it;
+  // its other side is that lane's wallet, with the opposite deltas.
+  const overviewFor = (address: string): TransactedRow[] => {
+    if (perWallet.has(address)) return walletRows(address);
+    const out: TransactedRow[] = [];
+    for (const lane of shownLanes) {
+      for (const row of counterpartyRows(address, walletRows(lane))) {
+        out.push({
+          ...row,
+          summary: {
+            ...row.summary,
+            counterparties: [...row.summary.inflows, ...row.summary.outflows].map((c) => ({
+              address: lane,
+              assetId: c.assetId,
+              delta: c.delta.startsWith("-") ? c.delta.slice(1) : `-${c.delta}`,
+            })),
+          },
+        });
+      }
+    }
+    return out;
+  };
+
   const rangeText = (address: string) => {
     const w = c.mappedWallets.find((m) => m.address === address);
     if (!w) return "";
@@ -454,38 +510,59 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     return `from ${r.start.slice(0, 16).replace("T", " ")} UTC${how} to the case end`;
   };
 
-  const panelFor = (address: string, beforeAnnotations?: React.ReactNode) => (
-    <AddressPanel
-      key={address}
-      caseId={c.id}
-      address={address}
-      state={addressState(address, c, registry, programs)}
-      label={names.label(address)}
-      entry={registry.lookup(address)}
-      transactionCount={address === selectedWallet ? undefined : counterparties.find((r) => r.address === address)?.count}
-      beforeAnnotations={beforeAnnotations}
-      onMap={() => {
-        setMapError(null);
-        setMapTarget(address);
-      }}
-      mapped={
-        c.mappedWallets.some((m) => m.address === address) && address !== c.primaryWallet
-          ? { rangeText: rangeText(address), onUnmap: () => void unmap(address) }
-          : undefined
-      }
-      bookmark={{ on: isBookmarked(c, "wallet", address), toggle: () => void updateCase(toggleBookmark(c, { kind: "wallet", target: address })) }}
-      onFilterTo={
-        c.mappedWallets.some((m) => m.address === address)
-          ? undefined
-          : { active: filter.address === address, toggle: () => updateFilter({ ...filter, address: filter.address === address ? null : address }) }
-      }
-      lane={
-        c.mappedWallets.length > 1 && c.mappedWallets.some((m) => m.address === address)
-          ? { hidden: (c.hiddenLanes ?? []).includes(address), onToggle: () => void updateCase(toggleLaneHidden(c, address)) }
-          : undefined
-      }
-    />
-  );
+  const panelFor = (address: string, beforeAnnotations?: React.ReactNode, withAssets = true) => {
+    // A clicked address opens with what moved through it; addresses without loaded history have none.
+    const rows = withAssets ? overviewFor(address) : [];
+    const flows = transactedOverview(rows, nfts).assets;
+    const assetFlows = flows.length > 0 && walletStates && (
+      <AssetFlows
+        flows={flows.map((a) => ({ assetId: a.assetId, received: a.in, sent: a.out, txCount: a.count }))}
+        assets={walletStates.assets}
+        formatAmount={formatAmount}
+      />
+    );
+    return (
+      <AddressPanel
+        key={address}
+        caseId={c.id}
+        address={address}
+        state={addressState(address, c, registry, programs)}
+        label={names.label(address)}
+        entry={registry.lookup(address)}
+        transactionCount={address === selectedWallet ? undefined : counterparties.find((r) => r.address === address)?.count}
+        beforeAnnotations={
+          assetFlows ? (
+            <>
+              {assetFlows}
+              {beforeAnnotations}
+            </>
+          ) : (
+            beforeAnnotations
+          )
+        }
+        onMap={() => {
+          setMapError(null);
+          setMapTarget(address);
+        }}
+        mapped={
+          c.mappedWallets.some((m) => m.address === address) && address !== c.primaryWallet
+            ? { rangeText: rangeText(address), onUnmap: () => void unmap(address) }
+            : undefined
+        }
+        bookmark={{ on: isBookmarked(c, "wallet", address), toggle: () => void updateCase(toggleBookmark(c, { kind: "wallet", target: address })) }}
+        onFilterTo={
+          c.mappedWallets.some((m) => m.address === address)
+            ? undefined
+            : { active: filter.address === address, toggle: () => updateFilter({ ...filter, address: filter.address === address ? null : address }) }
+        }
+        lane={
+          c.mappedWallets.length > 1 && c.mappedWallets.some((m) => m.address === address)
+            ? { hidden: (c.hiddenLanes ?? []).includes(address), onToggle: () => void updateCase(toggleLaneHidden(c, address)) }
+            : undefined
+        }
+      />
+    );
+  };
   // The inspector shows the last thing selected; an address stays until something else is picked.
   const addressPanel = selectedAddress && panelFor(selectedAddress);
 
@@ -520,10 +597,37 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   }, [view, shownLanes, perWallet, filter.hiddenAssets, showPrograms, graphRange, c.range.start, graphNodeLimit, graphRanking]);
   const edge = graph?.edges.find((e) => e.id === selectedEdge);
   const graphWallet = shownLanes.includes(selectedWallet) ? selectedWallet : (shownLanes[0] ?? selectedWallet);
-  const formatAmount = (amount: string, assetId: string) => {
-    if (!walletStates || !walletState) return amount;
-    const source = walletStates.states.find((st) => assetId in st.decimals) ?? walletState;
-    return formatAssetAmount(amount, assetId, source, walletStates.assets);
+
+  // The table's open transaction, in the same panel the timeline uses; the table supplies its own order for stepping.
+  const tableDetails = (nav: TableNav | null) => {
+    const index = visibleState && tableTx ? visibleState.effects.findIndex((e) => e.signature === tableTx) : -1;
+    if (!nav || !visible || !visibleState || !walletStates || state.status !== "done" || index === -1) return null;
+    const effect = visibleState.effects[index];
+    return (
+      <TransactionDetails
+        key={effect.signature}
+        effect={effect}
+        summary={visible.summaries[index]}
+        tx={state.result.transactions.get(effect.signature)}
+        state={visibleState}
+        assets={walletStates.assets}
+        position={{ index: nav.index, count: nav.count }}
+        onPrevious={nav.previous}
+        onNext={nav.next}
+        onClose={() => setTableTx(null)}
+        onHide={() => {
+          // Move on to a neighbour so stepping through isn't interrupted.
+          setTableTx(nav.neighbour);
+          setFilter((f) => ({ ...f, hiddenSignatures: toggled(f.hiddenSignatures, effect.signature) }));
+        }}
+        names={names}
+        onSelectAddress={setSelectedAddress}
+        sharedWith={(owners.get(effect.signature) ?? []).filter((w) => w !== selectedWallet)}
+        walletName={c.mappedWallets.length > 1 ? names.of(selectedWallet) : undefined}
+        bookmarked={isBookmarked(c, "transaction", effect.signature)}
+        onToggleBookmark={() => void updateCase(toggleBookmark(c, { kind: "transaction", target: effect.signature, wallet: selectedWallet }))}
+      />
+    );
   };
 
   let center: React.ReactNode;
@@ -573,7 +677,8 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                     }}
                     onClose={() => setSelectedEdge(null)}
                   />
-                  {addressPanel}
+                  {/* An endpoint's Assets would repeat the connection's Assets above it. */}
+                  {selectedAddress && panelFor(selectedAddress, undefined, selectedAddress !== edge.a && selectedAddress !== edge.b)}
                 </>
               ) : (
                 addressPanel || walletInspector
@@ -619,14 +724,29 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
         />
       ) : (
         <>
-          <div className="min-w-0 flex-1 overflow-auto p-4">
-            <WalletStateTable state={visibleState} assets={walletStates.assets} />
-          </div>
-          {(rightOpen || addressPanel) && (
-            <SidePanel side="right" label="Inspector">
-              {addressPanel || walletInspector}
-            </SidePanel>
-          )}
+          {/* Keyed by wallet so the table's filters and sort reset when the wallet changes. */}
+          <WalletStateTable
+            key={selectedWallet}
+            state={visibleState}
+            assets={walletStates.assets}
+            summaries={visible.summaries}
+            selected={tableTx}
+            onSelect={(signature) => {
+              // The inspector shows the last thing picked: this transaction now.
+              setSelectedAddress(null);
+              setTableTx(signature);
+            }}
+            renderPanel={(nav) => {
+              const details = tableDetails(nav);
+              return (
+                (rightOpen || addressPanel || details) && (
+                  <SidePanel side="right" label="Inspector">
+                    {addressPanel || details || walletInspector}
+                  </SidePanel>
+                )
+              );
+            }}
+          />
         </>
       );
   } else {
@@ -692,6 +812,12 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                   routeTo(v, v === "table" ? filter.address : null);
                   setFocusSignature(undefined);
                   setFocusTime(undefined);
+                  // A plain view switch starts the inspector fresh; jumps from a panel ("Show on timeline", "View all") keep it.
+                  if (v !== view) {
+                    setSelectedAddress(null);
+                    setSelectedEdge(null);
+                    setTableTx(null);
+                  }
                 }}
               >
                 {v === "timeline" ? "Timeline" : v === "graph" ? "Graph" : "Table"}

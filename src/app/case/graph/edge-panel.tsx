@@ -1,12 +1,12 @@
 "use client";
 
-import { ArrowDownLeftIcon, ArrowRightIcon, ArrowUpRightIcon, ChartNoAxesGanttIcon, ExternalLinkIcon, XIcon } from "lucide-react";
+import { ArrowDownLeftIcon, ArrowUpRightIcon, ChartNoAxesGanttIcon, ExternalLinkIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { edgeFlow, summarizeRelationship, type GraphEdge } from "@/lib/graph/build";
 import type { Names } from "@/lib/labels/labels";
-import { type Assets, assetLabel, assetLogo, formatUtc } from "../asset-format";
-import { AssetIcon } from "../asset-icon";
+import { type Assets, assetLabel, formatUtc } from "../asset-format";
+import { AssetFlows } from "../asset-flows";
 import { PanelSection } from "../panel";
 
 /**
@@ -48,13 +48,13 @@ export function EdgePanel({
   const program = edge.kind === "program";
   const flow = edgeFlow(edge);
   const summary = edge.summary ?? summarizeRelationship(edge);
+  // The panel reads from the focused wallet's side; when the focus isn't an endpoint, side with edge.b.
+  const you = focusWallet === edge.a ? edge.a : edge.b;
   const counterparty = edge.a === focusWallet ? edge.b : edge.a;
   const sent = focusWallet === edge.a ? summary.aToB : summary.bToA;
   const received = focusWallet === edge.a ? summary.bToA : summary.aToB;
   const direction = sent === 0 ? "Incoming only" : received === 0 ? "Outgoing only" : sent >= received * 1.5 ? "Mostly outbound" : received >= sent * 1.5 ? "Mostly inbound" : "Reciprocal";
   const representatives = edge.interactions.length <= 6 ? edge.interactions : [edge.interactions[0], ...edge.interactions.slice(-3)];
-  const dominantAsset = summary.assets[0];
-  const dominantType = summary.transactionTypes[0];
 
   return (
     <>
@@ -73,11 +73,11 @@ export function EdgePanel({
           </span>
           {name(flow.to)}
         </div>
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          {summary.totalInteractions.toLocaleString()} interactions. {program ? "This relationship consists of program calls." : `${direction}.`}
-          {dominantAsset && ` ${assetLabel(dominantAsset.assetId, assets)} appears in ${dominantAsset.txCount.toLocaleString()} interactions.`}
-          {dominantType && ` ${dominantType.kind.replaceAll("_", " ").toLowerCase()} is the dominant transaction type.`}
-        </p>
+        {program && (
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            {summary.totalInteractions.toLocaleString()} interactions. This relationship consists of program calls.
+          </p>
+        )}
       </PanelSection>
 
       {!program && (
@@ -94,32 +94,28 @@ export function EdgePanel({
           </div>
           <div className="flex flex-wrap gap-1.5 text-[10px]">
             <Badge variant="outline">{direction}</Badge>
+            {/* Types add something only when they're mixed; a single type is already the direction. */}
+            {summary.transactionTypes.length > 1 &&
+              summary.transactionTypes.slice(0, 4).map((type) => (
+                <Badge key={type.kind} variant="outline">{type.kind.replaceAll("_", " ").toLowerCase()} · {type.count}</Badge>
+              ))}
           </div>
         </PanelSection>
       )}
 
       {summary.assets.length > 0 && (
-        <PanelSection title="Assets">
-          <div className="flex flex-col gap-2">
-            {summary.assets.slice(0, 4).map((asset) => (
-              <div key={asset.assetId} className="flex items-center gap-2 text-xs">
-                <AssetIcon label={assetLabel(asset.assetId, assets)} logo={assetLogo(asset.assetId, assets)} className="size-7 text-[8px]" />
-                <span>{assetLabel(asset.assetId, assets)}</span>
-                <span className="ml-auto tabular-nums text-muted-foreground">{asset.txCount.toLocaleString()} tx</span>
-              </div>
-            ))}
-            {summary.assets.length > 4 && <span className="text-xs text-muted-foreground">+{summary.assets.length - 4} more assets</span>}
-          </div>
-        </PanelSection>
+        <AssetFlows
+          // Totals each way, from the focused wallet's side like the Sent/Received cards above.
+          flows={summary.assets.map((asset) => ({
+            assetId: asset.assetId,
+            received: focusWallet === edge.a ? asset.bToA : asset.aToB,
+            sent: focusWallet === edge.a ? asset.aToB : asset.bToA,
+            txCount: asset.txCount,
+          }))}
+          assets={assets}
+          formatAmount={formatAmount}
+        />
       )}
-
-      <PanelSection title="Transaction behavior">
-        <div className="flex flex-wrap gap-1.5">
-          {summary.transactionTypes.slice(0, 4).map((type) => (
-            <Badge key={type.kind} variant="outline" className="text-[10px]">{type.kind.replaceAll("_", " ").toLowerCase()} · {type.count}</Badge>
-          ))}
-        </div>
-      </PanelSection>
 
       <PanelSection title={edge.interactions.length > representatives.length ? "Representative transactions" : "Transactions"}>
         <ol className="-mx-1 flex flex-col">
@@ -132,16 +128,22 @@ export function EdgePanel({
                     {it.kind.replace("_", " ")}
                   </Badge>
                 </div>
-                {it.movements.map((m, i) => (
-                  <div key={`${m.assetId}:${i}`} className="flex min-w-0 items-center gap-1 text-xs">
-                    <span className="min-w-0 max-w-[40%] truncate">{name(m.from)}</span>
-                    <ArrowRightIcon className="size-3 shrink-0 text-muted-foreground" aria-label="to" />
-                    <span className="min-w-0 max-w-[40%] truncate">{name(m.to)}</span>
-                    <span className="ml-auto shrink-0 tabular-nums">
-                      {formatAmount(m.amount, m.assetId)} <span className="text-muted-foreground">{assetLabel(m.assetId, assets)}</span>
-                    </span>
-                  </div>
-                ))}
+                {it.movements.map((m, i) => {
+                  // The pair is named in the header; a colored arrow is all a movement line needs.
+                  const outgoing = m.from === you;
+                  return (
+                    <div key={`${m.assetId}:${i}`} className="flex min-w-0 items-center gap-1.5 text-xs">
+                      {outgoing ? (
+                        <ArrowUpRightIcon className="size-3.5 shrink-0 text-destructive" aria-label="sent" />
+                      ) : (
+                        <ArrowDownLeftIcon className="size-3.5 shrink-0 text-emerald-500" aria-label="received" />
+                      )}
+                      <span className="min-w-0 truncate tabular-nums" title={`${names.of(m.from)} → ${names.of(m.to)}`}>
+                        {formatAmount(m.amount, m.assetId)} <span className="text-muted-foreground">{assetLabel(m.assetId, assets)}</span>
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
               <div className="flex shrink-0 flex-col">
                 <Button

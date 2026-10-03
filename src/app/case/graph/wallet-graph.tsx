@@ -392,10 +392,18 @@ export function WalletGraph({
       const primaryNode = n.id === primaryWallet;
       const restingAlpha = role === "core" ? 1 : role === "bridge" ? 0.88 : role === "aggregate" ? 0.58 : 0.66;
       const nodeAlpha = litNodes.size > 0 && !litNodes.has(n.id) ? 0.18 : restingAlpha;
-      ctx.globalAlpha = nodeAlpha;
+      // An opaque backing in the page colour (the trick the edge badges use) keeps connections
+      // from showing through a translucent node body — they read as a line across the node
+      // once you zoom in.
+      ctx.globalAlpha = 1;
+      ctx.beginPath();
+      if (n.kind === "aggregate") ctx.roundRect(pos.x - 58, pos.y - 21, 116, 42, 7);
+      else if (infrastructure) ctx.roundRect(pos.x - r, pos.y - r, r * 2, r * 2, 4);
+      else ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = p.bg;
+      ctx.fill();
       if (n.kind === "aggregate") {
-        ctx.beginPath();
-        ctx.roundRect(pos.x - 58, pos.y - 21, 116, 42, 7);
+        ctx.globalAlpha = nodeAlpha;
         ctx.fillStyle = p.card;
         ctx.fill();
         ctx.lineWidth = n.id === nodeFocus ? 2.5 : 1.5;
@@ -411,6 +419,7 @@ export function WalletGraph({
         ctx.fillText(`${n.txCount.toLocaleString()} wallets`, pos.x - 47, pos.y + 8);
         continue;
       }
+      ctx.globalAlpha = nodeAlpha;
       if (primaryNode) {
         ctx.globalAlpha = nodeAlpha * 0.14;
         ctx.fillStyle = p.fg;
@@ -909,20 +918,39 @@ export function WalletGraph({
         {legendOpen && (
           <>
             <Legend color="bg-destructive">
-              Outgoing from focus <span className="font-semibold text-destructive">→</span>
+              Sent from focus <span className="font-semibold text-destructive">→</span>
             </Legend>
             <Legend color="bg-emerald-500">
-              <span className="font-semibold text-emerald-500">←</span> Incoming to focus
+              <span className="font-semibold text-emerald-500">←</span> Received by focus
             </Legend>
-            <Legend color="bg-muted-foreground">Bidirectional · red and green particles</Legend>
+            <Legend color="bg-muted-foreground">Both ways · red and green arrows</Legend>
             {showPrograms ? (
               <Legend color="border-t-2 border-dotted border-[oklch(0.7_0.14_250)] bg-transparent">Program called ({graph.counts.programConnections})</Legend>
             ) : (
               graph.counts.programConnections > 0 && <span>{graph.counts.programConnections.toLocaleString()} program connections hidden</span>
             )}
-            <span className="pt-0.5">Moving dots show direction · more dots mean more activity</span>
-            <span>Badge: interactions · filled node: mapped wallet · click a node or line to inspect</span>
-            {graph.omittedNodes > 0 && <span>Click Other addresses to reveal {graph.omittedNodes.toLocaleString()} more</span>}
+            <span className="flex items-center gap-2 pt-0.5">
+              <span className="flex w-5 items-center justify-center gap-0.5" aria-hidden>
+                <span className="size-1.5 rounded-full border border-muted-foreground" />
+                <span className="size-3 rounded-full border border-muted-foreground" />
+              </span>
+              Bigger node · more transactions
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="flex w-5 justify-center" aria-hidden>
+                <span className="size-2.5 rounded-full bg-foreground" />
+              </span>
+              Primary wallet · bright ring: mapped or shared by mapped wallets
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="flex w-5 justify-center" aria-hidden>
+                <span className="size-2.5 rounded-[2px] border border-muted-foreground" />
+              </span>
+              Square: program or infrastructure
+            </span>
+            <span className="pt-0.5">Dots flow in the direction of transfers · more dots and a stronger line mean more activity</span>
+            <span>Count badges on lines between mapped wallets and on the hovered line · click a node or line to inspect</span>
+            {graph.omittedNodes > 0 && <span>Click the dashed Other addresses box to reveal {graph.omittedNodes.toLocaleString()} more</span>}
           </>
         )}
       </div>

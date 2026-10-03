@@ -18,8 +18,10 @@ import { TransactionDetails } from "./transaction-details";
 
 const cardDate = (ms: number) => {
   const d = new Date(ms);
-  const date = d.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
-  return `${date} · ${d.toISOString().slice(11, 16)}`;
+  // The year only when it isn't this one, matching the nodes' labels on the canvas.
+  const options: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", timeZone: "UTC" };
+  if (d.getUTCFullYear() !== new Date().getUTCFullYear()) options.year = "numeric";
+  return `${d.toLocaleDateString("en-GB", options)} · ${d.toISOString().slice(11, 16)}`;
 };
 
 function headline(summary: EffectSummary, state: WalletState, assets: Assets, names: Names): string {
