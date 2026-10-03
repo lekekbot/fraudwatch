@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { NATIVE_SOL } from "@/lib/assets/assets";
 import type { EffectKind } from "@/lib/state/summarize";
 import type { FilterableTx } from "@/lib/timeline/filter";
-import { deleteRule, hiddenBy, hideTransactions, revertHiding, ruleMatches, saveRule, unhideTransactions } from "./hiding";
+import { deleteRule, hiddenBy, hideTransactions, revertHiding, ruleFrom, ruleMatches, saveRule, unhideTransactions } from "./hiding";
 import { createCase, type HideRule } from "./model";
 
 const A = "dLm61Lvpigiaig9ZHcdh6iE7mFp7WmfqzkFMrDdf5Vo";
@@ -44,11 +44,17 @@ describe("ruleMatches", () => {
     expect(ruleMatches(r, tx("a"))).toBe(false);
   });
 
-  it("treats dust as moving the asset, every movement under the threshold", () => {
-    const r = rule({ dust: { assetId: NATIVE_SOL, below: "1000" } });
-    expect(ruleMatches(r, tx("a", { inflows: [[NATIVE_SOL, "999"]] }))).toBe(true);
-    expect(ruleMatches(r, tx("a", { outflows: [[NATIVE_SOL, "-1000"]] }))).toBe(false);
-    expect(ruleMatches(r, tx("a", { inflows: [[SPAM, "1"]] }))).toBe(false);
+  it("compares the moved amount, either direction, and needs the asset to move", () => {
+    const amount = (op: "lt" | "gt" | "eq" | "ne") => rule({ amount: { assetId: NATIVE_SOL, op, value: "1000" } });
+    const moved = (delta: string) => tx("a", delta.startsWith("-") ? { outflows: [[NATIVE_SOL, delta]] } : { inflows: [[NATIVE_SOL, delta]] });
+    expect(ruleMatches(amount("lt"), moved("999"))).toBe(true);
+    expect(ruleMatches(amount("lt"), moved("-1000"))).toBe(false);
+    expect(ruleMatches(amount("gt"), moved("-1001"))).toBe(true);
+    expect(ruleMatches(amount("gt"), moved("1000"))).toBe(false);
+    expect(ruleMatches(amount("eq"), moved("-1000"))).toBe(true);
+    expect(ruleMatches(amount("ne"), moved("1000"))).toBe(false);
+    expect(ruleMatches(amount("ne"), moved("5"))).toBe(true);
+    expect(ruleMatches(amount("ne"), tx("a", { inflows: [[SPAM, "1"]] }))).toBe(false);
   });
 
   it("matches tags and protocols", () => {
@@ -58,7 +64,7 @@ describe("ruleMatches", () => {
 });
 
 describe("hiddenBy", () => {
-  const dust = rule({ dust: { assetId: NATIVE_SOL, below: "1000" } });
+  const dust = rule({ amount: { assetId: NATIVE_SOL, op: "lt", value: "1000" } });
   const small = tx("small", { inflows: [[NATIVE_SOL, "1"]] });
 
   it("reports a manual hide, then the first enabled matching rule", () => {
@@ -103,5 +109,17 @@ describe("revertHiding", () => {
     const undone = revertHiding(later, before, after);
     expect(undone.hiddenSignatures).toEqual(["kept", "c"]);
     expect(undone.shownSignatures).toEqual([]);
+  });
+});
+
+describe("ruleFrom", () => {
+  it("takes the hidden types and the filter's protocols, tags and address", () => {
+    const r = ruleFrom([tx("a", { kind: "PROGRAM" }), tx("b", { kind: "PROGRAM" })], { protocols: new Set(["jupiter"]), tags: new Set(), address: "X" }, "id", "Rule 1");
+    expect(r).toEqual({ id: "id", name: "Rule 1", enabled: true, kinds: ["PROGRAM"], protocols: ["jupiter"], counterparties: ["X"] });
+  });
+
+  it("leaves types out when the hide spanned many", () => {
+    const many = (["SEND", "RECEIVE", "SWAP", "BURN"] as const).map((kind, i) => tx(String(i), { kind }));
+    expect(ruleFrom(many, { protocols: new Set(), tags: new Set(), address: null }, "id", "R").kinds).toBeUndefined();
   });
 });

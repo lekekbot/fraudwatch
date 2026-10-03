@@ -33,8 +33,8 @@ import { shortenAddress } from "@/lib/solana/address";
 import { collectCounterparties } from "@/lib/state/counterparties";
 import { type EffectSummary, type NftCatalog, summarizeEffect } from "@/lib/state/summarize";
 import { counterpartyRows, type TransactedRow, transactedOverview } from "@/lib/state/volume";
-import { type HiddenReason, hiddenBy, hideTransactions, revertHiding, unhideTransactions } from "@/lib/case/hiding";
-import { EMPTY_FILTER, type FilterableTx, type TxFilter, involvedAddresses, movedAssets, passesFilter, toggled } from "@/lib/timeline/filter";
+import { type HiddenReason, hiddenBy, hideTransactions, revertHiding, ruleFrom, unhideTransactions } from "@/lib/case/hiding";
+import { EMPTY_FILTER, type FilterableTx, type TxFilter, involvedAddresses, isFilterActive, movedAssets, passesFilter, toggled } from "@/lib/timeline/filter";
 import type { SearchItem } from "@/lib/search";
 import { eventTimes } from "@/lib/timeline/layout";
 import { cn } from "cn";
@@ -43,7 +43,7 @@ import { AssetFlows } from "./asset-flows";
 import { CounterpartyList } from "./counterparty-list";
 import { DeleteCaseButton } from "./delete-case-button";
 import { FilterPanel } from "./filter-panel";
-import { HidingSection } from "./hide-rules";
+import { HidingSection, type RulesDialogState } from "./hide-rules";
 import { type MapWalletChoice, MapWalletDialog } from "./map-wallet-dialog";
 import { EdgePanel } from "./graph/edge-panel";
 import { WalletGraph } from "./graph/wallet-graph";
@@ -128,6 +128,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   const [rightOpen, setRightOpen] = useState(true);
   const view = route.view;
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
+  const [rulesDialog, setRulesDialog] = useState<RulesDialogState>(null);
   /** Transaction open from the table view. */
   const [tableTx, setTableTx] = useState<string | null>(null);
   /** Transaction to open the timeline on, from the graph's "Show on timeline". */
@@ -589,7 +590,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   const walletInspector = panelFor(
     selectedWallet,
     walletState && walletStates && (
-      <PanelSection title="Wallet state">
+      <PanelSection title="Wallet state" collapsible defaultCollapsed>
         <WalletStateSummary state={walletState} assets={walletStates.assets} />
       </PanelSection>
     ),
@@ -618,18 +619,39 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   const edge = graph?.edges.find((e) => e.id === selectedEdge);
   const graphWallet = shownLanes.includes(selectedWallet) ? selectedWallet : (shownLanes[0] ?? selectedWallet);
 
-  // Hiding from the table: one write per batch, with Undo. Undo reverses just that batch on the case as it is then.
+  // Hiding: one write per batch, with Undo. Undo reverses just that batch on the case as it is then.
   const latestCase = useRef(c);
   useEffect(() => {
     latestCase.current = c;
   }, [c]);
+  const undoOf = (before: FraudWatchCase, next: FraudWatchCase) => () => void updateCase(revertHiding(latestCase.current, before, next));
   const changeHiding = (next: FraudWatchCase, message: string) => {
-    const before = c;
     void updateCase(next);
-    toast.success(message, { action: { label: "Undo", onClick: () => void updateCase(revertHiding(latestCase.current, before, next)) } });
+    toast.success(message, { action: { label: "Undo", onClick: undoOf(c, next) } });
   };
-  const hideBatch = (signatures: string[]) =>
-    changeHiding(hideTransactions(c, signatures), `Hid ${signatures.length.toLocaleString()} transaction${signatures.length === 1 ? "" : "s"} from the map.`);
+  // After a hide, the toast offers to turn it into a rule, prefilled from what was hidden and the filter in use.
+  const hideBatch = (signatures: string[], context: TxFilter = EMPTY_FILTER) => {
+    const next = hideTransactions(c, signatures);
+    const wanted = new Set(signatures);
+    const rows = [...filterables.values()].flat().filter((row) => wanted.has(row.signature));
+    const name = `Rule ${(c.hideRules?.length ?? 0) + 1}`;
+    void updateCase(next);
+    toast.success(`Hid ${signatures.length.toLocaleString()} transaction${signatures.length === 1 ? "" : "s"} from the map.`, {
+      action: { label: "Make a rule", onClick: () => setRulesDialog(ruleFrom(rows, context, crypto.randomUUID(), name)) },
+      cancel: { label: "Undo", onClick: undoOf(c, next) },
+    });
+  };
+  // What the views show right now (the table: its wallet; otherwise every visible lane), once per transaction.
+  const viewLanes = view === "table" ? [selectedWallet] : shownLanes;
+  const shownNow = [...new Set(viewLanes.flatMap((w) => perWallet.get(w)?.state.effects.map((e) => e.signature) ?? []))];
+  // What the filters take out of view (not already hidden, and not shown on another lane): the noise when types or assets are unticked.
+  const filteredOut = (() => {
+    if (!isFilterActive(filter)) return [];
+    const tagsOf = (address: string) => names.label(address)?.tags ?? [];
+    const shownSet = new Set(shownNow);
+    const out = viewLanes.flatMap((w) => (filterables.get(w) ?? []).filter((row) => !shownSet.has(row.signature) && !passesFilter(row, filter, tagsOf) && hiddenBy(c, row, tagsOf) === null));
+    return [...new Set(out.map((row) => row.signature))];
+  })();
   const unhideBatch = (signatures: string[]) => {
     // Ones a rule would still hide become exceptions, so they really come back.
     const tagsOf = (address: string) => names.label(address)?.tags ?? [];
@@ -920,6 +942,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
             )}
             <PanelSection
               title="Wallets"
+              collapsible
               action={
                 focus.size > 0 && (
                   <Button variant="ghost" size="xs" onClick={() => setFocus(new Set())}>
@@ -1050,6 +1073,11 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                 filter={filter}
                 shown={view !== "table" ? lanes.reduce((n, l) => n + l.state.effects.length, 0) : visibleState.effects.length}
                 onChange={updateFilter}
+                // Filtering to the noise, then hiding it, is the everyday way to bulk-hide.
+                hide={{
+                  shown: { count: shownNow.length, run: () => hideBatch(shownNow, filter) },
+                  filteredOut: { count: filteredOut.length, run: () => hideBatch(filteredOut, filter) },
+                }}
               />
             )}
             {walletStates && (
@@ -1061,11 +1089,14 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                 decimalsOf={(assetId) =>
                   walletStates.assets.get(assetId)?.decimals ?? walletStates.states.find((st) => assetId in st.decimals)?.decimals[assetId] ?? 0
                 }
+                dialog={rulesDialog}
+                onDialog={setRulesDialog}
+                onPickInTable={view === "table" ? undefined : () => routeTo("table", filter.address)}
                 onSave={(next) => void updateCase(next)}
               />
             )}
             {(c.bookmarks ?? []).length > 0 && (
-              <PanelSection title={`Bookmarks (${c.bookmarks!.length})`}>
+              <PanelSection title={`Bookmarks (${c.bookmarks!.length})`} collapsible>
                 <ul className="-mx-1 flex flex-col">
                   {[...c.bookmarks!]
                     .sort((a, b) => a.kind.localeCompare(b.kind) || a.createdAt.localeCompare(b.createdAt))

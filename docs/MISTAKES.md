@@ -23,3 +23,8 @@ Rule: Before branching a new sprint, confirm the previous sprint's branch is mer
 What happened: The address label form saved the name in `onSubmit`, but it had two text inputs (name, tags) and no submit button, so pressing Enter never submitted. Browser testing showed the label not appearing on the cards.
 Why: Assumed Enter always submits a form. Implicit submission only happens with a submit button, or when the form has a single text field.
 Rule: For save-on-Enter fields, handle Enter on the field itself (e.g. blur to trigger the save) rather than relying on form submission. Verify the save happens in the browser without clicking anywhere else.
+
+### 2026-10-03 — Ran Prettier over a whole file in a repo that doesn't use it
+What happened: Ran `npx prettier --write` on `wallet-state-view.tsx` and later `filter-panel.tsx` to tidy an edit. The repo has no Prettier config and its files use long lines, so Prettier reformatted the entire file (+381/−122), burying the real change and mixing it with another session's uncommitted work.
+Why: Assumed a formatter was part of the workflow without checking for a config.
+Rule: Don't run a formatter unless the repo configures one (`.prettierrc`, a `format` script, or a lint rule). Match the surrounding style by hand. If a file does get reformatted, rebuild it from `HEAD` plus the known content changes, and confirm with a formatted-vs-formatted diff before overwriting.

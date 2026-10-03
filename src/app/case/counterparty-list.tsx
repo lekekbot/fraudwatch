@@ -22,7 +22,7 @@ export function CounterpartyList({ rows, names, selected, onSelect }: {
   onSelect: (address: string) => void;
 }) {
   return (
-    <PanelSection title={`Counterparties (${rows.length})`}>
+    <PanelSection title={`Counterparties (${rows.length})`} collapsible defaultCollapsed>
       {rows.length === 0 ? (
         <p className="text-xs text-muted-foreground">No counterparties in the loaded transactions.</p>
       ) : (

@@ -1,4 +1,4 @@
-import type { FilterableTx } from "@/lib/timeline/filter";
+import type { FilterableTx, TxFilter } from "@/lib/timeline/filter";
 import type { FraudWatchCase, HideRule } from "./model";
 
 type Hiding = Pick<FraudWatchCase, "hiddenSignatures" | "shownSignatures" | "hideRules">;
@@ -13,10 +13,12 @@ export function ruleMatches(rule: HideRule, tx: FilterableTx, tagsOf: (address: 
   const checks: boolean[] = [];
   if (rule.kinds?.length) checks.push(rule.kinds.includes(summary.kind));
   if (rule.onlyAssets?.length) checks.push(moved.length > 0 && moved.every((a) => rule.onlyAssets!.includes(a)));
-  if (rule.dust) {
-    const { assetId, below } = rule.dust;
+  if (rule.amount) {
+    const { assetId, op, value } = rule.amount;
+    const target = BigInt(value);
+    const holds = (moved: bigint) => (op === "lt" ? moved < target : op === "gt" ? moved > target : op === "eq" ? moved === target : moved !== target);
     const of = changes.filter((c) => c.assetId === assetId);
-    checks.push(of.length > 0 && of.every((c) => abs(BigInt(c.delta)) < BigInt(below)));
+    checks.push(of.length > 0 && of.every((c) => holds(abs(BigInt(c.delta)))));
   }
   if (rule.counterparties?.length) checks.push(tx.addresses.some((a) => rule.counterparties!.includes(a)));
   if (rule.tags?.length) checks.push(tx.addresses.some((a) => tagsOf(a).some((t) => rule.tags!.includes(t))));
@@ -88,5 +90,23 @@ export function revertHiding<C extends FraudWatchCase>(latest: C, before: Hiding
     hiddenSignatures: revert(latest.hiddenSignatures, before.hiddenSignatures, after.hiddenSignatures),
     shownSignatures: revert(latest.shownSignatures, before.shownSignatures, after.shownSignatures),
     updatedAt: now.toISOString(),
+  };
+}
+
+/**
+ * A starting point for "Make a rule" after a hide: the transaction types that
+ * were hidden (when there are a few), plus the active filter's protocols, tags
+ * and address. The editor's live count lets the user check and adjust it.
+ */
+export function ruleFrom(hidden: readonly FilterableTx[], filter: Pick<TxFilter, "protocols" | "tags" | "address">, id: string, name: string): HideRule {
+  const kinds = [...new Set(hidden.map((row) => row.summary.kind))];
+  return {
+    id,
+    name,
+    enabled: true,
+    ...(kinds.length > 0 && kinds.length <= 3 ? { kinds } : {}),
+    ...(filter.protocols.size ? { protocols: [...filter.protocols] } : {}),
+    ...(filter.tags.size ? { tags: [...filter.tags] } : {}),
+    ...(filter.address ? { counterparties: [filter.address] } : {}),
   };
 }

@@ -335,7 +335,8 @@ export function WalletGraph({
           }
         }
       }
-      if (edge.kind === "interaction" && (coreEdge || selected || focusEdge === edge.id)) {
+      // The count shows only for the line under the cursor or selected, so badges don't clutter the map.
+      if (edge.kind === "interaction" && (selected || focusEdge === edge.id)) {
         const point = pointOnPath(segment, 0.72);
         const tangent = pathTangent(segment, 0.72);
         const length = Math.hypot(tangent.x, tangent.y) || 1;
@@ -436,6 +437,13 @@ export function WalletGraph({
       ctx.lineWidth = n.id === nodeFocus ? 2.5 : role === "core" || role === "bridge" ? 2 : 1.5;
       ctx.strokeStyle = n.id === nodeFocus ? p.fg : n.kind === "program" ? p.program : role === "core" || role === "bridge" ? p.fg : p.muted;
       ctx.stroke();
+      // Other mapped wallets get a centre dot, so they stay distinct from counterparties of any size.
+      if (n.kind === "wallet" && !primaryNode) {
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, r * 0.4, 0, Math.PI * 2);
+        ctx.fillStyle = p.fg;
+        ctx.fill();
+      }
       if (!far && primaryNode) {
         ctx.font = "700 8px ui-sans-serif, system-ui, sans-serif";
         ctx.textAlign = "center";
@@ -940,7 +948,21 @@ export function WalletGraph({
               <span className="flex w-5 justify-center" aria-hidden>
                 <span className="size-2.5 rounded-full bg-foreground" />
               </span>
-              Primary wallet · bright ring: mapped or shared by mapped wallets
+              Primary wallet
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="flex w-5 justify-center" aria-hidden>
+                <span className="flex size-3 items-center justify-center rounded-full border border-foreground">
+                  <span className="size-1 rounded-full bg-foreground" />
+                </span>
+              </span>
+              Mapped wallet
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="flex w-5 justify-center" aria-hidden>
+                <span className="size-3 rounded-full border border-muted-foreground" />
+              </span>
+              Counterparty · bright ring: shared by mapped wallets
             </span>
             <span className="flex items-center gap-2">
               <span className="flex w-5 justify-center" aria-hidden>
@@ -949,7 +971,7 @@ export function WalletGraph({
               Square: program or infrastructure
             </span>
             <span className="pt-0.5">Dots flow in the direction of transfers · more dots and a stronger line mean more activity</span>
-            <span>Count badges on lines between mapped wallets and on the hovered line · click a node or line to inspect</span>
+            <span>Hover a line for its transaction count · click a node or line to inspect</span>
             {graph.omittedNodes > 0 && <span>Click the dashed Other addresses box to reveal {graph.omittedNodes.toLocaleString()} more</span>}
           </>
         )}

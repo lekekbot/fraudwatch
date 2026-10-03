@@ -60,6 +60,7 @@ export function EdgePanel({
     <>
       <PanelSection
         title={program ? "Program connection" : "Wallet interaction"}
+        collapsible
         action={
           <Button variant="ghost" size="icon-xs" aria-label="Close" onClick={onClose}>
             <XIcon />
@@ -81,7 +82,7 @@ export function EdgePanel({
       </PanelSection>
 
       {!program && (
-        <PanelSection title="Relationship">
+        <PanelSection title="Relationship" collapsible>
           <div className="grid grid-cols-2 gap-2 text-xs">
             <div className="rounded-md border bg-destructive/5 p-2">
               <span className="flex items-center gap-1 text-destructive"><ArrowUpRightIcon className="size-3.5" /> Sent</span>
@@ -117,7 +118,10 @@ export function EdgePanel({
         />
       )}
 
-      <PanelSection title={edge.interactions.length > representatives.length ? "Representative transactions" : "Transactions"}>
+      <PanelSection
+        title={edge.interactions.length > representatives.length ? "Representative transactions" : "Transactions"}
+        collapsible
+      >
         <ol className="-mx-1 flex flex-col">
           {representatives.map((it) => (
             <li key={it.signature} className="flex gap-2 rounded-md px-1 py-1.5 hover:bg-muted/50">

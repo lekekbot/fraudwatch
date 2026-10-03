@@ -102,7 +102,7 @@ export function IngestionPanel({
   const running = state.status === "running";
 
   return (
-    <PanelSection title="History">
+    <PanelSection title="History" collapsible defaultCollapsed>
       <p className="text-xs text-muted-foreground">
         Loads each mapped wallet&apos;s history for the case range from your RPC, including its token accounts. Cached
         in this browser; later loads only fetch what&apos;s missing.

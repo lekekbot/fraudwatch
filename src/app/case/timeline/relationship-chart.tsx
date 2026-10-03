@@ -1,0 +1,312 @@
+"use client";
+
+import { scaleUtc } from "d3-scale";
+import { select } from "d3-selection";
+import { type ZoomBehavior, type ZoomTransform, zoom, zoomIdentity } from "d3-zoom";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { wheelAction } from "@/lib/gestures";
+import type { Names } from "@/lib/labels/labels";
+import { binEvents, type Relationship } from "@/lib/timeline/relationships";
+
+/** Rows drawn: the busiest relationships. */
+const MAX_ROWS = 15;
+/** Row height range: rows shrink to fit the view, down to the minimum, then the chart scrolls. */
+const ROW_MAX = 52;
+const ROW_MIN = 36;
+/** Width of one activity slice, in px; slices follow the zoom. */
+const BIN = 6;
+const GUTTER = 190;
+const TOP = 64;
+const AXIS = 36;
+const PAD = 16;
+
+export type RelationshipChartHandle = { zoomBy: (factor: number) => void; fit: () => void };
+
+const utcRange = (start: number, end: number) => {
+  const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  const a = day(start);
+  const b = day(end);
+  return a === b ? a : `${a} – ${b}`;
+};
+
+/**
+ * Relationships over time: one row per pair of addresses, a band across the
+ * period they dealt with each other. Band thickness is how many transactions
+ * fell in each slice of time; above the line is what the mapped wallet sent,
+ * below what it received.
+ */
+export const RelationshipChart = forwardRef<
+  RelationshipChartHandle,
+  {
+    relationships: Relationship[];
+    range: { start: number; end: number };
+    names: Names;
+    /** Opens a transaction, seen from `wallet`'s lane. */
+    onPick: (signature: string, wallet: string) => void;
+  }
+>(function RelationshipChart({ relationships, range, names, onPick }, ref) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const transformRef = useRef<ZoomTransform>(zoomIdentity);
+  const zoomRef = useRef<ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
+  const sizeRef = useRef({ width: 800, height: 400, view: 400, row: ROW_MAX });
+  const frameRef = useRef<number | null>(null);
+  const [tip, setTip] = useState<{ x: number; y: number; lines: string[] } | null>(null);
+  const rows = useMemo(() => relationships.slice(0, MAX_ROWS), [relationships]);
+  const latest = useRef({ rows, range, names });
+  useEffect(() => {
+    latest.current = { rows, range, names };
+  });
+
+  const scale = useCallback(() => {
+    const { width } = sizeRef.current;
+    const base = scaleUtc().domain([latest.current.range.start, latest.current.range.end]).range([GUTTER + PAD, width - PAD]);
+    return transformRef.current.rescaleX(base);
+  }, []);
+  const rowY = (r: number) => TOP + r * sizeRef.current.row + sizeRef.current.row / 2;
+
+  const draw = useCallback(() => {
+    frameRef.current = null;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    const { rows, names } = latest.current;
+    const { width, height } = sizeRef.current;
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const css = getComputedStyle(canvas);
+    const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
+    const fg = v("--foreground", "#eee");
+    const muted = v("--muted-foreground", "#999");
+    const border = v("--border", "#333");
+    const bg = v("--background", "#111");
+    const send = v("--destructive", "#e5484d");
+    const receive = "oklch(0.72 0.16 155)";
+    ctx.clearRect(0, 0, width, height);
+    const x = scale();
+    const left = GUTTER + PAD;
+    const binned = rows.map((rel) => binEvents(rel.events, (t) => x(t), left, BIN));
+    // Thickness is relative to the busiest slice in view, so quiet periods still show.
+    const max = Math.max(1, ...binned.flat().map((b) => Math.max(b.sent, b.received)));
+    // Widest a band gets either side of its centre line: about a third of the row.
+    const widest = Math.round(sizeRef.current.row * 0.34);
+    const half = (n: number) => (n === 0 ? 0 : 2 + (widest - 2) * Math.sqrt(n / max));
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(GUTTER, 0, width - GUTTER, height - AXIS);
+    ctx.clip();
+    rows.forEach((rel, r) => {
+      const y = rowY(r);
+      // The span the two dealt with each other, as a thin line, so gaps between bursts still read as one relationship.
+      const x0 = x(rel.events[0].time);
+      const x1 = x(rel.events[rel.events.length - 1].time);
+      ctx.strokeStyle = muted;
+      ctx.globalAlpha = 0.6;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x0, y + 0.5);
+      ctx.lineTo(Math.max(x1, x0 + 1), y + 0.5);
+      ctx.stroke();
+      ctx.globalAlpha = 0.9;
+      for (const b of binned[r]) {
+        const bx = left + b.index * BIN;
+        ctx.fillStyle = send;
+        if (b.sent) ctx.fillRect(bx, y - half(b.sent), BIN - 1, half(b.sent));
+        ctx.fillStyle = receive;
+        if (b.received) ctx.fillRect(bx, y + 1, BIN - 1, half(b.received));
+      }
+      ctx.globalAlpha = 1;
+    });
+    ctx.restore();
+
+    // Row labels in a fixed gutter: the mapped wallet, then who it dealt with.
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, GUTTER, height);
+    ctx.strokeStyle = border;
+    ctx.beginPath();
+    ctx.moveTo(GUTTER - 0.5, 0);
+    ctx.lineTo(GUTTER - 0.5, height - AXIS);
+    ctx.stroke();
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    rows.forEach((rel, r) => {
+      const y = rowY(r);
+      ctx.fillStyle = fg;
+      ctx.font = "600 12px ui-sans-serif, system-ui, sans-serif";
+      ctx.fillText(names.of(rel.a), 12, y - 8);
+      ctx.fillStyle = muted;
+      ctx.font = names.known(rel.b) ? "12px ui-sans-serif, system-ui, sans-serif" : "11px ui-monospace, monospace";
+      ctx.fillText(`↔ ${names.of(rel.b)}`, 12, y + 9);
+      ctx.font = "10px ui-sans-serif, system-ui, sans-serif";
+      ctx.textAlign = "right";
+      ctx.fillText(`${rel.events.length.toLocaleString()} tx`, GUTTER - 10, y);
+      ctx.textAlign = "left";
+    });
+
+    // Time axis along the bottom.
+    const axisY = height - AXIS + 12;
+    ctx.strokeStyle = border;
+    ctx.beginPath();
+    ctx.moveTo(GUTTER, height - AXIS);
+    ctx.lineTo(width, height - AXIS);
+    ctx.stroke();
+    ctx.fillStyle = muted;
+    ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
+    ctx.textAlign = "center";
+    const format = x.tickFormat(Math.max(2, Math.floor((width - GUTTER) / 110)));
+    for (const tick of x.ticks(Math.max(2, Math.floor((width - GUTTER) / 110)))) {
+      const tx = x(tick);
+      if (tx < GUTTER + 20 || tx > width - 20) continue;
+      ctx.fillText(format(tick), tx, axisY);
+    }
+    ctx.textBaseline = "alphabetic";
+  }, [scale]);
+
+  const schedule = useCallback(() => {
+    if (frameRef.current === null) frameRef.current = requestAnimationFrame(draw);
+  }, [draw]);
+
+  // Size to the container; the rows can make the canvas taller than it, and the container scrolls.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const scroller = canvas?.parentElement;
+    if (!canvas || !scroller) return;
+    const resize = () => {
+      const width = scroller.clientWidth || 800;
+      const view = scroller.clientHeight || 400;
+      const count = Math.max(1, latest.current.rows.length);
+      const row = Math.max(ROW_MIN, Math.min(ROW_MAX, Math.floor((view - TOP - AXIS - 8) / count)));
+      const height = Math.max(view, TOP + count * row + AXIS + 8);
+      sizeRef.current = { width, height, view, row };
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      zoomRef.current?.extent([[0, 0], [width, height]]);
+      schedule();
+    };
+    resize();
+    const observer = new ResizeObserver(resize);
+    observer.observe(scroller);
+    return () => observer.disconnect();
+  }, [schedule, rows.length]);
+
+  // Drag pans time; pinch or a vertical swipe zooms; a sideways swipe pans.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const behavior = zoom<HTMLCanvasElement, unknown>()
+      .scaleExtent([1, 5000])
+      .filter((event: MouseEvent) => event.type !== "wheel" && !event.button)
+      .on("zoom", (event: { transform: ZoomTransform }) => {
+        transformRef.current = zoomIdentity.translate(event.transform.x, 0).scale(event.transform.k);
+        schedule();
+      });
+    zoomRef.current = behavior;
+    select(canvas).call(behavior).on("dblclick.zoom", null);
+    const onWheel = (event: WheelEvent) => {
+      const { height, view } = sizeRef.current;
+      const action = wheelAction(event, height > view + 1);
+      if (action.type === "scroll") return;
+      event.preventDefault();
+      if (action.type === "zoom") {
+        const rect = canvas.getBoundingClientRect();
+        select(canvas).call(behavior.scaleBy, action.factor, [event.clientX - rect.left, 0]);
+      } else select(canvas).call(behavior.translateBy, -action.dx / transformRef.current.k, 0);
+    };
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      select(canvas).on(".zoom", null);
+      canvas.removeEventListener("wheel", onWheel);
+    };
+  }, [schedule]);
+
+  useEffect(() => schedule(), [rows, range, names, schedule]);
+
+  useImperativeHandle(ref, () => ({
+    zoomBy: (factor) => {
+      const canvas = canvasRef.current;
+      if (canvas && zoomRef.current) select(canvas).call(zoomRef.current.scaleBy, factor, [(GUTTER + sizeRef.current.width) / 2, 0]);
+    },
+    fit: () => {
+      const canvas = canvasRef.current;
+      if (canvas && zoomRef.current) select(canvas).call(zoomRef.current.transform, zoomIdentity);
+    },
+  }));
+
+  /** The relationship row and activity slice under a point, if any. */
+  const hitAt = (px: number, py: number) => {
+    if (px < GUTTER) return null;
+    const r = Math.floor((py - TOP) / sizeRef.current.row);
+    const rel = rows[r];
+    if (!rel) return null;
+    const x = scale();
+    const left = GUTTER + PAD;
+    const index = Math.floor((px - left) / BIN);
+    const bin = binEvents(rel.events, (t) => x(t), left, BIN).find((b) => b.index === index);
+    if (!bin) return null;
+    const start = x.invert(left + index * BIN).getTime();
+    const end = x.invert(left + (index + 1) * BIN).getTime();
+    return { rel, bin, start, end };
+  };
+
+  const point = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return { px: event.clientX - rect.left, py: event.clientY - rect.top };
+  };
+
+  if (relationships.length === 0) {
+    return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">No value moved between these wallets and anyone else in view.</div>;
+  }
+
+  return (
+    <div className="relative h-full overflow-y-auto">
+      <canvas
+        ref={canvasRef}
+        className="block cursor-grab active:cursor-grabbing"
+        aria-label="Relationships over time"
+        onMouseMove={(event) => {
+          const { px, py } = point(event);
+          const hit = hitAt(px, py);
+          setTip(
+            hit
+              ? {
+                  x: px,
+                  y: py,
+                  lines: [
+                    `${names.of(hit.rel.a)} ↔ ${names.of(hit.rel.b)}`,
+                    `${hit.bin.sent.toLocaleString()} sent · ${hit.bin.received.toLocaleString()} received`,
+                    `${utcRange(hit.start, hit.end)} UTC · click to open`,
+                  ],
+                }
+              : null,
+          );
+        }}
+        onMouseLeave={() => setTip(null)}
+        onClick={(event) => {
+          const { px, py } = point(event);
+          const hit = hitAt(px, py);
+          if (hit) onPick(hit.bin.first.signature, hit.rel.a);
+        }}
+      />
+      {relationships.length > MAX_ROWS && (
+        <p className="pointer-events-none absolute bottom-3 left-3 text-[11px] text-muted-foreground">
+          Top {MAX_ROWS} of {relationships.length.toLocaleString()} by activity
+        </p>
+      )}
+      {tip && (
+        <div
+          className="pointer-events-none absolute z-10 rounded-md border bg-popover px-2 py-1.5 text-xs shadow-md"
+          style={{ left: Math.min(tip.x + 12, sizeRef.current.width - 260), top: tip.y + 12 }}
+        >
+          {tip.lines.map((line, i) => (
+            <div key={i} className={i === 0 ? "font-medium" : "text-muted-foreground"}>
+              {line}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+});

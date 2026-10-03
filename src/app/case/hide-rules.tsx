@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { deleteRule, hiddenBy, ruleMatches, saveRule } from "@/lib/case/hiding";
-import type { FraudWatchCase, HideRule } from "@/lib/case/model";
+import type { AmountOp, FraudWatchCase, HideRule } from "@/lib/case/model";
 import type { Names } from "@/lib/labels/labels";
 import { formatBaseUnits, parseUnits } from "@/lib/solana/amount";
 import type { EffectKind } from "@/lib/state/summarize";
@@ -18,17 +19,30 @@ import { PanelSection } from "./panel";
 
 const SHOWN_CHOICES = 12;
 
+const AMOUNT_OPS: { op: AmountOp; label: string; hint: string }[] = [
+  { op: "lt", label: "Less than", hint: "smaller" },
+  { op: "gt", label: "More than", hint: "larger" },
+  { op: "eq", label: "Exactly", hint: "exactly this" },
+  { op: "ne", label: "Not", hint: "anything but this" },
+];
+
+/** What the rules dialog shows: closed, the rule list, or the editor on a rule (new or existing). */
+export type RulesDialogState = null | "list" | HideRule;
+
 /** Left-panel section: what's hidden from the map, and the case's hide rules. */
-export function HidingSection({ c, rows, assets, names, decimalsOf, onSave }: {
+export function HidingSection({ c, rows, assets, names, decimalsOf, dialog, onDialog, onPickInTable, onSave }: {
   c: FraudWatchCase;
   /** Every loaded transaction side across mapped wallets, before filters. */
   rows: FilterableTx[];
   assets: Assets;
   names: Names;
   decimalsOf: (assetId: string) => number;
+  dialog: RulesDialogState;
+  onDialog: (next: RulesDialogState) => void;
+  /** Opens the table, where transactions can be ticked and hidden. */
+  onPickInTable?: () => void;
   onSave: (next: FraudWatchCase) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const tagsOf = (address: string) => names.label(address)?.tags ?? [];
   const unique = uniqueBySignature(rows);
   const manual = c.hiddenSignatures?.length ?? 0;
@@ -37,18 +51,12 @@ export function HidingSection({ c, rows, assets, names, decimalsOf, onSave }: {
     return why !== null && why !== "manual";
   }).length;
   const rules = c.hideRules ?? [];
+  const newRule = (): HideRule => ({ id: crypto.randomUUID(), name: `Rule ${rules.length + 1}`, enabled: true });
 
   return (
-    <PanelSection
-      title="Hide from map"
-      action={
-        <Button variant="ghost" size="xs" onClick={() => setOpen(true)}>
-          Rules{rules.length > 0 && ` (${rules.filter((r) => r.enabled).length}/${rules.length})`}
-        </Button>
-      }
-    >
+    <PanelSection title="Hidden transactions" collapsible>
       {manual === 0 && byRules === 0 ? (
-        <p className="text-xs text-muted-foreground">Nothing hidden. Hide transactions from the table, or add a rule.</p>
+        <p className="text-xs text-muted-foreground">Hide noise from the map: filter to it and hide it, tick rows in the table, or add a rule.</p>
       ) : (
         <div className="flex items-center justify-between gap-2 text-xs">
           <span className="text-muted-foreground">
@@ -61,7 +69,38 @@ export function HidingSection({ c, rows, assets, names, decimalsOf, onSave }: {
           )}
         </div>
       )}
-      {open && <RulesDialog c={c} rows={unique} assets={assets} names={names} decimalsOf={decimalsOf} onSave={onSave} onClose={() => setOpen(false)} />}
+      {rules.length > 0 && (
+        <div className="flex items-center justify-between gap-2 text-xs">
+          <span className="text-muted-foreground">
+            {rules.filter((r) => r.enabled).length} of {rules.length} rule{rules.length === 1 ? "" : "s"} on
+          </span>
+          <Button variant="ghost" size="xs" onClick={() => onDialog("list")}>
+            Manage
+          </Button>
+        </div>
+      )}
+      {manual === 0 && byRules === 0 && onPickInTable && (
+        <Button variant="outline" size="xs" className="w-full" onClick={onPickInTable}>
+          Pick in table
+        </Button>
+      )}
+      <Button variant="outline" size="sm" className="w-full" onClick={() => onDialog(newRule())}>
+        <PlusIcon /> Add Rule
+      </Button>
+      {dialog !== null && (
+        <RulesDialog
+          key={dialog === "list" ? "list" : dialog.id}
+          c={c}
+          rows={unique}
+          assets={assets}
+          names={names}
+          decimalsOf={decimalsOf}
+          initial={dialog === "list" ? null : dialog}
+          newRule={newRule}
+          onSave={onSave}
+          onClose={() => onDialog(null)}
+        />
+      )}
     </PanelSection>
   );
 }
@@ -72,16 +111,19 @@ function uniqueBySignature(rows: FilterableTx[]): FilterableTx[] {
   return rows.filter((row) => !seen.has(row.signature) && (seen.add(row.signature), true));
 }
 
-function RulesDialog({ c, rows, assets, names, decimalsOf, onSave, onClose }: {
+function RulesDialog({ c, rows, assets, names, decimalsOf, initial, newRule, onSave, onClose }: {
   c: FraudWatchCase;
   rows: FilterableTx[];
   assets: Assets;
   names: Names;
   decimalsOf: (assetId: string) => number;
+  /** Opens straight into the editor on this rule. */
+  initial: HideRule | null;
+  newRule: () => HideRule;
   onSave: (next: FraudWatchCase) => void;
   onClose: () => void;
 }) {
-  const [editing, setEditing] = useState<HideRule | null>(null);
+  const [editing, setEditing] = useState<HideRule | null>(initial);
   const tagsOf = (address: string) => names.label(address)?.tags ?? [];
   const rules = c.hideRules ?? [];
   const matches = (rule: HideRule) => rows.filter((row) => ruleMatches(rule, row, tagsOf)).length;
@@ -118,11 +160,10 @@ function RulesDialog({ c, rows, assets, names, decimalsOf, onSave, onClose }: {
               <ul className="flex flex-col divide-y rounded-lg border">
                 {rules.map((rule) => (
                   <li key={rule.id} className="flex items-center gap-2 px-3 py-2 text-sm">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={rule.enabled}
                       aria-label={`${rule.enabled ? "Disable" : "Enable"} ${rule.name}`}
-                      onChange={() => onSave(saveRule(c, { ...rule, enabled: !rule.enabled }))}
+                      onCheckedChange={() => onSave(saveRule(c, { ...rule, enabled: !rule.enabled }))}
                     />
                     <span className={cn("min-w-0 flex-1 truncate", !rule.enabled && "text-muted-foreground")}>{rule.name}</span>
                     <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{matches(rule).toLocaleString()} match</span>
@@ -140,7 +181,7 @@ function RulesDialog({ c, rows, assets, names, decimalsOf, onSave, onClose }: {
               <Button variant="outline" onClick={onClose}>
                 Done
               </Button>
-              <Button onClick={() => setEditing({ id: crypto.randomUUID(), name: `Rule ${rules.length + 1}`, enabled: true })}>
+              <Button onClick={() => setEditing(newRule())}>
                 <PlusIcon /> New rule
               </Button>
             </DialogFooter>
@@ -171,12 +212,14 @@ function RuleEditor({ rule, isNew, rows, assets, names, decimalsOf, matches, onC
 }) {
   const [draft, setDraft] = useState(rule);
   const assetChoices = seen(rows, (row) => movedAssets(row.summary));
-  const [dustAsset, setDustAsset] = useState(rule.dust?.assetId ?? assetChoices[0] ?? "");
-  const [dustText, setDustText] = useState(rule.dust ? formatBaseUnits(rule.dust.below, decimalsOf(rule.dust.assetId)).replaceAll(",", "") : "");
+  const [amountAsset, setAmountAsset] = useState(rule.amount?.assetId ?? assetChoices[0] ?? "");
+  const [amountOp, setAmountOp] = useState<AmountOp>(rule.amount?.op ?? "lt");
+  const [amountText, setAmountText] = useState(rule.amount ? formatBaseUnits(rule.amount.value, decimalsOf(rule.amount.assetId)).replaceAll(",", "") : "");
   const [addressText, setAddressText] = useState((rule.counterparties ?? []).join("\n"));
 
-  const dustBelow = dustText.trim() ? parseUnits(dustText, decimalsOf(dustAsset)) : null;
-  const dustInvalid = dustText.trim() !== "" && (dustBelow === null || dustBelow === "0");
+  const amountValue = amountText.trim() ? parseUnits(amountText, decimalsOf(amountAsset)) : null;
+  // Nothing moves less than zero, so "less than 0" could never match.
+  const amountInvalid = amountText.trim() !== "" && (amountValue === null || (amountOp === "lt" && amountValue === "0"));
   const counterparties = addressText.split(/[\s,]+/).filter(Boolean);
   const candidate: HideRule = {
     id: draft.id,
@@ -184,7 +227,7 @@ function RuleEditor({ rule, isNew, rows, assets, names, decimalsOf, matches, onC
     enabled: draft.enabled,
     ...(draft.kinds?.length ? { kinds: draft.kinds } : {}),
     ...(draft.onlyAssets?.length ? { onlyAssets: draft.onlyAssets } : {}),
-    ...(dustBelow && !dustInvalid && dustAsset ? { dust: { assetId: dustAsset, below: dustBelow } } : {}),
+    ...(amountValue && !amountInvalid && amountAsset ? { amount: { assetId: amountAsset, op: amountOp, value: amountValue } } : {}),
     ...(counterparties.length ? { counterparties } : {}),
     ...(draft.tags?.length ? { tags: draft.tags } : {}),
     ...(draft.protocols?.length ? { protocols: draft.protocols } : {}),
@@ -231,22 +274,37 @@ function RuleEditor({ rule, isNew, rows, assets, names, decimalsOf, matches, onC
           />
         </Condition>
 
-        <Condition title="Dust: moves less than" hint="Matches when the transaction moves this asset and every movement of it is smaller.">
+        <Condition
+          title="Amount moved"
+          hint={`Matches when the transaction moves this asset and every movement of it is ${AMOUNT_OPS.find((o) => o.op === amountOp)!.hint}. In or out counts the same.`}
+        >
           <div className="flex gap-1">
+            <select
+              aria-label="Comparison"
+              className="h-8 rounded-md border bg-transparent px-1 text-xs dark:bg-input/30"
+              value={amountOp}
+              onChange={(event) => setAmountOp(event.target.value as AmountOp)}
+            >
+              {AMOUNT_OPS.map((o) => (
+                <option key={o.op} value={o.op}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
             <Input
               inputMode="decimal"
-              aria-label="Dust threshold"
-              aria-invalid={dustInvalid || undefined}
+              aria-label="Amount"
+              aria-invalid={amountInvalid || undefined}
               placeholder="e.g. 0.001"
               className="h-8 min-w-0 flex-1"
-              value={dustText}
-              onChange={(event) => setDustText(event.target.value)}
+              value={amountText}
+              onChange={(event) => setAmountText(event.target.value)}
             />
             <select
-              aria-label="Dust asset"
+              aria-label="Amount asset"
               className="h-8 max-w-36 truncate rounded-md border bg-transparent px-1 text-xs dark:bg-input/30"
-              value={dustAsset}
-              onChange={(event) => setDustAsset(event.target.value)}
+              value={amountAsset}
+              onChange={(event) => setAmountAsset(event.target.value)}
             >
               {assetChoices.map((a) => (
                 <option key={a} value={a}>
@@ -255,7 +313,7 @@ function RuleEditor({ rule, isNew, rows, assets, names, decimalsOf, matches, onC
               ))}
             </select>
           </div>
-          {dustInvalid && <p className="text-xs text-destructive">Not a valid amount for this asset.</p>}
+          {amountInvalid && <p className="text-xs text-destructive">Not a valid amount for this asset.</p>}
         </Condition>
 
         <Condition title="Involves any of these addresses" hint="One per line.">
@@ -287,7 +345,7 @@ function RuleEditor({ rule, isNew, rows, assets, names, decimalsOf, matches, onC
         <Button variant="outline" onClick={onCancel}>
           Cancel
         </Button>
-        <Button disabled={empty || dustInvalid} onClick={() => onSave(candidate)}>
+        <Button disabled={empty || amountInvalid} onClick={() => onSave(candidate)}>
           Save rule
         </Button>
       </DialogFooter>

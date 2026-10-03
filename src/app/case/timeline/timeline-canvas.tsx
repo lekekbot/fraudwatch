@@ -6,7 +6,7 @@ import { type ZoomBehavior, type ZoomTransform, zoom, zoomIdentity } from "d3-zo
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react";
 import { wheelAction } from "@/lib/gestures";
 import type { EffectKind } from "@/lib/state/summarize";
-import { connectors, type Flow } from "@/lib/timeline/lanes";
+import { connectors, type Flow, mergeConnectors } from "@/lib/timeline/lanes";
 import {
   chooseBucket,
   fitTransform,
@@ -76,6 +76,8 @@ const CARD_W = 150;
 const CARD_H = 64;
 const CARD_GAP = 22;
 const DOT_GAP = 12;
+/** Connectors closer than this (px) between the same lanes merge into one arrow with a count. */
+const CONNECTOR_MERGE = 24;
 const PILL_GAP = 6;
 /** Narrowest bucket a dense period is split into, in px; fits a two-line pill. */
 const BUCKET_MIN = 84;
@@ -353,34 +355,55 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
     });
 
     // Shared transactions: one x, joined across the lanes involved, arrowed the way value moved.
+    // Nearby ones between the same lanes merge into one arrow with a count, so zoomed out they don't comb the view;
+    // the selected transaction always keeps its own, highlighted.
     const selectedSignature = selected ? items[selected.index]?.signature : undefined;
+    const links: { x: number; from: number; to: number; directed: boolean }[] = [];
+    const selectedLinks: typeof links = [];
     items.forEach((item, i) => {
       if (item.entries.length < 2) return;
       const x = xs[i];
       if (x < -20 || x > width + 20) return;
-      const on = item.signature === selectedSignature;
+      for (const c of connectors(item.entries)) (item.signature === selectedSignature ? selectedLinks : links).push({ x, ...c });
+    });
+    const drawConnector = (c: { x: number; from: number; to: number; directed: boolean }, count: number, on: boolean) => {
+      const y0 = laneY(c.from);
+      const y1 = laneY(c.to);
+      const dir = Math.sign(y1 - y0);
+      const tipY = y1 - dir * 9;
       ctx.strokeStyle = on ? p.fg : p.muted;
       ctx.fillStyle = on ? p.fg : p.muted;
-      ctx.lineWidth = on ? 2 : 1.25;
-      for (const c of connectors(item.entries)) {
-        const y0 = laneY(c.from);
-        const y1 = laneY(c.to);
-        const dir = Math.sign(y1 - y0);
-        const tipY = y1 - dir * 9;
+      // Heavier with more transactions behind it, within reason.
+      ctx.lineWidth = on ? 2 : Math.min(3.5, 1.25 + Math.log2(count) * 0.5);
+      ctx.beginPath();
+      ctx.moveTo(c.x, y0 + dir * 7);
+      ctx.lineTo(c.x, c.directed ? tipY : y1 - dir * 7);
+      ctx.stroke();
+      if (c.directed) {
         ctx.beginPath();
-        ctx.moveTo(x, y0 + dir * 7);
-        ctx.lineTo(x, c.directed ? tipY : y1 - dir * 7);
-        ctx.stroke();
-        if (c.directed) {
-          ctx.beginPath();
-          ctx.moveTo(x, tipY + dir * 2);
-          ctx.lineTo(x - 4, tipY - dir * 5);
-          ctx.lineTo(x + 4, tipY - dir * 5);
-          ctx.closePath();
-          ctx.fill();
-        }
+        ctx.moveTo(c.x, tipY + dir * 2);
+        ctx.lineTo(c.x - 4, tipY - dir * 5);
+        ctx.lineTo(c.x + 4, tipY - dir * 5);
+        ctx.closePath();
+        ctx.fill();
       }
-    });
+      if (count > 1) {
+        // The count sits beside the line, a third of the way along, clear of the lane cards at either end.
+        const label = `×${count.toLocaleString()}`;
+        ctx.font = "600 10px ui-sans-serif, system-ui, sans-serif";
+        const w = ctx.measureText(label).width + 8;
+        const y = y0 + (y1 - y0) / 3;
+        ctx.fillStyle = p.bg;
+        ctx.fillRect(c.x + 4, y - 7, w, 14);
+        ctx.fillStyle = p.muted;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(label, c.x + 8, y + 0.5);
+        ctx.textBaseline = "alphabetic";
+      }
+    };
+    for (const m of mergeConnectors(links, CONNECTOR_MERGE)) drawConnector(m, m.count, false);
+    for (const c of selectedLinks) drawConnector(c, 1, true);
 
     // Axis
     ctx.font = "11px ui-sans-serif, system-ui, sans-serif";

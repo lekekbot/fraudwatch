@@ -89,6 +89,7 @@ export function AddressPanel({
     <>
       <PanelSection
         title={state === "OBSERVED" ? "Observed address" : state === "INFRASTRUCTURE" ? "Infrastructure" : "Wallet"}
+        collapsible
         action={
           <span className="flex">
             {bookmark && (

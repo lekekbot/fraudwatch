@@ -25,6 +25,9 @@ export type Bookmark = {
   createdAt: string;
 };
 
+/** How a moved amount compares to a rule's value. */
+export type AmountOp = "lt" | "gt" | "eq" | "ne";
+
 /**
  * A named, switchable set of conditions that hides matching transactions.
  * Every condition given must match; any value within one may. No conditions match nothing.
@@ -37,8 +40,8 @@ export type HideRule = {
   kinds?: EffectKind[];
   /** Every asset it moves is one of these (spam tokens). */
   onlyAssets?: string[];
-  /** It moves the asset, and every movement of it is below `below` (base units). */
-  dust?: { assetId: string; below: string };
+  /** It moves the asset, and every movement of it compares to `value` (base units) by `op`. */
+  amount?: { assetId: string; op: AmountOp; value: string };
   /** Involves one of these addresses. */
   counterparties?: string[];
   /** Involves an address tagged with one of these. */

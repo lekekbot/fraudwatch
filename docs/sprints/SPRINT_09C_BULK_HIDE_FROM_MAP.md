@@ -44,7 +44,8 @@ type HideRule = {
   enabled: boolean;
   kinds?: EffectKind[];                               // transaction type is one of these
   onlyAssets?: string[];                              // every asset it moves is one of these (spam tokens)
-  dust?: { assetId: string; below: string };          // moves the asset, and every movement of it is below (base units)
+  amount?: { assetId: string; op: "lt" | "gt" | "eq" | "ne"; value: string };
+                                                      // moves the asset, every movement compares to value (base units)
   counterparties?: string[];                          // involves one of these addresses
   tags?: string[];                                    // involves an address tagged with one of these
   protocols?: string[];                               // uses one of these protocols
@@ -76,11 +77,25 @@ type HideRule = {
   ("Hidden" or the rule's name).
 - Hidden transactions stay off the timeline and graph whatever the toggle says.
 
+### 6. Make bulk hiding findable
+
+The table isn't where most people look. Every view gets a way in:
+
+- **Filter, then hide**: while filters are active, the filter panel offers "Hide these N from the map" just below
+  its last filter. It hides what the filters show (once per transaction) and clears the filters.
+- **Make a rule**: every hide's message offers "Make a rule" (beside Undo), opening the editor prefilled from what
+  was hidden — its types when there are three or fewer — and the filter's protocols, tags and address.
+- **Hidden transactions** (left panel, renamed from "Hide from map"): when nothing is hidden it explains the three
+  ways and offers "Pick in table" and "Add a rule".
+- The table shows "Tick rows to hide them from the map · Shift-click selects a range" until the first hide there.
+- Filter groups collapse (Type and Direction open; a group with an active filter opens and shows its count), and
+  Assets moved lists 8 before "Show more", so the whole filter panel and the hide button fit without scrolling.
+
 ## Non-goals
 
 - Global rules shared across cases (rules are per case; export carries them once Sprint 10 lands).
 - OR between conditions, nested rule logic.
-- Creating a rule from a selected transaction; keyboard shortcuts.
+- Keyboard shortcuts.
 - Hiding per lane.
 
 ## Verification
@@ -89,7 +104,7 @@ type HideRule = {
   hide/unhide updaters are idempotent and keep other fields.
 - `pnpm typecheck`, `pnpm lint`, `pnpm exec next build --webpack`
 - In the browser: bulk-hide a filtered set, reload, confirm it stays hidden across timeline, graph and table; Undo
-  restores it; a dust rule hides matches with a correct preview count; unhiding one rule match keeps it visible;
+  restores it; a "less than" amount rule hides dust with a correct preview count; unhiding one rule match keeps it visible;
   disabling the rule brings the rest back.
 
 ## Acceptance criteria
@@ -108,6 +123,8 @@ type HideRule = {
 - Checked in the browser: Shift-range select, bulk hide, reload, Show hidden, Unhide, Undo, a "Program call" rule
   (preview 37 = filter panel's 37), an exception surviving a rule, rule delete. Page/"select all", rule edit and
   disable, and the timeline/graph views share the same code paths and were not clicked through.
+- Also checked: on the timeline, filter to marginfi (24) → "Hide these 24 from the map" → filters cleared, 52 of 76
+  shown → "Make a rule" opened prefilled with Program call + marginfi, matching 24.
 - Selection actions sit in the table's toolbar row rather than a bar above the table: a bar appearing on the first
   click pushed rows down, so a Shift-click landed on the wrong row.
 - Export/import is Sprint 10; the fields are plain case data and travel with it then.
