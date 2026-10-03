@@ -3,13 +3,12 @@ import type { EffectKind, EffectSummary } from "@/lib/state/summarize";
 /**
  * What to leave off the map. Filtering only hides transactions from view;
  * wallet state, coverage and mismatch checks always use the full history.
+ * Lasting hides ("Hide from map", hide rules) live on the case, not here.
  */
 export type TxFilter = {
   hiddenKinds: ReadonlySet<EffectKind>;
   /** A transaction is hidden only when every asset it moves is hidden. */
   hiddenAssets: ReadonlySet<string>;
-  /** Individually hidden transactions. */
-  hiddenSignatures: ReadonlySet<string>;
   /** in: value came into the wallet; out: value left it (a swap is both). */
   direction: "any" | "in" | "out";
   /** Only transactions moving at least this much of one asset (base units). */
@@ -27,7 +26,6 @@ export type TxFilter = {
 export const EMPTY_FILTER: TxFilter = {
   hiddenKinds: new Set(),
   hiddenAssets: new Set(),
-  hiddenSignatures: new Set(),
   direction: "any",
   minAmount: null,
   protocols: new Set(),
@@ -37,7 +35,7 @@ export const EMPTY_FILTER: TxFilter = {
 };
 
 export const isFilterActive = (f: TxFilter) =>
-  f.hiddenKinds.size + f.hiddenAssets.size + f.hiddenSignatures.size + f.protocols.size + f.tags.size > 0 ||
+  f.hiddenKinds.size + f.hiddenAssets.size + f.protocols.size + f.tags.size > 0 ||
   f.direction !== "any" ||
   f.minAmount !== null ||
   f.address !== null ||
@@ -74,7 +72,7 @@ const abs = (v: bigint) => (v < BigInt(0) ? -v : v);
 
 export function passesFilter(tx: FilterableTx, f: TxFilter, tagsOf: (address: string) => readonly string[] = () => []): boolean {
   const { summary } = tx;
-  if (f.hiddenSignatures.has(tx.signature) || f.hiddenKinds.has(summary.kind)) return false;
+  if (f.hiddenKinds.has(summary.kind)) return false;
   const moved = movedAssets(summary);
   if (moved.length > 0 && moved.every((a) => f.hiddenAssets.has(a))) return false;
   if (f.direction === "in" && summary.inflows.length === 0) return false;

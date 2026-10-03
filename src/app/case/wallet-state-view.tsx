@@ -6,6 +6,7 @@ import { ChevronLeftIcon, ChevronRightIcon, ExternalLinkIcon } from "lucide-reac
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import type { HiddenReason } from "@/lib/case/hiding";
 import { formatLamports } from "@/lib/solana/amount";
 import { shortenAddress } from "@/lib/solana/address";
 import { type AssetChange, type AssetState, netChange, type WalletState, type WalletTransactionEffect } from "@/lib/state/reconstruct";
@@ -148,7 +149,7 @@ export function WalletStateSummary({ state, assets }: { state: WalletState; asse
 export type TableNav = { index: number; count: number; previous: () => void; next: () => void; /** Neighbour to open when this one is hidden. */ neighbour: string | null };
 
 /** One displayed line: a transaction's change of one asset, or its "nothing moved" row. */
-type TableRow = { effect: WalletTransactionEffect; kind: EffectKind | undefined; change: AssetChange | null };
+type TableRow = { effect: WalletTransactionEffect; kind: EffectKind | undefined; change: AssetChange | null; hidden: HiddenReason };
 
 type SortKey = "time" | "asset" | "before" | "change" | "after";
 
@@ -164,7 +165,7 @@ function asNumber(value: string | null | undefined, assetId: string | null, asse
 
 const selectClass = "h-7 rounded-md border bg-transparent px-1.5 text-xs outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring";
 
-export function WalletStateTable({ state, assets, summaries, selected, onSelect, renderPanel }: {
+export function WalletStateTable({ state, assets, summaries, selected, onSelect, renderPanel, hidden, onHide, onUnhide }: {
   state: WalletState;
   assets: Assets;
   summaries?: readonly EffectSummary[];
@@ -174,20 +175,32 @@ export function WalletStateTable({ state, assets, summaries, selected, onSelect,
   onSelect?: (signature: string | null) => void;
   /** The inspector beside the table, told where the open transaction sits in the table's current order. */
   renderPanel?: (nav: TableNav | null) => React.ReactNode;
+  /** Why each of `state.effects` is hidden from the map, or null; hidden ones show only with "Show hidden". */
+  hidden?: readonly HiddenReason[];
+  /** Hide or bring back a batch of transactions; enables row selection. */
+  onHide?: (signatures: string[]) => void;
+  onUnhide?: (signatures: string[]) => void;
 }) {
   const [assetFilter, setAssetFilter] = useState<string | null>(null);
   const [kindFilter, setKindFilter] = useState<EffectKind | null>(null);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "time", dir: 1 });
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(100);
+  const [showHidden, setShowHidden] = useState(false);
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
+  const [anchor, setAnchor] = useState<string | null>(null);
+  const selectable = Boolean(onHide && onUnhide);
+  const hiddenCount = hidden?.filter((h) => h !== null).length ?? 0;
 
   // Every row from the whole history, not just the first page: filters and sort see it all.
   const allRows: TableRow[] = state.effects.flatMap((e, i): TableRow[] => {
+    const why = hidden?.[i] ?? null;
+    if (why !== null && !showHidden) return [];
     const kind = summaries?.[i]?.kind;
     // Unchanged balances stay in the data but add nothing to the table.
     const rows = e.assetChanges.filter((c) => c.delta !== "0" || (c.assetId === "SOL" && e.feeLamports !== "0"));
-    if (rows.length === 0) return [{ effect: e, kind, change: null }];
-    return rows.map((change) => ({ effect: e, kind, change }));
+    if (rows.length === 0) return [{ effect: e, kind, change: null, hidden: why }];
+    return rows.map((change) => ({ effect: e, kind, change, hidden: why }));
   });
   const countBy = <K extends string>(keys: (row: TableRow) => K | null) => {
     const counts = new Map<K, number>();
@@ -229,6 +242,30 @@ export function WalletStateTable({ state, assets, summaries, selected, onSelect,
     setPage(Math.floor(sorted.findIndex((row) => row.effect.signature === signature) / pageSize));
     onSelect(signature);
   };
+  // Selection for bulk hiding, kept to what the table currently lists.
+  const picked = order.filter((sig) => checked.has(sig));
+  const hiddenSigs = new Set(sorted.filter((row) => row.hidden !== null).map((row) => row.effect.signature));
+  const pickedHidden = picked.filter((sig) => hiddenSigs.has(sig));
+  const pickedShown = picked.filter((sig) => !hiddenSigs.has(sig));
+  const pageSigs = [...new Set(shown.map((row) => row.effect.signature))];
+  const pageAll = pageSigs.length > 0 && pageSigs.every((sig) => checked.has(sig));
+  const check = (signature: string, range: boolean) => {
+    const next = new Set(checked);
+    const on = !checked.has(signature);
+    const from = range && anchor ? order.indexOf(anchor) : -1;
+    const to = order.indexOf(signature);
+    // Shift-click sets every transaction between the last one clicked and this one, in the table's order.
+    const span = from === -1 ? [signature] : order.slice(Math.min(from, to), Math.max(from, to) + 1);
+    for (const sig of span) if (on) next.add(sig); else next.delete(sig);
+    setChecked(next);
+    setAnchor(signature);
+  };
+  const act = (run: (signatures: string[]) => void, signatures: string[]) => {
+    run(signatures);
+    setChecked(new Set());
+    setAnchor(null);
+  };
+
   const nav: TableNav | null =
     at === -1
       ? null
@@ -318,10 +355,43 @@ export function WalletStateTable({ state, assets, summaries, selected, onSelect,
                     Reset
                   </Button>
                 )}
-                <span className="ml-auto tabular-nums" aria-live="polite">
-                  {filtersActive && `${filtered.length.toLocaleString()} of ${allRows.length.toLocaleString()} rows · `}
-                  {filteredTxs.toLocaleString()} transactions
-                </span>
+                {selectable && hiddenCount > 0 && (
+                  <label className="flex items-center gap-1.5">
+                    <input type="checkbox" checked={showHidden} onChange={(event) => setShowHidden(event.target.checked)} />
+                    Show hidden ({hiddenCount.toLocaleString()})
+                  </label>
+                )}
+                {/* Selection actions take the count's place in this row, so rows don't move under the cursor mid-selection. */}
+                {picked.length > 0 ? (
+                  <span className="ml-auto flex flex-wrap items-center gap-1" role="toolbar" aria-label="Selected transactions">
+                    <span className="pr-1 font-medium text-foreground tabular-nums" aria-live="polite">
+                      {picked.length.toLocaleString()} selected
+                    </span>
+                    {pageAll && order.length > picked.length && (
+                      <Button variant="ghost" size="xs" onClick={() => setChecked(new Set(order))}>
+                        Select all {order.length.toLocaleString()}
+                      </Button>
+                    )}
+                    {pickedShown.length > 0 && (
+                      <Button size="xs" onClick={() => act(onHide!, pickedShown)}>
+                        Hide {pickedShown.length.toLocaleString()} from map
+                      </Button>
+                    )}
+                    {pickedHidden.length > 0 && (
+                      <Button size="xs" variant="outline" onClick={() => act(onUnhide!, pickedHidden)}>
+                        Unhide {pickedHidden.length.toLocaleString()}
+                      </Button>
+                    )}
+                    <Button size="xs" variant="ghost" onClick={() => setChecked(new Set())}>
+                      Clear
+                    </Button>
+                  </span>
+                ) : (
+                  <span className="ml-auto tabular-nums" aria-live="polite">
+                    {filtersActive && `${filtered.length.toLocaleString()} of ${allRows.length.toLocaleString()} rows · `}
+                    {filteredTxs.toLocaleString()} transactions
+                  </span>
+                )}
               </div>
               {sorted.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No rows match the filters.</p>
@@ -330,6 +400,23 @@ export function WalletStateTable({ state, assets, summaries, selected, onSelect,
                   <table className="w-full text-sm">
                     <thead className="text-left text-xs text-muted-foreground">
                       <tr>
+                        {selectable && (
+                          <th className="w-6 py-2 pr-2">
+                            <input
+                              type="checkbox"
+                              aria-label="Select this page"
+                              checked={pageAll}
+                              ref={(el) => {
+                                if (el) el.indeterminate = !pageAll && pageSigs.some((sig) => checked.has(sig));
+                              }}
+                              onChange={() => {
+                                const next = new Set(checked);
+                                for (const sig of pageSigs) if (pageAll) next.delete(sig); else next.add(sig);
+                                setChecked(next);
+                              }}
+                            />
+                          </th>
+                        )}
                         {header("time")}
                         {header("asset")}
                         {header("before")}
@@ -340,6 +427,8 @@ export function WalletStateTable({ state, assets, summaries, selected, onSelect,
                     <tbody>
                       {shown.map((row, i) => {
                         const { effect: e, kind, change: c } = row;
+                        // The time cell opens each transaction's group of rows in the current order.
+                        const groupStart = i === 0 || shown[i - 1].effect.signature !== e.signature;
                         // Every row of a transaction opens it; Enter does too, for keyboard users.
                         const rowProps = onSelect && {
                           tabIndex: 0,
@@ -350,14 +439,32 @@ export function WalletStateTable({ state, assets, summaries, selected, onSelect,
                         const rowClass = cn(
                           onSelect && "cursor-pointer hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none",
                           selected === e.signature && "bg-muted/60 hover:bg-muted/60",
+                          row.hidden !== null && "text-muted-foreground opacity-60",
                         );
-                        // The time cell opens each transaction's group of rows in the current order.
-                        const groupStart = i === 0 || shown[i - 1].effect.signature !== e.signature;
+                        // One checkbox per transaction, on the first of its rows; it selects without opening the row.
+                        const selectCell = selectable && (
+                          <td className="py-1 pr-2 align-top" onClick={(event) => event.stopPropagation()}>
+                            {groupStart && (
+                              <input
+                                type="checkbox"
+                                aria-label={`Select ${e.signature}`}
+                                checked={checked.has(e.signature)}
+                                onChange={() => {}}
+                                onClick={(event) => check(e.signature, event.shiftKey)}
+                              />
+                            )}
+                          </td>
+                        );
+                        const hiddenNote = groupStart && row.hidden !== null && (
+                          <span className="block text-[10px] tracking-wide uppercase">{row.hidden === "manual" ? "Hidden" : `Hidden · ${row.hidden.name}`}</span>
+                        );
                         if (!c) {
                           return (
                             <tr key={`${e.signature}:none`} className={cn(groupStart && "border-t", rowClass)} {...rowProps}>
+                              {selectCell}
                               <td className="py-1 pr-4 align-top whitespace-nowrap tabular-nums">
                                 {groupStart && <TransactionCell e={e} kind={kind} />}
+                                {hiddenNote}
                               </td>
                               <td colSpan={4} className="py-1 text-muted-foreground">
                                 No balance change for this wallet
@@ -367,8 +474,10 @@ export function WalletStateTable({ state, assets, summaries, selected, onSelect,
                         }
                         return (
                           <tr key={`${e.signature}:${c.assetId}`} className={cn(groupStart && "border-t", rowClass)} {...rowProps}>
+                            {selectCell}
                             <td className="py-1 pr-4 align-top whitespace-nowrap tabular-nums">
                               {groupStart && <TransactionCell e={e} kind={kind} />}
+                              {hiddenNote}
                             </td>
                             <td className="py-1 pr-4">
                               <div className="flex items-start gap-2">

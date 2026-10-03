@@ -33,6 +33,7 @@ import { shortenAddress } from "@/lib/solana/address";
 import { collectCounterparties } from "@/lib/state/counterparties";
 import { type EffectSummary, type NftCatalog, summarizeEffect } from "@/lib/state/summarize";
 import { counterpartyRows, type TransactedRow, transactedOverview } from "@/lib/state/volume";
+import { type HiddenReason, hiddenBy, hideTransactions, revertHiding, unhideTransactions } from "@/lib/case/hiding";
 import { EMPTY_FILTER, type FilterableTx, type TxFilter, involvedAddresses, movedAssets, passesFilter, toggled } from "@/lib/timeline/filter";
 import type { SearchItem } from "@/lib/search";
 import { eventTimes } from "@/lib/timeline/layout";
@@ -42,6 +43,7 @@ import { AssetFlows } from "./asset-flows";
 import { CounterpartyList } from "./counterparty-list";
 import { DeleteCaseButton } from "./delete-case-button";
 import { FilterPanel } from "./filter-panel";
+import { HidingSection } from "./hide-rules";
 import { type MapWalletChoice, MapWalletDialog } from "./map-wallet-dialog";
 import { EdgePanel } from "./graph/edge-panel";
 import { WalletGraph } from "./graph/wallet-graph";
@@ -226,21 +228,39 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     return out;
   }, [walletStates, summariesByWallet, transactions, c.range.start]);
   // Only the views are filtered; the wallet state panel keeps the full history.
+  // Hidden transactions (by hand or by rule) leave every view; the table keeps them, with why, for "Show hidden".
+  const { hiddenSignatures, shownSignatures, hideRules } = c;
   const perWallet = useMemo(() => {
     const tagsOf = (address: string) => names.label(address)?.tags ?? [];
-    const out = new Map<string, { all: EffectSummary[]; state: NonNullable<typeof walletState>; summaries: EffectSummary[] }>();
+    const hiding = { hiddenSignatures, shownSignatures, hideRules };
+    const out = new Map<
+      string,
+      {
+        all: EffectSummary[];
+        state: NonNullable<typeof walletState>;
+        summaries: EffectSummary[];
+        table: { state: NonNullable<typeof walletState>; summaries: EffectSummary[]; hidden: HiddenReason[] };
+      }
+    >();
     for (const ws of walletStates?.states ?? []) {
       const rows = filterables.get(ws.wallet) ?? [];
-      const keep = rows.map((row) => passesFilter(row, filter, tagsOf));
+      const passes = rows.map((row) => passesFilter(row, filter, tagsOf));
+      const why = rows.map((row, i) => (passes[i] ? hiddenBy(hiding, row, tagsOf) : null));
+      const keep = passes.map((p, i) => p && why[i] === null);
       const all = summariesByWallet.get(ws.wallet) ?? [];
       out.set(ws.wallet, {
         all,
         state: { ...ws, effects: ws.effects.filter((_, i) => keep[i]) },
         summaries: all.filter((_, i) => keep[i]),
+        table: {
+          state: { ...ws, effects: ws.effects.filter((_, i) => passes[i]) },
+          summaries: all.filter((_, i) => passes[i]),
+          hidden: why.filter((_, i) => passes[i]),
+        },
       });
     }
     return out;
-  }, [walletStates, filterables, summariesByWallet, filter, names]);
+  }, [walletStates, filterables, summariesByWallet, filter, names, hiddenSignatures, shownSignatures, hideRules]);
   const summaries = summariesByWallet.get(selectedWallet) ?? NO_SUMMARIES;
   const visible = perWallet.get(selectedWallet);
   const visibleState = visible?.state;
@@ -598,18 +618,41 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   const edge = graph?.edges.find((e) => e.id === selectedEdge);
   const graphWallet = shownLanes.includes(selectedWallet) ? selectedWallet : (shownLanes[0] ?? selectedWallet);
 
+  // Hiding from the table: one write per batch, with Undo. Undo reverses just that batch on the case as it is then.
+  const latestCase = useRef(c);
+  useEffect(() => {
+    latestCase.current = c;
+  }, [c]);
+  const changeHiding = (next: FraudWatchCase, message: string) => {
+    const before = c;
+    void updateCase(next);
+    toast.success(message, { action: { label: "Undo", onClick: () => void updateCase(revertHiding(latestCase.current, before, next)) } });
+  };
+  const hideBatch = (signatures: string[]) =>
+    changeHiding(hideTransactions(c, signatures), `Hid ${signatures.length.toLocaleString()} transaction${signatures.length === 1 ? "" : "s"} from the map.`);
+  const unhideBatch = (signatures: string[]) => {
+    // Ones a rule would still hide become exceptions, so they really come back.
+    const tagsOf = (address: string) => names.label(address)?.tags ?? [];
+    const rulesOnly = { hideRules: c.hideRules };
+    const wanted = new Set(signatures);
+    const ruleMatched = [...filterables.values()].flat().filter((row) => wanted.has(row.signature) && hiddenBy(rulesOnly, row, tagsOf) !== null).map((row) => row.signature);
+    changeHiding(unhideTransactions(c, signatures, ruleMatched), `Brought back ${signatures.length.toLocaleString()} transaction${signatures.length === 1 ? "" : "s"}.`);
+  };
+
   // The table's open transaction, in the same panel the timeline uses; the table supplies its own order for stepping.
   const tableDetails = (nav: TableNav | null) => {
-    const index = visibleState && tableTx ? visibleState.effects.findIndex((e) => e.signature === tableTx) : -1;
-    if (!nav || !visible || !visibleState || !walletStates || state.status !== "done" || index === -1) return null;
-    const effect = visibleState.effects[index];
+    // From the table's rows, which include hidden transactions when "Show hidden" is on.
+    const table = visible?.table;
+    const index = table && tableTx ? table.state.effects.findIndex((e) => e.signature === tableTx) : -1;
+    if (!nav || !table || !walletStates || state.status !== "done" || index === -1) return null;
+    const effect = table.state.effects[index];
     return (
       <TransactionDetails
         key={effect.signature}
         effect={effect}
-        summary={visible.summaries[index]}
+        summary={table.summaries[index]}
         tx={state.result.transactions.get(effect.signature)}
-        state={visibleState}
+        state={table.state}
         assets={walletStates.assets}
         position={{ index: nav.index, count: nav.count }}
         onPrevious={nav.previous}
@@ -618,7 +661,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
         onHide={() => {
           // Move on to a neighbour so stepping through isn't interrupted.
           setTableTx(nav.neighbour);
-          setFilter((f) => ({ ...f, hiddenSignatures: toggled(f.hiddenSignatures, effect.signature) }));
+          hideBatch([effect.signature]);
         }}
         names={names}
         onSelectAddress={setSelectedAddress}
@@ -706,7 +749,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                 ? "No transactions match the filters."
                 : undefined
           }
-          onHide={(signature) => setFilter((f) => ({ ...f, hiddenSignatures: toggled(f.hiddenSignatures, signature) }))}
+          onHide={(signature) => hideBatch([signature])}
           onSelectLane={pickWallet}
           sharedWith={(signature, wallet) => (owners.get(signature) ?? []).filter((w) => w !== wallet)}
           isBookmarked={(signature) => isBookmarked(c, "transaction", signature)}
@@ -727,9 +770,12 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
           {/* Keyed by wallet so the table's filters and sort reset when the wallet changes. */}
           <WalletStateTable
             key={selectedWallet}
-            state={visibleState}
+            state={visible.table.state}
             assets={walletStates.assets}
-            summaries={visible.summaries}
+            summaries={visible.table.summaries}
+            hidden={visible.table.hidden}
+            onHide={hideBatch}
+            onUnhide={unhideBatch}
             selected={tableTx}
             onSelect={(signature) => {
               // The inspector shows the last thing picked: this transaction now.
@@ -1004,6 +1050,18 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                 filter={filter}
                 shown={view !== "table" ? lanes.reduce((n, l) => n + l.state.effects.length, 0) : visibleState.effects.length}
                 onChange={updateFilter}
+              />
+            )}
+            {walletStates && (
+              <HidingSection
+                c={c}
+                rows={[...filterables.values()].flat()}
+                assets={walletStates.assets}
+                names={names}
+                decimalsOf={(assetId) =>
+                  walletStates.assets.get(assetId)?.decimals ?? walletStates.states.find((st) => assetId in st.decimals)?.decimals[assetId] ?? 0
+                }
+                onSave={(next) => void updateCase(next)}
               />
             )}
             {(c.bookmarks ?? []).length > 0 && (

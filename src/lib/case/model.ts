@@ -1,4 +1,5 @@
 import { isValidSolanaAddress, shortenAddress } from "@/lib/solana/address";
+import type { EffectKind } from "@/lib/state/summarize";
 import { type CaseRange, isValidRange, rangeFromDates } from "./range";
 
 export type MappedWalletConfig = {
@@ -24,6 +25,28 @@ export type Bookmark = {
   createdAt: string;
 };
 
+/**
+ * A named, switchable set of conditions that hides matching transactions.
+ * Every condition given must match; any value within one may. No conditions match nothing.
+ */
+export type HideRule = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  /** Transaction type is one of these. */
+  kinds?: EffectKind[];
+  /** Every asset it moves is one of these (spam tokens). */
+  onlyAssets?: string[];
+  /** It moves the asset, and every movement of it is below `below` (base units). */
+  dust?: { assetId: string; below: string };
+  /** Involves one of these addresses. */
+  counterparties?: string[];
+  /** Involves an address tagged with one of these. */
+  tags?: string[];
+  /** Uses one of these protocols (registry ids). */
+  protocols?: string[];
+};
+
 export type FraudWatchCase = {
   id: string;
   name: string;
@@ -38,6 +61,12 @@ export type FraudWatchCase = {
   laneOrder?: string[];
   /** Mapped wallets whose lanes are hidden; still mapped and loaded. */
   hiddenLanes?: string[];
+  /** Transactions hidden from the map by hand (Sprint 09C). */
+  hiddenSignatures?: string[];
+  /** Exceptions: shown even when a hide rule matches them. */
+  shownSignatures?: string[];
+  /** Saved conditions that hide matching transactions. */
+  hideRules?: HideRule[];
   /** Places the investigator marked to come back to (Sprint 09). */
   bookmarks?: Bookmark[];
 

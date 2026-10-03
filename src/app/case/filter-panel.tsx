@@ -13,7 +13,7 @@ import { cn } from "cn";
 import { type Assets, assetLabel } from "./asset-format";
 import { PanelSection, ShowMoreList } from "./panel";
 
-const KINDS: { kind: EffectKind; label: string; dot: string }[] = [
+export const KINDS: { kind: EffectKind; label: string; dot: string }[] = [
   { kind: "SEND", label: "Send", dot: "bg-destructive" },
   { kind: "RECEIVE", label: "Receive", dot: "bg-[oklch(0.72_0.16_155)]" },
   { kind: "SWAP", label: "Swap", dot: "bg-[oklch(0.7_0.14_250)]" },
@@ -51,7 +51,7 @@ function Heading({ children }: { children: React.ReactNode }) {
 }
 
 /** Protocol id → display name, from the registry. */
-const protocolName = (id: string) => registry.protocols.get(id)?.name ?? id;
+export const protocolName = (id: string) => registry.protocols.get(id)?.name ?? id;
 
 const DAY = 86_400_000;
 const SHOWN_ASSETS = 25;
@@ -271,16 +271,6 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
         />
       </div>
 
-      {filter.hiddenSignatures.size > 0 && (
-        <div className="flex items-center justify-between gap-2 text-xs">
-          <span className="text-muted-foreground">
-            {filter.hiddenSignatures.size} hidden individually
-          </span>
-          <Button variant="ghost" size="xs" onClick={() => onChange({ ...filter, hiddenSignatures: new Set() })}>
-            Show all
-          </Button>
-        </div>
-      )}
     </PanelSection>
   );
 }
