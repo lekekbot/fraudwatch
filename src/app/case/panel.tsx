@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ChevronDownIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "cn";
 
@@ -25,19 +26,37 @@ export function SidePanel({ side, label, className, children }: {
   );
 }
 
-export function PanelSection({ title, action, children }: {
+export function PanelSection({ title, action, collapsible = false, defaultCollapsed = false, children }: {
   title: string;
   action?: React.ReactNode;
+  /** The header toggles the section open and closed; `defaultCollapsed` is its starting state. */
+  collapsible?: boolean;
+  defaultCollapsed?: boolean;
   children: React.ReactNode;
 }) {
+  if (!collapsible) {
+    return (
+      <section className="flex flex-col gap-2 border-b p-3">
+        <div className="flex min-h-6 items-center justify-between gap-2">
+          <h2 className="text-xs font-medium text-muted-foreground">{title}</h2>
+          {action}
+        </div>
+        {children}
+      </section>
+    );
+  }
   return (
-    <section className="flex flex-col gap-2 border-b p-3">
-      <div className="flex min-h-6 items-center justify-between gap-2">
+    <details open={!defaultCollapsed} className="group flex flex-col border-b">
+      <summary className="flex min-h-6 cursor-pointer list-none items-center justify-between gap-2 p-3 [&::-webkit-details-marker]:hidden">
         <h2 className="text-xs font-medium text-muted-foreground">{title}</h2>
-        {action}
-      </div>
-      {children}
-    </section>
+        {/* stopPropagation keeps the header's buttons from toggling the section. */}
+        <span className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
+          {action}
+          <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden />
+        </span>
+      </summary>
+      <div className="flex flex-col gap-2 px-3 pb-3">{children}</div>
+    </details>
   );
 }
 

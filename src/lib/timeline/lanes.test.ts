@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { connectors, mergeLaneEvents } from "./lanes";
+import { connectors, mergeLaneEvents, mergeConnectors } from "./lanes";
 
 describe("mergeLaneEvents", () => {
   it("puts a transaction shared by two lanes once, at one time, with an entry per lane", () => {
@@ -37,5 +37,29 @@ describe("connectors", () => {
       { from: 1, to: 2, directed: false },
     ]);
     expect(connectors([{ lane: 0, flow: "out" }])).toEqual([]);
+  });
+});
+
+describe("mergeConnectors", () => {
+  it("combines nearby connectors between the same lanes, the same way, with a count", () => {
+    const merged = mergeConnectors(
+      [
+        { x: 100, from: 0, to: 1, directed: true },
+        { x: 110, from: 0, to: 1, directed: true },
+        { x: 104, from: 1, to: 0, directed: true },
+        { x: 200, from: 0, to: 1, directed: true },
+      ],
+      24,
+    );
+    expect(merged).toEqual([
+      { from: 0, to: 1, directed: true, x: 105, count: 2 },
+      { from: 0, to: 1, directed: true, x: 200, count: 1 },
+      { from: 1, to: 0, directed: true, x: 104, count: 1 },
+    ]);
+  });
+
+  it("measures a run from its first connector, so a long chain still splits", () => {
+    const merged = mergeConnectors([0, 20, 40, 60].map((x) => ({ x, from: 0, to: 2, directed: false })), 24);
+    expect(merged.map((m) => m.count)).toEqual([2, 2]);
   });
 });

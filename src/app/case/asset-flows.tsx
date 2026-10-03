@@ -22,6 +22,7 @@ export function AssetFlows({ flows, assets, formatAmount }: {
   return (
     <PanelSection
       title="Assets"
+      collapsible
       action={
         <div className="flex rounded-md border p-0.5" role="group" aria-label="Asset view">
           <Button size="icon-xs" variant={view === "list" ? "secondary" : "ghost"} aria-label="List" aria-pressed={view === "list"} onClick={() => setView("list")}>

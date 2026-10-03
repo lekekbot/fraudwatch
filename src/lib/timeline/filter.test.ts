@@ -21,11 +21,10 @@ describe("passesFilter", () => {
     expect(passesFilter(tx(summary("PROGRAM")), EMPTY_FILTER)).toBe(true);
   });
 
-  it("hides by kind and by signature", () => {
-    const f = with_({ hiddenKinds: new Set(["ACCOUNT" as const]), hiddenSignatures: new Set(["b"]) });
+  it("hides by kind", () => {
+    const f = with_({ hiddenKinds: new Set(["ACCOUNT" as const]) });
     expect(isFilterActive(f)).toBe(true);
     expect(passesFilter(tx(summary("ACCOUNT")), f)).toBe(false);
-    expect(passesFilter(tx(summary("SEND", [["SOL", "-1"]]), { signature: "b" }), f)).toBe(false);
     expect(passesFilter(tx(summary("SEND", [["SOL", "-1"]])), f)).toBe(true);
   });
 

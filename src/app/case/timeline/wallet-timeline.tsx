@@ -10,10 +10,12 @@ import type { WalletState } from "@/lib/state/reconstruct";
 import { describeAction, type EffectSummary } from "@/lib/state/summarize";
 import { eventAtOrAfter, eventTimes, minimapTarget, type SpacingMode, stepEvent } from "@/lib/timeline/layout";
 import { type Flow, mergeLaneEvents } from "@/lib/timeline/lanes";
+import { buildRelationships } from "@/lib/timeline/relationships";
 import { type Assets, assetLabel, formatAssetAmount, nftLabel } from "../asset-format";
 import { SidePanel } from "../panel";
 import { type TimelineHandle, type TimelineItem, type TimelineLane, type TimelineSelection, TimelineCanvas } from "./timeline-canvas";
 import { TimelineMinimap } from "./timeline-minimap";
+import { RelationshipChart, type RelationshipChartHandle } from "./relationship-chart";
 import { TransactionDetails } from "./transaction-details";
 
 const cardDate = (ms: number) => {
@@ -153,6 +155,9 @@ export function WalletTimeline({
 }) {
   const timeline = useRef<TimelineHandle>(null);
   const [mode, setMode] = useState<SpacingMode>("time");
+  /** Transactions on wallet lanes, or relationships between addresses as bands over time. */
+  const [chart, setChart] = useState<"lanes" | "relationships">("lanes");
+  const relationshipChart = useRef<RelationshipChartHandle>(null);
   // Tracked by signature and wallet so the selection survives filtering and lane changes.
   const [selection, setSelection] = useState<{ signature: string; wallet: string | null } | null>(
     initialSignature ? { signature: initialSignature, wallet: null } : null,
@@ -183,6 +188,20 @@ export function WalletTimeline({
         }),
       })),
     [events, lanes, assets, names],
+  );
+  const relationships = useMemo(
+    () =>
+      chart === "relationships"
+        ? buildRelationships(
+            lanes.map((lane) => ({
+              wallet: lane.wallet,
+              signatures: lane.state.effects.map((e) => e.signature),
+              times: eventTimes(lane.state.effects.map((e) => e.timestamp), Date.parse(lane.range.start)),
+              summaries: lane.summaries,
+            })),
+          )
+        : [],
+    [chart, lanes],
   );
   const canvasLanes = useMemo<TimelineLane[]>(() => {
     const index = new Map(lanes.map((l, i) => [l.wallet, i]));
@@ -332,7 +351,22 @@ export function WalletTimeline({
       >
         <div className="relative min-h-0 flex-1">
           {/* Lanes scroll vertically when they don't fit; the toolbar floats above them. */}
-          <div className="absolute inset-0 overflow-x-hidden overflow-y-auto">
+          {chart === "relationships" && (
+            <div className="absolute inset-0">
+              <RelationshipChart
+                ref={relationshipChart}
+                relationships={relationships}
+                range={bounds}
+                names={names}
+                onPick={(signature, wallet) => {
+                  const index = items.findIndex((i) => i.signature === signature);
+                  if (index === -1) return;
+                  setSelected(index, items[index].entries.find((e) => lanes[e.lane].wallet === wallet)?.lane);
+                }}
+              />
+            </div>
+          )}
+          <div className={chart === "relationships" ? "hidden" : "absolute inset-0 overflow-x-hidden overflow-y-auto"}>
             <TimelineCanvas
               ref={timeline}
               items={items}
@@ -361,19 +395,37 @@ export function WalletTimeline({
             <div className="pointer-events-auto flex flex-wrap items-center gap-1 rounded-xl border bg-popover/95 p-1 shadow-lg backdrop-blur">
               <div className="flex" role="group" aria-label="Spacing">
                 {(["time", "event"] as const).map((m) => (
-                  <Button key={m} size="xs" variant={mode === m ? "secondary" : "ghost"} onClick={() => setMode(m)} aria-pressed={mode === m}>
+                  <Button
+                    key={m}
+                    size="xs"
+                    variant={chart === "lanes" && mode === m ? "secondary" : "ghost"}
+                    onClick={() => {
+                      setChart("lanes");
+                      setMode(m);
+                    }}
+                    aria-pressed={chart === "lanes" && mode === m}
+                  >
                     {m === "time" ? "Time" : "Events"}
                   </Button>
                 ))}
+                <Button
+                  size="xs"
+                  variant={chart === "relationships" ? "secondary" : "ghost"}
+                  title="Who dealt with whom, over time: one band per relationship"
+                  onClick={() => setChart("relationships")}
+                  aria-pressed={chart === "relationships"}
+                >
+                  Relationships
+                </Button>
               </div>
               <Divider />
-              <Button variant="ghost" size="icon-sm" aria-label="Zoom out" title="Zoom out" onClick={() => timeline.current?.zoomBy(1 / 1.6)}>
+              <Button variant="ghost" size="icon-sm" aria-label="Zoom out" title="Zoom out" onClick={() => (chart === "relationships" ? relationshipChart.current : timeline.current)?.zoomBy(1 / 1.6)}>
                 <MinusIcon />
               </Button>
-              <Button variant="ghost" size="icon-sm" aria-label="Zoom in" title="Zoom in" onClick={() => timeline.current?.zoomBy(1.6)}>
+              <Button variant="ghost" size="icon-sm" aria-label="Zoom in" title="Zoom in" onClick={() => (chart === "relationships" ? relationshipChart.current : timeline.current)?.zoomBy(1.6)}>
                 <PlusIcon />
               </Button>
-              <Button variant="ghost" size="icon-sm" aria-label="Fit range" title="Fit range" onClick={() => timeline.current?.fit()}>
+              <Button variant="ghost" size="icon-sm" aria-label="Fit range" title="Fit range" onClick={() => (chart === "relationships" ? relationshipChart.current : timeline.current)?.fit()}>
                 <MaximizeIcon />
               </Button>
               <Button

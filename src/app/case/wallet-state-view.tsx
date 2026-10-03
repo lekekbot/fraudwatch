@@ -6,6 +6,8 @@ import { ChevronLeftIcon, ChevronRightIcon, ExternalLinkIcon } from "lucide-reac
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import type { HiddenReason } from "@/lib/case/hiding";
 import { formatLamports } from "@/lib/solana/amount";
 import { shortenAddress } from "@/lib/solana/address";
 import { type AssetChange, type AssetState, netChange, type WalletState, type WalletTransactionEffect } from "@/lib/state/reconstruct";
@@ -144,11 +146,13 @@ export function WalletStateSummary({ state, assets }: { state: WalletState; asse
   );
 }
 
+const HIDE_HINT_KEY = "fraudwatch:table-hide-hint-seen";
+
 /** Where the open transaction sits in the table's sorted, filtered order, and how to move from it. */
 export type TableNav = { index: number; count: number; previous: () => void; next: () => void; /** Neighbour to open when this one is hidden. */ neighbour: string | null };
 
 /** One displayed line: a transaction's change of one asset, or its "nothing moved" row. */
-type TableRow = { effect: WalletTransactionEffect; kind: EffectKind | undefined; change: AssetChange | null };
+type TableRow = { effect: WalletTransactionEffect; kind: EffectKind | undefined; change: AssetChange | null; hidden: HiddenReason };
 
 type SortKey = "time" | "asset" | "before" | "change" | "after";
 
@@ -164,7 +168,7 @@ function asNumber(value: string | null | undefined, assetId: string | null, asse
 
 const selectClass = "h-7 rounded-md border bg-transparent px-1.5 text-xs outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring";
 
-export function WalletStateTable({ state, assets, summaries, selected, onSelect, renderPanel }: {
+export function WalletStateTable({ state, assets, summaries, selected, onSelect, renderPanel, hidden, onHide, onUnhide }: {
   state: WalletState;
   assets: Assets;
   summaries?: readonly EffectSummary[];
@@ -174,20 +178,34 @@ export function WalletStateTable({ state, assets, summaries, selected, onSelect,
   onSelect?: (signature: string | null) => void;
   /** The inspector beside the table, told where the open transaction sits in the table's current order. */
   renderPanel?: (nav: TableNav | null) => React.ReactNode;
+  /** Why each of `state.effects` is hidden from the map, or null; hidden ones show only with "Show hidden". */
+  hidden?: readonly HiddenReason[];
+  /** Hide or bring back a batch of transactions; enables row selection. */
+  onHide?: (signatures: string[]) => void;
+  onUnhide?: (signatures: string[]) => void;
 }) {
   const [assetFilter, setAssetFilter] = useState<string | null>(null);
   const [kindFilter, setKindFilter] = useState<EffectKind | null>(null);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "time", dir: 1 });
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(100);
+  const [showHidden, setShowHidden] = useState(false);
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
+  const [anchor, setAnchor] = useState<string | null>(null);
+  // A how-to until the first hide from the table; the table only mounts in the browser, so storage is there.
+  const [hinted, setHinted] = useState(() => localStorage.getItem(HIDE_HINT_KEY) === "1");
+  const selectable = Boolean(onHide && onUnhide);
+  const hiddenCount = hidden?.filter((h) => h !== null).length ?? 0;
 
   // Every row from the whole history, not just the first page: filters and sort see it all.
   const allRows: TableRow[] = state.effects.flatMap((e, i): TableRow[] => {
+    const why = hidden?.[i] ?? null;
+    if (why !== null && !showHidden) return [];
     const kind = summaries?.[i]?.kind;
     // Unchanged balances stay in the data but add nothing to the table.
     const rows = e.assetChanges.filter((c) => c.delta !== "0" || (c.assetId === "SOL" && e.feeLamports !== "0"));
-    if (rows.length === 0) return [{ effect: e, kind, change: null }];
-    return rows.map((change) => ({ effect: e, kind, change }));
+    if (rows.length === 0) return [{ effect: e, kind, change: null, hidden: why }];
+    return rows.map((change) => ({ effect: e, kind, change, hidden: why }));
   });
   const countBy = <K extends string>(keys: (row: TableRow) => K | null) => {
     const counts = new Map<K, number>();
@@ -229,10 +247,82 @@ export function WalletStateTable({ state, assets, summaries, selected, onSelect,
     setPage(Math.floor(sorted.findIndex((row) => row.effect.signature === signature) / pageSize));
     onSelect(signature);
   };
+  // Selection for bulk hiding, kept to what the table currently lists.
+  const picked = order.filter((sig) => checked.has(sig));
+  const hiddenSigs = new Set(sorted.filter((row) => row.hidden !== null).map((row) => row.effect.signature));
+  const pickedHidden = picked.filter((sig) => hiddenSigs.has(sig));
+  const pickedShown = picked.filter((sig) => !hiddenSigs.has(sig));
+  const pageSigs = [...new Set(shown.map((row) => row.effect.signature))];
+  const pageAll = pageSigs.length > 0 && pageSigs.every((sig) => checked.has(sig));
+  const check = (signature: string, range: boolean) => {
+    const next = new Set(checked);
+    const on = !checked.has(signature);
+    const from = range && anchor ? order.indexOf(anchor) : -1;
+    const to = order.indexOf(signature);
+    // Shift-click sets every transaction between the last one clicked and this one, in the table's order.
+    const span = from === -1 ? [signature] : order.slice(Math.min(from, to), Math.max(from, to) + 1);
+    for (const sig of span) if (on) next.add(sig); else next.delete(sig);
+    setChecked(next);
+    setAnchor(signature);
+  };
+  const act = (run: (signatures: string[]) => void, signatures: string[]) => {
+    run(signatures);
+    if (!hinted) {
+      localStorage.setItem(HIDE_HINT_KEY, "1");
+      setHinted(true);
+    }
+    setChecked(new Set());
+    setAnchor(null);
+  };
+
   const nav: TableNav | null =
     at === -1
       ? null
       : { index: at, count: order.length, previous: () => open(order[at - 1]), next: () => open(order[at + 1]), neighbour: order[at + 1] ?? order[at - 1] ?? null };
+
+  /** The same pager above and below the table; only the top copy is a live region. */
+  const pager = (className: string, live: boolean) => (
+    <div className={cn("flex flex-wrap items-center gap-2 text-xs text-muted-foreground", className)}>
+      <span className="tabular-nums">
+        Rows {(current * pageSize + 1).toLocaleString()}–{Math.min((current + 1) * pageSize, sorted.length).toLocaleString()} of{" "}
+        {sorted.length.toLocaleString()}
+      </span>
+      <div className="ml-auto flex items-center gap-2">
+        <label className="flex items-center gap-1.5">
+          Rows per page
+          <select
+            className={selectClass}
+            value={pageSize}
+            onChange={(event) => {
+              setPageSize(Number(event.target.value));
+              setPage(0);
+            }}
+          >
+            {PAGE_SIZES.map((size) => (
+              <option key={size} value={size}>
+                {size}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="tabular-nums" aria-live={live ? "polite" : undefined}>
+          Page {current + 1} of {maxPage + 1}
+        </span>
+        <Button variant="ghost" size="icon-xs" aria-label="Previous page" disabled={current === 0} onClick={() => setPage(current - 1)}>
+          <ChevronLeftIcon />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label="Next page"
+          disabled={current >= maxPage}
+          onClick={() => setPage(current + 1)}
+        >
+          <ChevronRightIcon />
+        </Button>
+      </div>
+    </div>
+  );
 
   const header = (key: SortKey) => {
     const active = sort.key === key;
@@ -318,18 +408,68 @@ export function WalletStateTable({ state, assets, summaries, selected, onSelect,
                     Reset
                   </Button>
                 )}
-                <span className="ml-auto tabular-nums" aria-live="polite">
-                  {filtersActive && `${filtered.length.toLocaleString()} of ${allRows.length.toLocaleString()} rows · `}
-                  {filteredTxs.toLocaleString()} transactions
-                </span>
+                {selectable && hiddenCount > 0 && (
+                  <label className="flex items-center gap-1.5">
+                    <Checkbox checked={showHidden} onCheckedChange={setShowHidden} />
+                    Show hidden ({hiddenCount.toLocaleString()})
+                  </label>
+                )}
+                {/* Selection actions take the count's place in this row, so rows don't move under the cursor mid-selection. */}
+                {picked.length > 0 ? (
+                  <span className="ml-auto flex flex-wrap items-center gap-1" role="toolbar" aria-label="Selected transactions">
+                    <span className="pr-1 font-medium text-foreground tabular-nums" aria-live="polite">
+                      {picked.length.toLocaleString()} selected
+                    </span>
+                    {pageAll && order.length > picked.length && (
+                      <Button variant="ghost" size="xs" onClick={() => setChecked(new Set(order))}>
+                        Select all {order.length.toLocaleString()}
+                      </Button>
+                    )}
+                    {pickedShown.length > 0 && (
+                      <Button size="xs" onClick={() => act(onHide!, pickedShown)}>
+                        Hide {pickedShown.length.toLocaleString()} from map
+                      </Button>
+                    )}
+                    {pickedHidden.length > 0 && (
+                      <Button size="xs" variant="outline" onClick={() => act(onUnhide!, pickedHidden)}>
+                        Unhide {pickedHidden.length.toLocaleString()}
+                      </Button>
+                    )}
+                    <Button size="xs" variant="ghost" onClick={() => setChecked(new Set())}>
+                      Clear
+                    </Button>
+                  </span>
+                ) : (
+                  <span className="ml-auto tabular-nums" aria-live="polite">
+                    {selectable && !hinted && <span className="pr-3 text-muted-foreground/80">Double-click a row to select it · Shift-click selects a range ·</span>}
+                    {filtersActive && `${filtered.length.toLocaleString()} of ${allRows.length.toLocaleString()} rows · `}
+                    {filteredTxs.toLocaleString()} transactions
+                  </span>
+                )}
               </div>
               {sorted.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No rows match the filters.</p>
               ) : (
                 <div className="overflow-x-auto">
+                  {pager("pb-2", true)}
                   <table className="w-full text-sm">
                     <thead className="text-left text-xs text-muted-foreground">
                       <tr>
+                        {selectable && (
+                          <th className="w-8 px-1 py-2 align-middle">
+                            <Checkbox
+                              className="mx-auto"
+                              aria-label="Select this page"
+                              checked={pageAll}
+                              indeterminate={!pageAll && pageSigs.some((sig) => checked.has(sig))}
+                              onCheckedChange={() => {
+                                const next = new Set(checked);
+                                for (const sig of pageSigs) if (pageAll) next.delete(sig); else next.add(sig);
+                                setChecked(next);
+                              }}
+                            />
+                          </th>
+                        )}
                         {header("time")}
                         {header("asset")}
                         {header("before")}
@@ -340,26 +480,52 @@ export function WalletStateTable({ state, assets, summaries, selected, onSelect,
                     <tbody>
                       {shown.map((row, i) => {
                         const { effect: e, kind, change: c } = row;
+                        // The time cell opens each transaction's group of rows in the current order.
+                        const groupStart = i === 0 || shown[i - 1].effect.signature !== e.signature;
                         // Every row of a transaction opens it; Enter does too, for keyboard users.
+                        // A double-click selects the transaction for bulk hiding, on top of opening it.
                         const rowProps = onSelect && {
                           tabIndex: 0,
                           "aria-selected": selected === e.signature,
                           onClick: () => onSelect(e.signature),
+                          onDoubleClick: (event: React.MouseEvent) => {
+                            if (!selectable) return;
+                            event.stopPropagation();
+                            check(e.signature, event.shiftKey);
+                          },
                           onKeyDown: (event: React.KeyboardEvent) => event.key === "Enter" && onSelect(e.signature),
                         };
                         const rowClass = cn(
                           onSelect && "cursor-pointer hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none",
                           selected === e.signature && "bg-muted/60 hover:bg-muted/60",
+                          row.hidden !== null && "text-muted-foreground opacity-60",
                         );
-                        // The time cell opens each transaction's group of rows in the current order.
-                        const groupStart = i === 0 || shown[i - 1].effect.signature !== e.signature;
+                        // One checkbox per transaction, on the first of its rows; it selects without opening the row.
+                        const selectCell = selectable && (
+                          <td className="w-8 px-1 py-1.5 align-middle" onClick={(event) => event.stopPropagation()}>
+                            {groupStart && (
+                              <Checkbox
+                                className="mx-auto"
+                                aria-label={`Select ${e.signature}`}
+                                checked={checked.has(e.signature)}
+                                // The native event rides along, so shift-click still selects a range.
+                                onCheckedChange={(_checked, details) => check(e.signature, Boolean((details.event as { shiftKey?: boolean } | undefined)?.shiftKey))}
+                              />
+                            )}
+                          </td>
+                        );
+                        const hiddenNote = groupStart && row.hidden !== null && (
+                          <span className="block text-[10px] tracking-wide uppercase">{row.hidden === "manual" ? "Hidden" : `Hidden · ${row.hidden.name}`}</span>
+                        );
                         if (!c) {
                           return (
                             <tr key={`${e.signature}:none`} className={cn(groupStart && "border-t", rowClass)} {...rowProps}>
-                              <td className="py-1 pr-4 align-top whitespace-nowrap tabular-nums">
+                              {selectCell}
+                              <td className="py-1.5 pr-4 align-top whitespace-nowrap tabular-nums">
                                 {groupStart && <TransactionCell e={e} kind={kind} />}
+                                {hiddenNote}
                               </td>
-                              <td colSpan={4} className="py-1 text-muted-foreground">
+                              <td colSpan={4} className="py-1.5 text-muted-foreground">
                                 No balance change for this wallet
                               </td>
                             </tr>
@@ -367,10 +533,12 @@ export function WalletStateTable({ state, assets, summaries, selected, onSelect,
                         }
                         return (
                           <tr key={`${e.signature}:${c.assetId}`} className={cn(groupStart && "border-t", rowClass)} {...rowProps}>
-                            <td className="py-1 pr-4 align-top whitespace-nowrap tabular-nums">
+                            {selectCell}
+                            <td className="py-1.5 pr-4 align-top whitespace-nowrap tabular-nums">
                               {groupStart && <TransactionCell e={e} kind={kind} />}
+                              {hiddenNote}
                             </td>
-                            <td className="py-1 pr-4">
+                            <td className="py-1.5 pr-4">
                               <div className="flex items-start gap-2">
                                 <AssetIcon label={assetLabel(c.assetId, assets)} logo={assetLogo(c.assetId, assets)} className="mt-0.5" />
                                 <div title={c.assetId}>
@@ -381,58 +549,19 @@ export function WalletStateTable({ state, assets, summaries, selected, onSelect,
                                 </div>
                               </div>
                             </td>
-                            <td className="py-1 pr-4 text-right tabular-nums">{c.before && amount(c.before, c.assetId, state, assets)}</td>
+                            <td className="py-1.5 pr-4 text-right tabular-nums">{c.before && amount(c.before, c.assetId, state, assets)}</td>
                             <td
-                              className={`py-1 pr-4 text-right tabular-nums ${c.delta.startsWith("-") ? "text-destructive" : c.delta !== "0" ? "text-emerald-500" : "text-muted-foreground"}`}
+                              className={`py-1.5 pr-4 text-right tabular-nums ${c.delta.startsWith("-") ? "text-destructive" : c.delta !== "0" ? "text-emerald-500" : "text-muted-foreground"}`}
                             >
                               {amount(c.delta, c.assetId, state, assets, true)}
                             </td>
-                            <td className="py-1 pr-0 text-right tabular-nums">{c.after && amount(c.after, c.assetId, state, assets)}</td>
+                            <td className="py-1.5 pr-0 text-right tabular-nums">{c.after && amount(c.after, c.assetId, state, assets)}</td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
-                  <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-muted-foreground">
-                    <span className="tabular-nums">
-                      Rows {(current * pageSize + 1).toLocaleString()}–{Math.min((current + 1) * pageSize, sorted.length).toLocaleString()} of{" "}
-                      {sorted.length.toLocaleString()}
-                    </span>
-                    <div className="ml-auto flex items-center gap-2">
-                      <label className="flex items-center gap-1.5">
-                        Rows per page
-                        <select
-                          className={selectClass}
-                          value={pageSize}
-                          onChange={(event) => {
-                            setPageSize(Number(event.target.value));
-                            setPage(0);
-                          }}
-                        >
-                          {PAGE_SIZES.map((size) => (
-                            <option key={size} value={size}>
-                              {size}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <span className="tabular-nums" aria-live="polite">
-                        Page {current + 1} of {maxPage + 1}
-                      </span>
-                      <Button variant="ghost" size="icon-xs" aria-label="Previous page" disabled={current === 0} onClick={() => setPage(current - 1)}>
-                        <ChevronLeftIcon />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label="Next page"
-                        disabled={current >= maxPage}
-                        onClick={() => setPage(current + 1)}
-                      >
-                        <ChevronRightIcon />
-                      </Button>
-                    </div>
-                  </div>
+                  {pager("pt-1", false)}
                 </div>
               )}
             </>
