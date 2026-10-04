@@ -3,11 +3,19 @@
 import { ArrowDownLeftIcon, ArrowUpRightIcon, ChartNoAxesGanttIcon, ExternalLinkIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { edgeFlow, summarizeRelationship, type GraphEdge } from "@/lib/graph/build";
+import { edgeFlow, startedBy, summarizeRelationship, type GraphEdge } from "@/lib/graph/build";
 import type { Names } from "@/lib/labels/labels";
 import { type Assets, assetLabel, formatUtc } from "../asset-format";
 import { AssetFlows } from "../asset-flows";
 import { PanelSection } from "../panel";
+
+const NFT_RELATED_LABEL = {
+  royalty: "Royalty",
+  rent: "Rent",
+  marketplace_fee: "Marketplace fee",
+  unidentified: "Other recipient",
+  escrow: "Escrow",
+} as const;
 
 /**
  * Inspector for one connection: the wallet pair, then every underlying
@@ -101,6 +109,8 @@ export function EdgePanel({
                 <Badge key={type.kind} variant="outline">{type.kind.replaceAll("_", " ").toLowerCase()} · {type.count}</Badge>
               ))}
           </div>
+          {/* Who made the first move: each side's approved (signed) transactions, and any signed by someone else. */}
+          <p className="text-xs text-muted-foreground">{startedBy(edge, names)}</p>
         </PanelSection>
       )}
 
@@ -132,6 +142,11 @@ export function EdgePanel({
                     {it.kind.replace("_", " ")}
                   </Badge>
                 </div>
+                {it.initiator !== edge.a && it.initiator !== edge.b && (
+                  <span className="text-xs text-amber-500">
+                    Signed by {name(it.initiator)}, not either side
+                  </span>
+                )}
                 {it.movements.map((m, i) => {
                   // The pair is named in the header; a colored arrow is all a movement line needs.
                   const outgoing = m.from === you;
@@ -148,6 +163,31 @@ export function EdgePanel({
                     </div>
                   );
                 })}
+                {it.nftRelated && it.nftRelated.length > 0 && (
+                  <div className="mt-0.5 flex flex-col gap-1 rounded-md bg-muted/50 p-2">
+                    <span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+                      {it.kind === "NFT_BUY" ? "NFT purchase breakdown" : "NFT trade breakdown"}
+                    </span>
+                    {it.nftRelated.map((m, i) => {
+                      const outgoing = m.from === you;
+                      const other = outgoing ? m.to : m.from;
+                      return (
+                        <div key={`${m.assetId}:${m.from}:${m.to}:${i}`} className="flex min-w-0 items-center gap-1.5 text-xs">
+                          {outgoing ? (
+                            <ArrowUpRightIcon className="size-3.5 shrink-0 text-destructive" aria-label="sent" />
+                          ) : (
+                            <ArrowDownLeftIcon className="size-3.5 shrink-0 text-emerald-500" aria-label="received" />
+                          )}
+                          <span className="shrink-0 tabular-nums">
+                            {formatAmount(m.amount, m.assetId)} <span className="text-muted-foreground">{assetLabel(m.assetId, assets)}</span>
+                          </span>
+                          <span className="text-muted-foreground">· {NFT_RELATED_LABEL[m.role]}</span>
+                          <span className="min-w-0">{name(other)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
               <div className="flex shrink-0 flex-col">
                 <Button

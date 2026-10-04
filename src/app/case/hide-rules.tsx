@@ -32,7 +32,7 @@ export type RulesDialogState = null | "list" | HideRule;
 /** Left-panel section: what's hidden from the map, and the case's hide rules. */
 export function HidingSection({ c, rows, assets, names, decimalsOf, dialog, onDialog, onPickInTable, onSave }: {
   c: FraudWatchCase;
-  /** Every loaded transaction side across mapped wallets, before filters. */
+  /** Every lane's side of every loaded transaction, before filters, with the lane's wallet counted as involved. */
   rows: FilterableTx[];
   assets: Assets;
   names: Names;
@@ -44,12 +44,14 @@ export function HidingSection({ c, rows, assets, names, decimalsOf, dialog, onDi
   onSave: (next: FraudWatchCase) => void;
 }) {
   const tagsOf = (address: string) => names.label(address)?.tags ?? [];
-  const unique = uniqueBySignature(rows);
   const manual = c.hiddenSignatures?.length ?? 0;
-  const byRules = unique.filter((row) => {
-    const why = hiddenBy(c, row, tagsOf);
-    return why !== null && why !== "manual";
-  }).length;
+  // A transaction counts once however many lanes it's on.
+  const byRules = new Set(
+    rows.filter((row) => {
+      const why = hiddenBy(c, row, tagsOf);
+      return why !== null && why !== "manual";
+    }).map((row) => row.signature),
+  ).size;
   const rules = c.hideRules ?? [];
   const newRule = (): HideRule => ({ id: crypto.randomUUID(), name: `Rule ${rules.length + 1}`, enabled: true });
 
@@ -91,7 +93,7 @@ export function HidingSection({ c, rows, assets, names, decimalsOf, dialog, onDi
         <RulesDialog
           key={dialog === "list" ? "list" : dialog.id}
           c={c}
-          rows={unique}
+          rows={rows}
           assets={assets}
           names={names}
           decimalsOf={decimalsOf}
@@ -103,12 +105,6 @@ export function HidingSection({ c, rows, assets, names, decimalsOf, dialog, onDi
       )}
     </PanelSection>
   );
-}
-
-/** One row per transaction: a transaction shared by two mapped wallets counts once. */
-function uniqueBySignature(rows: FilterableTx[]): FilterableTx[] {
-  const seen = new Set<string>();
-  return rows.filter((row) => !seen.has(row.signature) && (seen.add(row.signature), true));
 }
 
 function RulesDialog({ c, rows, assets, names, decimalsOf, initial, newRule, onSave, onClose }: {
@@ -126,7 +122,7 @@ function RulesDialog({ c, rows, assets, names, decimalsOf, initial, newRule, onS
   const [editing, setEditing] = useState<HideRule | null>(initial);
   const tagsOf = (address: string) => names.label(address)?.tags ?? [];
   const rules = c.hideRules ?? [];
-  const matches = (rule: HideRule) => rows.filter((row) => ruleMatches(rule, row, tagsOf)).length;
+  const matches = (rule: HideRule) => new Set(rows.filter((row) => ruleMatches(rule, row, tagsOf)).map((row) => row.signature)).size;
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>

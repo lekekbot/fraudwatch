@@ -1,6 +1,6 @@
 "use client";
 
-import { DownloadIcon, SquareIcon } from "lucide-react";
+import { DownloadIcon, RefreshCwIcon, SquareIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -93,10 +93,13 @@ export function IngestionPanel({
   names,
   rpc,
   ingestion,
+  extend,
 }: {
   names: Names;
   rpc: RpcSettings | undefined;
   ingestion: ReturnType<typeof useIngestion>;
+  /** When the case ends before today: its last day (UTC), and carrying it to today then loading. */
+  extend?: { lastDay: string; run: () => void };
 }) {
   const { state, start, cancel, wallets } = ingestion;
   const running = state.status === "running";
@@ -117,6 +120,17 @@ export function IngestionPanel({
           <DownloadIcon />
           {state.status === "done" ? "Load missing history" : "Load transactions"}
         </Button>
+      )}
+      {extend && !running && (
+        <div className="flex flex-col gap-1.5 rounded-md border border-dashed p-2 text-xs">
+          <span className="text-muted-foreground">
+            The case ends on {extend.lastDay} (UTC), so anything the wallets did since isn&apos;t loaded.
+          </span>
+          <Button variant="outline" size="sm" disabled={!rpc} onClick={extend.run}>
+            <RefreshCwIcon />
+            Extend to today and load
+          </Button>
+        </div>
       )}
       {state.status === "done" && state.lastLoadedAt && (
         <span className="text-xs text-muted-foreground">

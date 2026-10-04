@@ -21,6 +21,8 @@ export type TxFilter = {
   tags: ReadonlySet<string>;
   /** Only transactions in [start, end) (ms). */
   dateRange: { start: number; end: number } | null;
+  /** Leave out transactions involving a likely address-poisoning decoy (dust look-alike). */
+  hideDecoys: boolean;
 };
 
 export const EMPTY_FILTER: TxFilter = {
@@ -32,12 +34,14 @@ export const EMPTY_FILTER: TxFilter = {
   address: null,
   tags: new Set(),
   dateRange: null,
+  hideDecoys: false,
 };
 
 export const isFilterActive = (f: TxFilter) =>
   f.hiddenKinds.size + f.hiddenAssets.size + f.protocols.size + f.tags.size > 0 ||
   f.direction !== "any" ||
   f.minAmount !== null ||
+  f.hideDecoys ||
   f.address !== null ||
   f.dateRange !== null;
 
@@ -70,7 +74,13 @@ export function movedAssets(summary: EffectSummary): string[] {
 
 const abs = (v: bigint) => (v < BigInt(0) ? -v : v);
 
-export function passesFilter(tx: FilterableTx, f: TxFilter, tagsOf: (address: string) => readonly string[] = () => []): boolean {
+/** `isDecoy` says whether an address is a likely dust decoy; only consulted when `hideDecoys` is on. */
+export function passesFilter(
+  tx: FilterableTx,
+  f: TxFilter,
+  tagsOf: (address: string) => readonly string[] = () => [],
+  isDecoy: (address: string) => boolean = () => false,
+): boolean {
   const { summary } = tx;
   if (f.hiddenKinds.has(summary.kind)) return false;
   const moved = movedAssets(summary);
@@ -86,6 +96,7 @@ export function passesFilter(tx: FilterableTx, f: TxFilter, tagsOf: (address: st
   if (f.address !== null && !tx.addresses.includes(f.address)) return false;
   if (f.tags.size > 0 && !tx.addresses.some((a) => tagsOf(a).some((t) => f.tags.has(t)))) return false;
   if (f.dateRange && (tx.time < f.dateRange.start || tx.time >= f.dateRange.end)) return false;
+  if (f.hideDecoys && tx.addresses.some(isDecoy)) return false;
   return true;
 }
 

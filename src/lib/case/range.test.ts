@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { datesFromRange, formatRange, isValidRange, rangeFromDates, rangeFromUnix, rangeToUnix, sameRange } from "./range";
+import { datesFromRange, extendedToToday, formatRange, isValidRange, rangeFromDates, rangeFromUnix, rangeToUnix, sameRange } from "./range";
 
 describe("case ranges", () => {
   it("converts inclusive UTC dates to a half-open range", () => {
@@ -30,5 +30,19 @@ describe("case ranges", () => {
   it("flags start >= end", () => {
     expect(isValidRange({ start: "2026-06-02T00:00:00.000Z", end: "2026-06-01T00:00:00.000Z" })).toBe(false);
     expect(isValidRange({ start: "2026-06-01T00:00:00.000Z", end: "2026-06-01T00:00:00.000Z" })).toBe(false);
+  });
+});
+
+describe("extendedToToday", () => {
+  const now = new Date("2026-10-04T15:30:00.000Z");
+  it("carries a past end to the end of today, keeping the start", () => {
+    expect(extendedToToday({ start: "2022-07-25T00:00:00.000Z", end: "2025-09-11T00:00:00.000Z" }, now)).toEqual({
+      start: "2022-07-25T00:00:00.000Z",
+      end: "2026-10-05T00:00:00.000Z",
+    });
+  });
+
+  it("leaves a range that already covers today", () => {
+    expect(extendedToToday({ start: "2026-01-01T00:00:00.000Z", end: "2026-10-05T00:00:00.000Z" }, now)).toBeNull();
   });
 });

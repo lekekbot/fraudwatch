@@ -52,3 +52,12 @@ export function formatRange(range: CaseRange): string {
   const { startDate, endDate } = datesFromRange(range);
   return startDate === endDate ? `${startDate} (UTC)` : `${startDate} → ${endDate} (UTC)`;
 }
+
+/**
+ * The range carried on to the end of today (UTC), so later activity is in it;
+ * null when it already reaches that far.
+ */
+export function extendedToToday(range: CaseRange, now = new Date()): CaseRange | null {
+  const endOfToday = Math.floor(now.getTime() / DAY_MS) * DAY_MS + DAY_MS;
+  return Date.parse(range.end) >= endOfToday ? null : { start: range.start, end: new Date(endOfToday).toISOString() };
+}

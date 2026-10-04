@@ -158,7 +158,8 @@ type SortKey = "time" | "asset" | "before" | "change" | "after";
 
 const SORT_LABEL: Record<SortKey, string> = { time: "Time (UTC)", asset: "Asset", before: "Before", change: "Change", after: "After" };
 /** Numeric columns open on their most useful direction first. */
-const firstDirection = (key: SortKey): 1 | -1 => (key === "time" || key === "asset" ? 1 : -1);
+/** Time starts newest first and assets A–Z; amounts start largest first. */
+const firstDirection = (key: SortKey): 1 | -1 => (key === "asset" ? 1 : -1);
 
 /** Base units as a decimal number, so rows of different assets compare. */
 function asNumber(value: string | null | undefined, assetId: string | null, assets: Assets): number {
@@ -186,7 +187,7 @@ export function WalletStateTable({ state, assets, summaries, selected, onSelect,
 }) {
   const [assetFilter, setAssetFilter] = useState<string | null>(null);
   const [kindFilter, setKindFilter] = useState<EffectKind | null>(null);
-  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "time", dir: 1 });
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "time", dir: -1 });
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(100);
   const [showHidden, setShowHidden] = useState(false);

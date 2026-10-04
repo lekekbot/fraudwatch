@@ -1,9 +1,10 @@
 import registryJson from "../../../protocols/solana.json";
+import centralizedVaultsJson from "../../../protocols/centralized-vaults.json";
 import { isValidSolanaAddress } from "@/lib/solana/address";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
 
 /**
- * Address → protocol lookup from `protocols/solana.json`. Lookup only: what a
+ * Address → protocol or service lookup from `protocols/solana.json`. Lookup only: what a
  * transaction *did* is worked out in code (`summarize.ts`), never in JSON.
  * An address that isn't listed stays unknown; nothing is guessed.
  */
@@ -17,10 +18,12 @@ export const CATEGORIES = [
   "perps",
   "nft",
   "nft_marketplace",
+  "name_service",
+  "exchange",
   "bridge",
   "launchpad",
 ] as const;
-export const ROLES = ["program", "pool", "vault", "authority", "fee_account", "market"] as const;
+export const ROLES = ["program", "pool", "vault", "authority", "fee_account", "market", "wallet"] as const;
 
 export type ProtocolCategory = (typeof CATEGORIES)[number];
 export type AddressRole = (typeof ROLES)[number];
@@ -37,7 +40,7 @@ export type RegistryEntry = {
 export type ProtocolRegistry = {
   version: number;
   lookup: (address: string) => RegistryEntry | undefined;
-  /** Protocols by id: name and category. */
+  /** Protocols and services by id: name and category. */
   protocols: ReadonlyMap<string, { name: string; category: ProtocolCategory }>;
   size: number;
 };
@@ -91,8 +94,11 @@ export function parseRegistry(json: unknown): ProtocolRegistry {
   return { version: version as number, lookup: (address) => byAddress.get(address), protocols, size: byAddress.size };
 }
 
-/** The bundled registry. */
-export const registry: ProtocolRegistry = parseRegistry(registryJson);
+/** The bundled registry. Centralized wallets stay in their own maintainable source file. */
+export const registry: ProtocolRegistry = parseRegistry({
+  ...registryJson,
+  protocols: { ...registryJson.protocols, ...centralizedVaultsJson.protocols },
+});
 
 export type TxEnrichment = {
   /** Registry the matches were read against; a newer registry may know more. */
@@ -117,10 +123,16 @@ export function enrichTransaction(tx: CanonicalTransaction, reg: ProtocolRegistr
     const entry = reg.lookup(address);
     if (entry && !matches.has(address)) matches.set(address, entry);
   }
+  // SPL transfers expose the custodial wallet as the token account owner.
+  for (const { owner } of tx.tokenChanges) {
+    if (!owner) continue;
+    const entry = reg.lookup(owner);
+    if (entry && !matches.has(owner)) matches.set(owner, entry);
+  }
   return { protocolRegistryVersion: reg.version, matches: [...matches.values()], unknownPrograms };
 }
 
-/** Distinct non-core protocols a transaction used, in first-seen order. */
+/** Distinct non-core protocols and services a transaction used, in first-seen order. */
 export function protocolsUsed(enrichment: TxEnrichment): { id: string; name: string; category: ProtocolCategory }[] {
   const seen = new Map<string, { id: string; name: string; category: ProtocolCategory }>();
   for (const m of enrichment.matches) {

@@ -1,6 +1,6 @@
 {
   "$schema": "./schema.json",
-  "version": 2,
+  "version": 7,
   "protocols": {
     "solana": {
       "name": "Solana",
@@ -10,7 +10,12 @@
         "ComputeBudget111111111111111111111111111111": { "role": "program", "label": "Compute Budget" },
         "Stake11111111111111111111111111111111111111": { "role": "program", "label": "Stake Program" },
         "Vote111111111111111111111111111111111111111": { "role": "program", "label": "Vote Program" },
-        "AddressLookupTab1e1111111111111111111111111": { "role": "program", "label": "Address Lookup Table" }
+        "AddressLookupTab1e1111111111111111111111111": { "role": "program", "label": "Address Lookup Table" },
+        "KeccakSecp256k11111111111111111111111111111": { "role": "program", "label": "Secp256k1 Program" },
+        "Feat1YXHhH6t1juaWF74WLcfv4XoNocjXA6sPWHNgAse": { "role": "program", "label": "Feature Proposal Program" },
+        "BPFLoaderUpgradeab1e11111111111111111111111": { "role": "program", "label": "BPF Upgradeable Loader" },
+        "BPFLoader1111111111111111111111111111111111": { "role": "program", "label": "BPF Loader" },
+        "BPFLoader2111111111111111111111111111111111": { "role": "program", "label": "BPF Loader 2" }
       }
     },
     "spl": {
@@ -31,8 +36,15 @@
       "website": "https://jup.ag",
       "addresses": {
         "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4": { "role": "program", "label": "Jupiter Aggregator v6" },
-        "j1o2qRpjcyUwEvwtcfhEQefh773ZgjxcVRry7LDqg5X": { "role": "program", "label": "Jupiter Limit Order" },
-        "DCA265Vj8a9CEuX1eb1LWRnDT7uK6q1xMipnNyatn23M": { "role": "program", "label": "Jupiter DCA" }
+        "j1o2qRpjcyUwEvwtcfhEQefh773ZgjxcVRry7LDqg5X": { "role": "program", "label": "Jupiter Limit Order v1" },
+        "jupoNjAxXgZ4rjzxzPMP4oxduvQsQtZzyknqvzYNrNu": { "role": "program", "label": "Jupiter Limit Order" },
+        "DCA265Vj8a9CEuX1eb1LWRnDT7uK6q1xMipnNyatn23M": { "role": "program", "label": "Jupiter DCA" },
+        "PERPHjGBqRHArX4DySjwM6UJHiR3sWAatqfdBS2qQJu": { "role": "program", "label": "Jupiter Perpetuals" },
+        "JUP6i4ozu5ydDCnLiMogSckDPpbtr7BJ4FtzYWkb5Rk": { "role": "program", "label": "Jupiter Aggregator v1" },
+        "JUP2jxvXaqu7NQY1GmNF4m1vodw12LVXYxbFL2uJvfo": { "role": "program", "label": "Jupiter Aggregator v2" },
+        "JUP3c2Uh3WA4Ng34tw6kPd2G4C5BB21Xo36Je1s32Ph": { "role": "program", "label": "Jupiter Aggregator v3" },
+        "JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB": { "role": "program", "label": "Jupiter Aggregator v4" },
+        "GovaE4iu227srtG2s3tZzB4RmWBzw8sTwrCLZz7kN7rY": { "role": "program", "label": "Jupiter Governance" }
       }
     },
     "raydium": {
@@ -42,7 +54,17 @@
       "addresses": {
         "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8": { "role": "program", "label": "Raydium AMM v4" },
         "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK": { "role": "program", "label": "Raydium CLMM" },
-        "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C": { "role": "program", "label": "Raydium CPMM" }
+        "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C": { "role": "program", "label": "Raydium CPMM" },
+        "RVKd61ztZW9GUwhRbbLoYVRE5Xf1B2tVscKqwZqXgEr": { "role": "program", "label": "Raydium Liquidity Pool v2" },
+        "27haf8L6oxUeXrHrgEgsexjSY5hbVUWEmvv9Nyxg8vQv": { "role": "program", "label": "Raydium Liquidity Pool v3" },
+        "5quBtoiQqxF9Jv6KYKctB59NT3gtJD2Y65kdnB1Uev3h": { "role": "program", "label": "Raydium AMM" },
+        "routeUGWgWzqBWFcrCfv8tritsqukccJPu3q5GPP3xS": { "role": "program", "label": "Raydium Router" },
+        "FarmqiPv5eAj3j1GMdMCMUGXqPUvmquZtMy86QH6rzhG": { "role": "program", "label": "Raydium Farm" },
+        "EhhTKczWMGQt46ynNeRX1WfeagwwJd7ufHvCDjRxjo5Q": { "role": "program", "label": "Raydium Stake" },
+        "CBuCnLe26faBpcBP2fktp4rp8abpcAnTWft6ZrP5Q4T": { "role": "program", "label": "Raydium Stake v4" },
+        "9KEPoZmtHUrBbhWN1v1KWLMkkvwY6WLtAVUCPRtRjP4z": { "role": "program", "label": "Raydium Stake v5" },
+        "9HzJyW1qZsEiSfMUf6L2jo3CcTKAyBmSyKdwQeYisHrC": { "role": "program", "label": "Raydium IDO" },
+        "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj": { "role": "program", "label": "Raydium LaunchLab" }
       }
     },
     "orca": {
@@ -50,7 +72,10 @@
       "category": "dex",
       "website": "https://orca.so",
       "addresses": {
-        "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc": { "role": "program", "label": "Orca Whirlpools" }
+        "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc": { "role": "program", "label": "Orca Whirlpools" },
+        "82yxjeMsvaURa4MbZZ7WZZHfobirZYkH1zF8fmeGtyaQ": { "role": "program", "label": "Orca Aquafarm" },
+        "DjVE6JNiYqPL2QXyCUUh8rNjHrbz9hXHNYt99MQ59qw1": { "role": "program", "label": "Orca Token Swap" },
+        "9W959DqEETiGZocYWCQPaJ6sBmUzgfxXfqGeTEdp3aQP": { "role": "program", "label": "Orca Token Swap v2" }
       }
     },
     "meteora": {
@@ -59,7 +84,11 @@
       "website": "https://meteora.ag",
       "addresses": {
         "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo": { "role": "program", "label": "Meteora DLMM" },
-        "Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB": { "role": "program", "label": "Meteora Pools" }
+        "Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB": { "role": "program", "label": "Meteora Pools" },
+        "24Uqj9JCLxUeoC3hGfh5W3s9FM9uCHDS2SG3LYwBpyTi": { "role": "program", "label": "Meteora Vault" },
+        "5B23C376Kwtd1vzb5LCJHiHLPnoWSnnx661hhGGDEv8y": { "role": "program", "label": "Meteora Dynamic AMM" },
+        "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG": { "role": "program", "label": "Meteora DAMM v2" },
+        "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN": { "role": "program", "label": "Meteora Dynamic Bonding Curve" }
       }
     },
     "phoenix": {
@@ -73,7 +102,8 @@
       "name": "OpenBook",
       "category": "dex",
       "addresses": {
-        "opnb2LAfJYbRMAHHvqjCwQxanZn7ReEHp1k81EohpZb": { "role": "program", "label": "OpenBook v2" }
+        "opnb2LAfJYbRMAHHvqjCwQxanZn7ReEHp1k81EohpZb": { "role": "program", "label": "OpenBook v2" },
+        "srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX": { "role": "program", "label": "OpenBook v1" }
       }
     },
     "pump_fun": {
@@ -81,7 +111,8 @@
       "category": "launchpad",
       "addresses": {
         "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P": { "role": "program", "label": "Pump.fun" },
-        "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA": { "role": "program", "label": "PumpSwap AMM" }
+        "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA": { "role": "program", "label": "Pump.fun AMM" },
+        "6Vo3245eszAb5wuqEMw8mGdbfRUdKbHhDHP5LcaGuTAB": { "role": "program", "label": "Pump App" }
       }
     },
     "kamino": {
@@ -89,7 +120,8 @@
       "category": "lending",
       "website": "https://kamino.finance",
       "addresses": {
-        "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD": { "role": "program", "label": "Kamino Lend" }
+        "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD": { "role": "program", "label": "Kamino Lend" },
+        "6LtLpnUFNByNXLyCoK9wA2MykKAmQNZKBdY8s47dehDc": { "role": "program", "label": "Kamino Program" }
       }
     },
     "marginfi": {
@@ -117,7 +149,8 @@
       "name": "Marinade",
       "category": "liquid_staking",
       "addresses": {
-        "MarBmsSgKXdrN1egZf5sqe1TMai9K1rChYNDJgjq7aD": { "role": "program", "label": "Marinade" }
+        "MarBmsSgKXdrN1egZf5sqe1TMai9K1rChYNDJgjq7aD": { "role": "program", "label": "Marinade" },
+        "MR2LqxoSbw831bNy68utpu5n4YqBH3AzDmddkgk9LQv": { "role": "program", "label": "Marinade Staking" }
       }
     },
     "metaplex": {
@@ -125,7 +158,14 @@
       "category": "nft",
       "addresses": {
         "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s": { "role": "program", "label": "Token Metadata" },
-        "BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY": { "role": "program", "label": "Bubblegum" }
+        "BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY": { "role": "program", "label": "Bubblegum" },
+        "cndyAnrLdpjq1Ssp1z8xxDsB8dxe7u4HL5Nxi2K5WXZ": { "role": "program", "label": "Candy Machine v1" },
+        "cndy3Z4yapfJBmL3ShUp5exZKqR3z33thTzeNMm2gRZ": { "role": "program", "label": "Candy Machine v2" },
+        "CndyV3LdqHUfDLmE5naZjVN8rBZz4tqhdefbAnjHG3JR": { "role": "program", "label": "Candy Machine Core" },
+        "vau1zxA2LbssAUEF7Gpw91zMM1LvXrvpzJtmZ58rPsn": { "role": "program", "label": "Token Vault" },
+        "p1exdMJcjVao65QdewkaZRUnU6VPSXhus9n2GzWfh98": { "role": "program", "label": "Metaplex" },
+        "auctxRXPeJoc4817jDhf4HbjnhEcr1cCXenosMhK5R8": { "role": "program", "label": "NFT Auction" },
+        "hausS13jsjafwWwGqZTUQRmWyvyxn9EQpqMwV1PBBmk": { "role": "program", "label": "Auction House" }
       }
     },
     "tensor": {
@@ -133,14 +173,30 @@
       "category": "nft_marketplace",
       "addresses": {
         "TCMPhJdwDryooaGtiocG1u3xcYbRpiJzb283XfCZsDp": { "role": "program", "label": "Tensor Marketplace" },
-        "TSWAPaqyCSx2KABk68Shruf4rp7CxcNi8hAsbdwmHbN": { "role": "program", "label": "Tensor Swap" }
+        "TSWAPaqyCSx2KABk68Shruf4rp7CxcNi8hAsbdwmHbN": { "role": "program", "label": "Tensor Swap" },
+        "TL1ST2iRBzuGTqLn1KXnGdSnEow62BzPnGiqyRXhWtW": { "role": "program", "label": "Tensor Whitelist" }
       }
     },
     "magic_eden": {
       "name": "Magic Eden",
       "category": "nft_marketplace",
       "addresses": {
-        "M2mx93ekt1fmXSVkTrUL9xVFHkmME8HTUi5Cyc5aF7K": { "role": "program", "label": "Magic Eden v2" }
+        "M2mx93ekt1fmXSVkTrUL9xVFHkmME8HTUi5Cyc5aF7K": { "role": "program", "label": "Magic Eden v2" },
+        "M3mxk5W2tt27WGT7THox7PmgRDp4m6NEhL5xvxrBfS1": { "role": "program", "label": "Magic Eden cNFT" },
+        "MEisE1HzehtrDpAAT8PnLHjpSSkRYakotTuJRPjTpo8": { "role": "program", "label": "Magic Eden Marketplace (legacy)" }
+      }
+    },
+    "sns": {
+      "name": "Solana Name Service",
+      "category": "name_service",
+      "website": "https://www.sns.id",
+      "addresses": {
+        "namesLPneVptA9Z5rqUDD9tMTWEJwofgaYwp8cawRkX": { "role": "program", "label": "SNS Name Service" },
+        "jCebN34bUfdeUYJT13J1yG16XWQpt5PDx6Mse9GUqhR": { "role": "program", "label": "SNS Registrar" },
+        "85iDfUvr3HJyLM2zcq5BXSiDvUWfw6cSE1FfNBo8Ap29": { "role": "program", "label": "SNS Marketplace" },
+        "2KkyPzjaAYaz2ojQZ9P3xYakLd96B5UH6a2isLaZ4Cgs": { "role": "program", "label": "SNS Sub Registrar" },
+        "nftD3vbNkNqfj2Sd3HZwbpw4BxxKWr4AjGb9X38JeZk": { "role": "program", "label": "SNS Name Tokenizer" },
+        "AVWV7vdWbLqXiLKFaP19GhYurhwxaLp2qRBSjT5tR5vT": { "role": "program", "label": "SNS Auction" }
       }
     },
     "wormhole": {
@@ -150,7 +206,8 @@
         "worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth": { "role": "program", "label": "Wormhole Core" },
         "wormDTUJ6AWPNvk59vGQbDvGJmqbDTdgWgAqcLBCgUb": { "role": "program", "label": "Wormhole Token Bridge" },
         "WnFt12ZrnzZrFZkt2xsNsaNWoQribnuQ5B5FrDbwDhD": { "role": "program", "label": "Wormhole NFT Bridge" },
-        "EtZMZM22ViKMo4r5y4Anovs3wKQ2owUmDpjygnMMcdEX": { "role": "program", "label": "Wormhole Message Shim" }
+        "EtZMZM22ViKMo4r5y4Anovs3wKQ2owUmDpjygnMMcdEX": { "role": "program", "label": "Wormhole Message Shim" },
+        "WormT3McKhFJ2RkiGpdw9GKvNCrB2aB54gb2uV9MfQC": { "role": "program", "label": "Wormhole (legacy)" }
       }
     },
     "cctp": {
@@ -190,6 +247,7 @@
         "GFRP4yXUjvcQemf2zRJN8w9sPNaDk5PyBUQdPHD1AzLp": { "role": "program", "label": "Mayan MPS" },
         "B96dV3Luxzo6SokJx3xt8i5y8Mb7HRR6Eec8hCjJDT69": { "role": "program", "label": "Mayan SPL Utils" },
         "DwMLtdtJqJQkHzNcrdTBuWHJByJfgpKBnvFvzyKdy3cU": { "role": "program", "label": "Mayan Payload Writer" },
+        "8LPjGDbxhW4G2Q8S6FvdvUdfGWssgtqmvsc63bwNFA7E": { "role": "program", "label": "Mayan Swap Bridge (legacy)" },
         "D8C8iW6zmoKg5TRr8nQ7h14TMWqQX8FiBdj2ju5MF3wa": { "role": "program", "label": "Mayan CPI Proxy" }
       }
     },
@@ -305,6 +363,146 @@
         "opre2VP8uvjq3YS15NRhRagsWvsY5DybitvCeLPAwbK": { "role": "program", "label": "Axelar Operators" },
         "memtaCuA26EANM26matPAhiQGPnvsrYdJYrYcK8wcon": { "role": "program", "label": "Axelar Memo" },
         "itsAUdHnV2K99ppbM6d6WUDac8MD54RAE7dUKHnw1Eg": { "role": "program", "label": "Axelar Interchain Token Service" }
+      }
+    },
+    "bisonfi": {
+      "name": "BisonFi",
+      "category": "dex",
+      "addresses": {
+        "BiSoNHVpsVZW2F7rx2eQ59yQwKxzU5NvBcmKshCSUypi": { "role": "program", "label": "BisonFi" }
+      }
+    },
+    "dflow": {
+      "name": "DFlow",
+      "category": "dex_aggregator",
+      "addresses": {
+        "DF1ow4tspfHX9JwWJsAb9epbkA8hmpSEAtxXy1V27QBH": { "role": "program", "label": "DFlow Aggregator v4" }
+      }
+    },
+    "okx": {
+      "name": "OKX",
+      "category": "dex_aggregator",
+      "addresses": {
+        "proVF4pMXVaYqmy4NjniPh4pqKNfMmsihgd4wdkCX3u": { "role": "program", "label": "OKX DEX Router" }
+      }
+    },
+    "axiom": {
+      "name": "Axiom Trade",
+      "category": "dex_aggregator",
+      "addresses": {
+        "FLASHX8DrLbgeR8FcfNV1F5krxYcYMUdBkrP1EPBtxB9": { "role": "program", "label": "Axiom Trade" }
+      }
+    },
+    "manifest": {
+      "name": "Manifest",
+      "category": "dex",
+      "addresses": {
+        "MNFSTqtC93rEfYHB6hF82sKdZpUDFWkViLByLd1k1Ms": { "role": "program", "label": "Manifest" }
+      }
+    },
+    "tessera": {
+      "name": "Tessera V",
+      "category": "dex",
+      "addresses": {
+        "TessVdML9pBGgG9yGks7o4HewRaXVAMuoVj4x83GLQH": { "role": "program", "label": "Tessera V" }
+      }
+    },
+    "scorch": {
+      "name": "Scorch",
+      "category": "dex",
+      "addresses": {
+        "SCoRcH8c2dpjvcJD6FiPbCSQyQgu3PcUAWj2Xxx3mqn": { "role": "program", "label": "Scorch" }
+      }
+    },
+    "goonfi": {
+      "name": "GoonFi",
+      "category": "dex",
+      "addresses": {
+        "goonuddtQRrWqqn5nFyczVKaie28f3kDkHWkHtURSLE": { "role": "program", "label": "GoonFi v2" }
+      }
+    },
+    "quantum": {
+      "name": "Quantum",
+      "category": "dex",
+      "addresses": {
+        "QuaNtZsgYRe5Z9Bk4LZ4cTD9tbkVoyCNf1R2BN9bBDv": { "role": "program", "label": "Quantum" }
+      }
+    },
+    "humidifi": {
+      "name": "HumidiFi",
+      "category": "dex",
+      "addresses": {
+        "9H6tua7jkLhdm3w8BvgpTn5LZNU7g4ZynDmCiNN3q6Rp": { "role": "program", "label": "HumidiFi" }
+      }
+    },
+    "alphaq": {
+      "name": "AlphaQ",
+      "category": "dex",
+      "addresses": {
+        "ALPHAQmeA7bjrVuccPsYPiCvsi428SNwte66Srvs4pHA": { "role": "program", "label": "AlphaQ" }
+      }
+    },
+    "titan": {
+      "name": "Titan Exchange",
+      "category": "dex_aggregator",
+      "addresses": {
+        "T1TANpTeScyeqVzzgNViGDNrkQ6qHz9KrSBS4aNXvGT": { "role": "program", "label": "Titan Exchange Router" }
+      }
+    },
+    "zerofi": {
+      "name": "ZeroFi",
+      "category": "dex",
+      "addresses": {
+        "ZERor4xhbUycZ6gb9ntrhqscUcZmAbQDjEAtCf4hbZY": { "role": "program", "label": "ZeroFi" }
+      }
+    },
+    "solfi": {
+      "name": "SolFi",
+      "category": "dex",
+      "addresses": {
+        "SV2EYYJyRz2YhfXwXnhNAevDEui5Q6yrfyo13WtupPF": { "role": "program", "label": "SolFi v2" }
+      }
+    },
+    "kipseli": {
+      "name": "Kipseli",
+      "category": "dex",
+      "addresses": {
+        "3TK9D8aoBFYjYZtKCjciPrVrRStsnvo7KmpcJqDavpaU": { "role": "program", "label": "Kipseli" }
+      }
+    },
+    "pancakeswap": {
+      "name": "PancakeSwap",
+      "category": "dex",
+      "addresses": {
+        "HpNfyc2Saw7RKkQd8nEL4khUcuPhQ7WwY1B2qjx8jxFq": { "role": "program", "label": "PancakeSwap" }
+      }
+    },
+    "terminal": {
+      "name": "Terminal",
+      "category": "dex_aggregator",
+      "addresses": {
+        "term9YPb9mzAsABaqN71A4xdbxHmpBNZavpBiQKZzN3": { "role": "program", "label": "Terminal (formerly Padre)" }
+      }
+    },
+    "byreal": {
+      "name": "Byreal",
+      "category": "dex",
+      "addresses": {
+        "REALQqNEomY6cQGZJUGwywTBD2UmDT32rZcNnfxQ5N2": { "role": "program", "label": "Byreal CLMM" }
+      }
+    },
+    "jupiter_lend": {
+      "name": "Jupiter Lend",
+      "category": "lending",
+      "addresses": {
+        "jupZ4m2GqUCJ5iueMfzQf8khFfH31d4XAQt3RzCT9Vd": { "role": "program", "label": "Jupiter Lend AMM" }
+      }
+    },
+    "flux": {
+      "name": "Flux",
+      "category": "dex",
+      "addresses": {
+        "FLUX6xBayGxLX9UcimVRxXFMHH6q43mAbRvDzSpCsvfK": { "role": "program", "label": "Flux" }
       }
     }
   }

@@ -143,6 +143,52 @@ describe("buildInteractionGraph", () => {
     expect(edgeFlow(g.edges[0])).toEqual({ from: B, to: A, forward: 1, reverse: 0, bidirectional: false });
   });
 
+  it("groups an NFT purchase's escrow, royalty and fee legs under the seller relationship", () => {
+    const g = buildInteractionGraph([
+      {
+        wallet: A,
+        effects: [effect(A, "buy", 1)],
+        summaries: [
+          summary({
+            kind: "NFT_BUY",
+            counterparties: [
+              cp("Seller", "SOL", "900"),
+              cp("Creator", "SOL", "50"),
+              cp("Fee", "SOL", "50"),
+              cp("Escrow", "NFT", "-1"),
+            ],
+            nft: {
+              received: ["NFT"],
+              sent: [],
+              payment: { assetId: "SOL", delta: "-1000" },
+              party: "Seller",
+              others: [
+                { address: "Creator", amount: "50", role: "royalty" },
+                { address: "Fee", amount: "50", role: "marketplace_fee" },
+              ],
+              marketplace: null,
+            },
+          }),
+        ],
+      },
+    ]);
+
+    expect(g.nodes.map((node) => node.id).sort()).toEqual([A, "Seller"].sort());
+    expect(g.edges).toHaveLength(1);
+    expect(g.edges[0].interactions[0]).toMatchObject({
+      kind: "NFT_BUY",
+      movements: [
+        { from: A, to: "Seller", assetId: "SOL", amount: "900" },
+        { from: "Seller", to: A, assetId: "NFT", amount: "1" },
+      ],
+      nftRelated: [
+        { from: A, to: "Creator", assetId: "SOL", amount: "50", role: "royalty" },
+        { from: A, to: "Fee", assetId: "SOL", amount: "50", role: "marketplace_fee" },
+        { from: "Escrow", to: A, assetId: "NFT", amount: "1", role: "escrow" },
+      ],
+    });
+  });
+
   it("keeps every mapped wallet and the busiest others under the node cap", () => {
     const sides = [
       {
@@ -175,4 +221,21 @@ describe("buildInteractionGraph", () => {
     expect(g.nodes.map((n) => n.id)).toEqual([A, B, D, OMITTED_NODE_ID]);
     expect(g.nodes.at(-1)).toMatchObject({ kind: "aggregate", txCount: 1 });
   });
+
+  it("records who approved each transaction, and counts it per connection", () => {
+    const DRAINER = "D-drainer";
+    const g = buildInteractionGraph([
+      {
+        wallet: A,
+        effects: [effect(A, "self", 1), effect(A, "drained", 2)],
+        summaries: [summary({ counterparties: [cp(B, "SOL", "1")] }), summary({ counterparties: [cp(B, "SOL", "5")], actor: DRAINER })],
+      },
+    ]);
+    const edge = g.edges.find((e) => e.id === pairId(A, B))!;
+    expect(edge.interactions.map((it) => it.initiator)).toEqual([A, DRAINER]);
+    const byA = edge.a === A ? edge.summary!.initiatedByA : edge.summary!.initiatedByB;
+    expect(byA).toBe(1);
+    expect(edge.summary!.initiatedByOthers).toBe(1);
+  });
 });
+

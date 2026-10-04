@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Tabs } from "@base-ui/react/tabs";
 import { ChevronRightIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import type { Names } from "@/lib/labels/labels";
 import { registry } from "@/lib/protocols/registry";
@@ -81,7 +82,7 @@ const tabClass =
   "flex-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none data-active:bg-secondary data-active:text-foreground";
 
 /** Left-panel section: choose which transactions appear on the map and in the table. */
-export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter, shown, onChange, hide }: {
+export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter, shown, onChange, hide, decoyCount = 0 }: {
   /** Every transaction the views could show, one per wallet side. */
   rows: FilterableTx[];
   assets: Assets;
@@ -94,6 +95,8 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
   onChange: (filter: TxFilter) => void;
   /** Hide what the filters show, or what they take out of view (once per transaction each); filters are then cleared. */
   hide?: { shown: { count: number; run: () => void }; filteredOut: { count: number; run: () => void } };
+  /** Likely dust decoys (address-poisoning look-alikes) in the case; offers a filter to leave them out. */
+  decoyCount?: number;
 }) {
   const kindCounts = new Map<EffectKind, number>();
   const assetCounts = new Map<string, number>();
@@ -300,6 +303,19 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
         </FilterGroup>
       )}
 
+      {decoyCount > 0 && (
+        <FilterGroup title="Look-alikes" active={filter.hideDecoys ? 1 : 0}>
+          <label className="flex cursor-pointer items-center gap-2 px-1 text-xs">
+            <Checkbox checked={filter.hideDecoys} onCheckedChange={(checked) => onChange({ ...filter, hideDecoys: checked === true })} />
+            <span className="flex-1">Hide likely dust decoys</span>
+            <span className="tabular-nums text-muted-foreground">{decoyCount}</span>
+          </label>
+          <p className="text-[11px] text-muted-foreground">
+            Leaves out transactions with addresses that imitate another in the case and only move dust.
+          </p>
+        </FilterGroup>
+      )}
+
       <FilterGroup title="Dates (UTC)" active={filter.dateRange ? 1 : 0}>
         <div className="flex items-center gap-1 text-xs">
           <Input
@@ -334,7 +350,7 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
 
       {hide && isFilterActive(filter) && (() => {
         // Unticking a type or asset takes noise out of view, so that's what to hide; the other filters zoom in on it.
-        const excluding = filter.hiddenKinds.size > 0 || filter.hiddenAssets.size > 0;
+        const excluding = filter.hiddenKinds.size > 0 || filter.hiddenAssets.size > 0 || filter.hideDecoys;
         const options = [
           { key: "out", label: `Hide the ${hide.filteredOut.count.toLocaleString()} filtered out`, ...hide.filteredOut },
           { key: "shown", label: `Hide the ${hide.shown.count.toLocaleString()} shown`, ...hide.shown },
