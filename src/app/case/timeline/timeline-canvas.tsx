@@ -297,6 +297,7 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
     };
     const openXOf = (lane: TimelineLane) => (mode === "time" ? scale(lane.start) : scale(firstAtOrAfter(lane.start) - 0.5));
     const closeX = mode === "time" ? undefined : scale(items.length - 0.5);
+    const lifecycle: { text: string; x: number; y: number; align: CanvasTextAlign }[] = [];
     lanes.forEach((lane, l) => {
       const y = laneY(l);
       const openX = openXOf(lane);
@@ -307,17 +308,13 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
       ctx.moveTo(Math.max(openX, -10), y);
       ctx.lineTo(Math.min(endX, width + 10), y);
       ctx.stroke();
+      // Above where a pill would sit, and painted after the events, so a pill at the lane's end can't hide it.
+      const labelY = y - (multi ? PILL_H / 2 + 4 : 22);
+      // A lane too short for both labels inside it puts them outside its ends instead of on top of each other.
       ctx.font = "600 11px ui-sans-serif, system-ui, sans-serif";
-      ctx.fillStyle = p.muted;
-      ctx.textBaseline = "alphabetic";
-      if (openX >= -40 && openX <= width) {
-        ctx.textAlign = "left";
-        ctx.fillText("OPEN", openX + 4, y - (multi ? 8 : 22));
-      }
-      if (endX >= 0 && endX <= width + 40) {
-        ctx.textAlign = "right";
-        ctx.fillText("CLOSE", endX - 4, y - (multi ? 8 : 22));
-      }
+      const outward = endX - openX < ctx.measureText("OPEN").width + ctx.measureText("CLOSE").width + 16;
+      if (openX >= -40 && openX <= width) lifecycle.push({ text: "OPEN", x: outward ? openX - 4 : openX + 4, y: labelY, align: outward ? "right" : "left" });
+      if (endX >= 0 && endX <= width + 40) lifecycle.push({ text: "CLOSE", x: outward ? endX + 4 : endX - 4, y: labelY, align: outward ? "left" : "right" });
       if (lane.fork && lanes[lane.fork.fromLane]) {
         const x0 = mode === "time" ? scale(lane.fork.time) : scale(firstAtOrAfter(lane.fork.time));
         const y0 = laneY(lane.fork.fromLane);
@@ -404,73 +401,6 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
     };
     for (const m of mergeConnectors(links, CONNECTOR_MERGE)) drawConnector(m, m.count, false);
     for (const c of selectedLinks) drawConnector(c, 1, true);
-
-    // Axis
-    ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "alphabetic";
-    if (multi) {
-      ctx.fillStyle = p.bg;
-      ctx.fillRect(0, axisY - 14, width, 32);
-    }
-    ctx.fillStyle = p.muted;
-    ctx.strokeStyle = p.border;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, axisY - 14);
-    ctx.lineTo(width, axisY - 14);
-    ctx.stroke();
-    if (mode === "time") {
-      const s = scale as ScaleTime<number, number>;
-      const ticks = s.ticks(Math.max(2, Math.floor(width / 120)));
-      for (const t of ticks) {
-        const x = s(t);
-        ctx.beginPath();
-        ctx.moveTo(x, axisY - 14);
-        ctx.lineTo(x, axisY - 10);
-        ctx.stroke();
-        ctx.fillText(axisLabel(t), x, axisY);
-      }
-    } else {
-      let lastX = Number.NEGATIVE_INFINITY;
-      let lastDay = "";
-      for (let i = 0; i < items.length; i++) {
-        const x = xs[i];
-        if (x < 0 || x > width || x - lastX < 110) continue;
-        lastX = x;
-        // Name the day once; after that, show the time until the day changes.
-        const date = new Date(items[i].time);
-        const day = dayFormat(date);
-        ctx.fillText(day === lastDay ? axisFormats.minute(date) : day, x, axisY);
-        lastDay = day;
-      }
-      ctx.textAlign = "left";
-      ctx.fillText("Event spacing: gaps between transactions aren't to scale", 8, axisY - 22);
-      ctx.textAlign = "center";
-    }
-    // Time context: tick labels drop the day (or year) as you zoom in, so name it at the left.
-    {
-      const leftTime =
-        mode === "time"
-          ? +(scale as ScaleTime<number, number>).invert(PAD)
-          : items[Math.max(0, Math.min(items.length - 1, Math.ceil((scale as ScaleLinear<number, number>).invert(PAD))))]?.time;
-      if (leftTime !== undefined) {
-        const visibleMs =
-          mode === "time"
-            ? +(scale as ScaleTime<number, number>).invert(width - PAD) - leftTime
-            : (items[Math.max(0, Math.min(items.length - 1, Math.floor((scale as ScaleLinear<number, number>).invert(width - PAD))))]?.time ?? leftTime) - leftTime;
-        const text = visibleMs < 3 * 86_400_000 ? contextDay(new Date(leftTime)) : contextYear(new Date(leftTime));
-        ctx.font = "600 11px ui-sans-serif, system-ui, sans-serif";
-        const w = ctx.measureText(text).width + 12;
-        ctx.fillStyle = p.bg;
-        ctx.fillRect(0, axisY - 11, w + 4, 14);
-        ctx.fillStyle = p.fg;
-        ctx.textAlign = "left";
-        ctx.fillText(text, 6, axisY);
-        ctx.textAlign = "center";
-        ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
-      }
-    }
 
     // Events per lane: natural clusters first, then dense runs split into calendar buckets that fit a pill.
     const DAY = 86_400_000;
@@ -582,20 +512,22 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
         const placement = placements[gi];
         if (placement) {
           const top = placement.tier === 0 ? y - CARD_GAP - CARD_H : y + CARD_GAP;
+          // The card slides to stay inside the canvas; its stem still starts at the event's own dot.
+          const left = Math.max(4, Math.min(placement.left, width - CARD_W - 4));
           ctx.strokeStyle = p.border;
           ctx.lineWidth = 1;
           ctx.beginPath();
           ctx.moveTo(g.x, y);
           ctx.lineTo(g.x, placement.tier === 0 ? top + CARD_H : top);
           ctx.stroke();
-          roundRect(ctx, placement.left, top, CARD_W, CARD_H, 8);
+          roundRect(ctx, left, top, CARD_W, CARD_H, 8);
           ctx.fillStyle = p.card;
           ctx.fill();
           ctx.lineWidth = isSelected ? 2 : 1;
           ctx.strokeStyle = isSelected ? p.fg : isEcho ? p.muted : p.border;
           ctx.stroke();
           ctx.fillStyle = color;
-          ctx.fillRect(placement.left, top + 8, 3, CARD_H - 16);
+          ctx.fillRect(left, top + 8, 3, CARD_H - 16);
           ctx.textAlign = "left";
           const fonts = [
             "11px ui-sans-serif, system-ui, sans-serif",
@@ -609,9 +541,9 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
             ctx.fillStyle = colors[li];
             const text = fitText(ctx, fonts[li], line, CARD_W - 18);
             ctx.font = fonts[li];
-            ctx.fillText(text, placement.left + 10, top + 16 + li * 14);
+            ctx.fillText(text, left + 10, top + 16 + li * 14);
           });
-          hits.push({ type: "event", x0: placement.left, y0: top, x1: placement.left + CARD_W, y1: top + CARD_H, first, last: first, lane: l });
+          hits.push({ type: "event", x0: left, y0: top, x1: left + CARD_W, y1: top + CARD_H, first, last: first, lane: l });
         }
 
         ctx.beginPath();
@@ -634,6 +566,100 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
         hits.push({ type: "event", x0: g.x - 8, y0: y - 8, x1: g.x + 8, y1: y + 8, first, last: first, lane: l });
       });
     });
+
+    // OPEN and CLOSE on top of the events, each on a background so it reads over lines and pill edges.
+    ctx.font = "600 11px ui-sans-serif, system-ui, sans-serif";
+    ctx.textBaseline = "alphabetic";
+    const cards = hits.filter((h) => h.type === "event" && h.x1 - h.x0 === CARD_W);
+    for (const mark of lifecycle) {
+      const w = ctx.measureText(mark.text).width;
+      // Kept inside the canvas, and slid clear of any card sitting where it would go
+      // (below the line is where the lane's name goes).
+      let left = Math.max(4, Math.min(mark.align === "left" ? mark.x : mark.x - w, width - w - 4));
+      const y = mark.y;
+      for (let tries = 0; tries < 4; tries++) {
+        const hit = cards.find((c) => left - 3 < c.x1 && left + w + 3 > c.x0 && y - 10 < c.y1 && y + 3 > c.y0);
+        if (!hit) break;
+        const right = hit.x1 + 6;
+        left = right + w + 4 <= width ? right : hit.x0 - w - 6;
+      }
+      ctx.fillStyle = p.bg;
+      ctx.globalAlpha = 0.85;
+      ctx.fillRect(left - 3, y - 10, w + 6, 13);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = p.muted;
+      ctx.textAlign = "left";
+      ctx.fillText(mark.text, left, y);
+    }
+
+    // Axis last: its band covers anything from lanes scrolled beneath it.
+    {
+      ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "alphabetic";
+      if (multi) {
+        ctx.fillStyle = p.bg;
+        ctx.fillRect(0, axisY - 14, width, 32);
+      }
+      ctx.fillStyle = p.muted;
+      ctx.strokeStyle = p.border;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, axisY - 14);
+      ctx.lineTo(width, axisY - 14);
+      ctx.stroke();
+      if (mode === "time") {
+        const s = scale as ScaleTime<number, number>;
+        const ticks = s.ticks(Math.max(2, Math.floor(width / 120)));
+        for (const t of ticks) {
+          const x = s(t);
+          ctx.beginPath();
+          ctx.moveTo(x, axisY - 14);
+          ctx.lineTo(x, axisY - 10);
+          ctx.stroke();
+          ctx.fillText(axisLabel(t), x, axisY);
+        }
+      } else {
+        let lastX = Number.NEGATIVE_INFINITY;
+        let lastDay = "";
+        for (let i = 0; i < items.length; i++) {
+          const x = xs[i];
+          if (x < 0 || x > width || x - lastX < 110) continue;
+          lastX = x;
+          // Name the day once; after that, show the time until the day changes.
+          const date = new Date(items[i].time);
+          const day = dayFormat(date);
+          ctx.fillText(day === lastDay ? axisFormats.minute(date) : day, x, axisY);
+          lastDay = day;
+        }
+        ctx.textAlign = "left";
+        ctx.fillText("Event spacing: gaps between transactions aren't to scale", 8, axisY - 22);
+        ctx.textAlign = "center";
+      }
+      // Time context: tick labels drop the day (or year) as you zoom in, so name it at the left.
+      {
+        const leftTime =
+          mode === "time"
+            ? +(scale as ScaleTime<number, number>).invert(PAD)
+            : items[Math.max(0, Math.min(items.length - 1, Math.ceil((scale as ScaleLinear<number, number>).invert(PAD))))]?.time;
+        if (leftTime !== undefined) {
+          const visibleMs =
+            mode === "time"
+              ? +(scale as ScaleTime<number, number>).invert(width - PAD) - leftTime
+              : (items[Math.max(0, Math.min(items.length - 1, Math.floor((scale as ScaleLinear<number, number>).invert(width - PAD))))]?.time ?? leftTime) - leftTime;
+          const text = visibleMs < 3 * 86_400_000 ? contextDay(new Date(leftTime)) : contextYear(new Date(leftTime));
+          ctx.font = "600 11px ui-sans-serif, system-ui, sans-serif";
+          const w = ctx.measureText(text).width + 12;
+          ctx.fillStyle = p.bg;
+          ctx.fillRect(0, axisY - 11, w + 4, 14);
+          ctx.fillStyle = p.fg;
+          ctx.textAlign = "left";
+          ctx.fillText(text, 6, axisY);
+          ctx.textAlign = "center";
+          ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
+        }
+      }
+    }
 
     hitsRef.current = hits;
   }, [baseScale, laneY]);
