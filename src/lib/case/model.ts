@@ -11,6 +11,9 @@ export type MappedWalletConfig = {
 
   /** Where this wallet's history starts, for `first_interaction` (resolved when mapped) and `custom`. See `walletRange`. */
   customStart?: string;
+
+  /** Never load from the RPC: only history already cached is shown. */
+  paused?: boolean;
 };
 
 /** A wallet or address, a transaction (on a wallet's lane), or a moment in time. */

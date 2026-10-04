@@ -43,5 +43,10 @@ Checked against Solscan's public labels on 2026-10-04:
 - Jupiter Perpetuals: `PERPHjGBqRHArX4DySjwM6UJHiR3sWAatqfdBS2qQJu`
 - Magic Eden cNFT: `M3mxk5W2tt27WGT7THox7PmgRDp4m6NEhL5xvxrBfS1`
 - Solana Name Service: `namesLPneVptA9Z5rqUDD9tMTWEJwofgaYwp8cawRkX`, `jCebN34bUfdeUYJT13J1yG16XWQpt5PDx6Mse9GUqhR`, `85iDfUvr3HJyLM2zcq5BXSiDvUWfw6cSE1FfNBo8Ap29`, `2KkyPzjaAYaz2ojQZ9P3xYakLd96B5UH6a2isLaZ4Cgs`
+- Solflare: Swap Fees: `2rbMgYvzAb3xDk6vXrzKkY3VwsmyDZsJTkvB3JJYsRzA` (checked 2026-10-04; Solscan tags #Solflare #Fee Vault)
 
 Exchange labels describe known service wallets, not every deposit address. Phantom and Ledger are wallet software/signers; ordinary Solana addresses do not reveal which app or hardware created them, so they are not registry entries.
+
+## Community labels
+
+`protocols/community-labels.json` is generated from the tribixbite snapshot by `node scripts/import-community-labels.ts`. It holds display names only (address → name) for the `program` and `address` sections, minus every address already in the verified registry; `hacker` attributions are left out. The app shows these names attributed as "community list, unverified" and never uses them to decide what protocol a transaction used. Verify an entry and move it into `solana.json` to make it count.

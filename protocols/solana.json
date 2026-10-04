@@ -1,6 +1,6 @@
 {
   "$schema": "./schema.json",
-  "version": 7,
+  "version": 8,
   "protocols": {
     "solana": {
       "name": "Solana",
@@ -503,6 +503,14 @@
       "category": "dex",
       "addresses": {
         "FLUX6xBayGxLX9UcimVRxXFMHH6q43mAbRvDzSpCsvfK": { "role": "program", "label": "Flux" }
+      }
+    },
+    "solflare": {
+      "name": "Solflare",
+      "category": "dex_aggregator",
+      "website": "https://solflare.com",
+      "addresses": {
+        "2rbMgYvzAb3xDk6vXrzKkY3VwsmyDZsJTkvB3JJYsRzA": { "role": "fee_account", "label": "Solflare: Swap Fees" }
       }
     }
   }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDownIcon, CopyIcon, ExternalLinkIcon, EyeIcon, EyeOffIcon, FilterIcon, GitBranchPlusIcon, StarIcon, UnlinkIcon, XIcon } from "lucide-react";
+import { ChevronDownIcon, CopyIcon, ExternalLinkIcon, EyeIcon, EyeOffIcon, FilterIcon, GitBranchPlusIcon, PauseIcon, PlayIcon, StarIcon, UnlinkIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import type { AddressState } from "@/lib/case/address-state";
 import { describeStorageError, getDb } from "@/lib/db/db";
 import { saveAddressLabel } from "@/lib/db/address-labels";
 import { type AddressLabel, MAX_LABEL_NAME, MAX_LABEL_NOTE, MAX_TAG } from "@/lib/labels/labels";
+import { COMMUNITY_SOURCE } from "@/lib/labels/community";
 import type { LookalikeVerdict } from "@/lib/labels/lookalikes";
 import type { RegistryEntry } from "@/lib/protocols/registry";
 import { LookalikeBadge, LookalikeComparison } from "./lookalike";
@@ -50,6 +51,7 @@ export function AddressPanel({
   bookmark,
   beforeAnnotations,
   lookalikes = [],
+  publicName,
   verdictOf,
   onHideDecoys,
   onSelectAddress,
@@ -63,8 +65,8 @@ export function AddressPanel({
   transactionCount?: number;
   /** Starts mapping an observed wallet. */
   onMap?: () => void;
-  /** For a mapped (non-primary) wallet: where its history starts, and removing it. */
-  mapped?: { rangeText: string; onUnmap: () => void };
+  /** For a mapped (non-primary) wallet: where its history starts, pausing its RPC loading, and removing it. */
+  mapped?: { rangeText: string; onUnmap: () => void; paused: boolean; onTogglePaused: () => void };
   /** For any mapped wallet when there are several lanes: hide or show its lane. */
   lane?: { hidden: boolean; onToggle: () => void };
   /** Narrow the views to transactions involving this address. */
@@ -73,6 +75,8 @@ export function AddressPanel({
   beforeAnnotations?: React.ReactNode;
   /** Other addresses in the case with the same short form. */
   lookalikes?: readonly string[];
+  /** A name from an unverified public source, shown attributed. */
+  publicName?: { source: "community" | "sns"; text: string };
   verdictOf?: (address: string) => LookalikeVerdict | undefined;
   onHideDecoys?: () => void;
   onSelectAddress?: (address: string) => void;
@@ -150,7 +154,17 @@ export function AddressPanel({
             {label?.name && " — your name is shown instead."}
           </p>
         ) : (
-          state === "INFRASTRUCTURE" && <p className="text-xs text-muted-foreground">Unknown program: not in the protocol registry.</p>
+          state === "INFRASTRUCTURE" && !publicName && <p className="text-xs text-muted-foreground">Unknown program: not in the protocol registry.</p>
+        )}
+        {publicName && (
+          <p className="text-xs text-muted-foreground">
+            {publicName.source === "community" ? (
+              <>Community label: {publicName.text}, from {COMMUNITY_SOURCE}. Not verified.</>
+            ) : (
+              <>.sol name: {publicName.text}, chosen by the wallet&apos;s owner. Not a verified identity.</>
+            )}
+            {label?.name && " Your name is shown instead."}
+          </p>
         )}
         <p className="text-xs text-muted-foreground">{STATE_TEXT[state]}</p>
         {transactionCount !== undefined && (
@@ -179,6 +193,20 @@ export function AddressPanel({
         {mapped && (
           <>
             <p className="text-xs text-muted-foreground">History loaded {mapped.rangeText}.</p>
+            {mapped.paused && (
+              <p className="text-xs text-muted-foreground">Paused: only its cached history is shown. Loads skip it and never ask the RPC.</p>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="self-start text-muted-foreground"
+              aria-pressed={mapped.paused}
+              title={mapped.paused ? "Load this wallet from the RPC again" : "Keep its cached history, but never load more from the RPC"}
+              onClick={mapped.onTogglePaused}
+            >
+              {mapped.paused ? <PlayIcon /> : <PauseIcon />}
+              {mapped.paused ? "Resume loading" : "Pause loading"}
+            </Button>
             <Button
               variant="ghost"
               size="sm"

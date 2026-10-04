@@ -117,6 +117,8 @@ export type IngestOptions = {
   onProgress?: (progress: IngestionProgress) => void;
   /** When set, cached coverage and transactions are reused and new results are saved. */
   cache?: IngestionCache;
+  /** Wallets that must not touch the RPC: only their cached history is returned. */
+  cacheOnly?: ReadonlySet<string>;
   now?: () => Date;
 };
 
@@ -317,6 +319,9 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
     let complete = true;
     let error: string | undefined;
     let phase: IngestionPhase = "signatures";
+    const paused = options.cacheOnly?.has(wallet) ?? false;
+    /** Cached signatures of a paused wallet whose transaction isn't cached: left unloaded rather than fetched. */
+    let skippedWhilePaused = 0;
     /** This wallet's signatures whose transaction has settled: loaded, cached, unavailable, or failed. */
     let settled = 0;
     let failedHere = 0;
@@ -403,7 +408,11 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
           if (err instanceof Cancelled) throw err;
         }
       }
-      queue.push(missing);
+      // A paused wallet never asks the RPC, even for transactions its cached signatures point to.
+      if (paused) {
+        skippedWhilePaused += missing.length;
+        settled += missing.length;
+      } else queue.push(missing);
       report();
     };
 
@@ -424,8 +433,19 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
       if (signal.aborted) throw new Cancelled();
 
       const known: string[] = [];
+      if (paused && !cache) {
+        gaps = [];
+        complete = false;
+        warnings.push("Paused: only cached history is shown; nothing was loaded from the RPC.");
+      }
       if (cache) {
-        gaps = missingRanges(await guard(cache.getCoverage(wallet)), range);
+        const uncovered = missingRanges(await guard(cache.getCoverage(wallet)), range);
+        // A paused wallet fetches nothing: whatever the cache lacks stays missing, and says so.
+        if (paused && uncovered.length > 0) {
+          complete = false;
+          warnings.push("Paused: only cached history is shown; nothing was loaded from the RPC.");
+        }
+        gaps = paused ? [] : uncovered;
         for (const e of await guard(cache.getWalletSignatures(wallet, range))) {
           signatures.set(e.signature, e.blockTime);
           known.push(e.signature);
@@ -568,6 +588,10 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
     flush();
     await Promise.all(saves);
 
+    if (skippedWhilePaused > 0) {
+      complete = false;
+      warnings.push(`Paused: ${skippedWhilePaused} transaction(s) aren't cached and weren't fetched.`);
+    }
     const pruned = [...signatures.keys()].filter((s) => unavailable.has(s)).length;
     if (pruned > 0) {
       complete = false;

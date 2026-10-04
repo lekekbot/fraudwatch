@@ -25,6 +25,10 @@ describe("displayName", () => {
     // A label with only tags doesn't hide the registry name.
     expect(displayName(JUPITER, { caseId: "c", address: JUPITER, name: "", tags: ["x"] }, entry).source).toBe("registry");
     expect(displayName(ADDRESS, undefined, undefined)).toEqual({ text: "4VWK…ZVCi", source: "address" });
+    // Unverified sources come after the registry: the community list, then the owner's own .sol name.
+    expect(displayName(ADDRESS, undefined, undefined, 4, { community: "Some Vault", sns: "kai.sol" })).toEqual({ text: "Some Vault", source: "community" });
+    expect(displayName(ADDRESS, undefined, undefined, 4, { sns: "kai.sol" })).toEqual({ text: "kai.sol", source: "sns" });
+    expect(displayName(JUPITER, undefined, entry, 4, { sns: "kai.sol" }).source).toBe("registry");
   });
 });
 

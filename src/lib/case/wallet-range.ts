@@ -94,3 +94,13 @@ export function newWalletProblem(
   if (isInfrastructure(address)) return "That's a program or protocol address, not a wallet.";
   return null;
 }
+
+/** Pauses or resumes RPC loading for a mapped wallet (never the primary); its cached history stays. */
+export function toggleWalletPaused(c: FraudWatchCase, address: string, now = new Date()): FraudWatchCase {
+  if (address === c.primaryWallet) return c;
+  return {
+    ...c,
+    mappedWallets: c.mappedWallets.map((w) => (w.address === address ? { ...w, paused: !w.paused } : w)),
+    updatedAt: now.toISOString(),
+  };
+}

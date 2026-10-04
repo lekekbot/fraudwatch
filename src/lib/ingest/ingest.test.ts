@@ -57,6 +57,19 @@ describe("ingestWallets against recorded mainnet fixtures", () => {
     }
   });
 
+  it("never asks the RPC about a paused wallet, and still loads the others", async () => {
+    const fixture = loadFixture("a-to-b-to-c");
+    const [paused, ...others] = fixture.manifest.wallets.map((w) => w.address);
+    const log: ReplayLog = [];
+    const result = await run(fixture, { fetchImpl: replayFetch(fixture, log), cacheOnly: new Set([paused]) });
+    expect(log.filter((c) => c.params[0] === paused)).toEqual([]);
+    const w = result.wallets.find((x) => x.wallet === paused)!;
+    expect(w.signatures).toEqual([]);
+    expect(w.coverage.complete).toBe(false);
+    expect(w.coverage.warnings.join(" ")).toMatch(/Paused/);
+    for (const other of others) expect(result.wallets.find((x) => x.wallet === other)!.signatures.length).toBeGreaterThan(0);
+  });
+
   it("counts a transaction already loaded for another wallet as reused, not fetched", async () => {
     const fixture = loadFixture("a-to-b-to-c");
     const result = await run(fixture);

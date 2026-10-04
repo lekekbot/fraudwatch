@@ -85,6 +85,8 @@ export function useIngestion(c: FraudWatchCase) {
           wallets: config.mappedWallets.map((w) => w.address),
           range: config.range,
           ranges: walletRanges(config),
+          // Paused wallets keep their cached history but never ask the RPC for more.
+          cacheOnly: new Set(config.mappedWallets.filter((w) => w.paused).map((w) => w.address)),
           signal: current.signal,
           cache: db ? createDbIngestionCache(db) : undefined,
           onProgress: (progress) => {

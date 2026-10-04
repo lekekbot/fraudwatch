@@ -1,3 +1,4 @@
+import { communityLabel } from "./community";
 import { distinguishingShort, type LookalikeVerdict } from "./lookalikes";
 import type { ProtocolRegistry, RegistryEntry } from "@/lib/protocols/registry";
 import { shortenAddress } from "@/lib/solana/address";
@@ -33,26 +34,36 @@ export function normalizeLabel(label: AddressLabel): AddressLabel {
 export const isEmptyLabel = (label: AddressLabel) => !label.name && !label.note && label.tags.length === 0;
 
 /**
- * Display text for an address. A user label wins visually over the protocol
- * registry, without changing the registry's metadata.
+ * Display text for an address, most trusted source first: the user's own
+ * label, the verified registry, the community list (unverified), then the
+ * wallet's own .sol name (claimed by its owner), else the shortened address.
+ * A user label wins visually without changing the registry's metadata.
  */
 export function displayName(
   address: string,
   label: AddressLabel | undefined,
   entry: RegistryEntry | undefined,
   chars = 4,
-): { text: string; source: "label" | "registry" | "address" } {
+  other: { community?: string; sns?: string } = {},
+): { text: string; source: NameSource } {
   if (label?.name) return { text: label.name, source: "label" };
   if (entry) return { text: entry.label, source: "registry" };
+  if (other.community) return { text: other.community, source: "community" };
+  if (other.sns) return { text: other.sns, source: "sns" };
   return { text: shortenAddress(address, chars), source: "address" };
 }
+
+/** Where a displayed name came from. */
+export type NameSource = "label" | "registry" | "community" | "sns" | "address";
 
 /** Name lookups for one case, combining its labels with the registry. */
 export type Names = {
   /** Always returns something to show: label, registry label, or shortened address. */
   of: (address: string, chars?: number) => string;
-  /** A real name (label or registry) if there is one. */
+  /** A real name (label, registry, community list or .sol name) if there is one. */
   known: (address: string) => string | undefined;
+  /** Where the displayed name comes from, for attribution. */
+  source: (address: string) => NameSource;
   label: (address: string) => AddressLabel | undefined;
   /** Other addresses in the case whose short form matches this one's: possible address poisoning. */
   lookalikes: (address: string) => readonly string[];
@@ -70,9 +81,11 @@ export function createNames(
   reg: ProtocolRegistry,
   lookalikes: ReadonlyMap<string, readonly string[]> = new Map(),
   verdicts: ReadonlyMap<string, LookalikeVerdict> = new Map(),
+  /** Primary .sol names looked up on-chain. */
+  sns: ReadonlyMap<string, string> = new Map(),
 ): Names {
   const resolve = (address: string, chars?: number) => {
-    const name = displayName(address, labels.get(address), reg.lookup(address), chars);
+    const name = displayName(address, labels.get(address), reg.lookup(address), chars, { community: communityLabel(address), sns: sns.get(address) });
     const twins = lookalikes.get(address);
     return name.source === "address" && twins ? { ...name, text: distinguishingShort(address, twins, chars) } : name;
   };
@@ -83,6 +96,7 @@ export function createNames(
       return name.source === "address" ? undefined : name.text;
     },
     label: (address) => labels.get(address),
+    source: (address) => resolve(address).source,
     lookalikes: (address) => lookalikes.get(address) ?? [],
     verdict: (address) => verdicts.get(address),
   };

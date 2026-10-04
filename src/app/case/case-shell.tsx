@@ -3,19 +3,20 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownIcon, ArrowUpIcon, CalendarIcon, EyeIcon, EyeOffIcon, FocusIcon, Link2Icon, PanelLeftIcon, HashIcon, PanelRightIcon, PlusIcon, SearchIcon, ShieldIcon, WalletIcon, XIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, CalendarIcon, EyeIcon, EyeOffIcon, FocusIcon, Link2Icon, PanelLeftIcon, HashIcon, PanelRightIcon, PauseIcon, PlayIcon, PlusIcon, SearchIcon, ShieldIcon, Trash2Icon, WalletIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { RpcStatusBadge } from "@/components/rpc-status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { useIngestion } from "@/hooks/use-ingestion";
+import { useSnsNames } from "@/hooks/use-sns-names";
 import { useLocalQuery } from "@/hooks/use-local-db";
 import { useWalletStates } from "@/hooks/use-wallet-states";
 import { addressState } from "@/lib/case/address-state";
 import { isBookmarked, removeBookmark, toggleBookmark } from "@/lib/case/bookmarks";
 import { laneOrder, moveLane, toggleLaneHidden, visibleLanes } from "@/lib/case/lanes";
-import { firstInteraction, mapWallet, newWalletProblem, unmapWallet, walletRange, walletRanges } from "@/lib/case/wallet-range";
+import { firstInteraction, mapWallet, newWalletProblem, toggleWalletPaused, unmapWallet, walletRange, walletRanges } from "@/lib/case/wallet-range";
 import { mappingSummary, sharedTransactions } from "@/lib/ingest/intersections";
 import { buildInteractionGraph, type GraphRanking } from "@/lib/graph/build";
 import type { FraudWatchCase } from "@/lib/case/model";
@@ -24,6 +25,7 @@ import { getAddressLabels } from "@/lib/db/address-labels";
 import { getCase, saveCase, touchCase } from "@/lib/db/cases";
 import { getDb } from "@/lib/db/db";
 import { getRpcSettings } from "@/lib/db/rpc-settings";
+import { communityLabel } from "@/lib/labels/community";
 import { createNames } from "@/lib/labels/labels";
 import { isDust, judgeLookalikes, lookalikeGroups, type LookalikeVerdict } from "@/lib/labels/lookalikes";
 import { enrichTransaction, protocolsUsed, registry } from "@/lib/protocols/registry";
@@ -57,6 +59,8 @@ import { assetLabel, assetLogo, formatAssetAmount } from "./asset-format";
 import { TransactionDetails } from "./timeline/transaction-details";
 import { type TableNav, WalletStateSummary, WalletStateTable } from "./wallet-state-view";
 
+/** Most counterparties whose .sol names are looked up per case, busiest first. */
+const SNS_LOOKUP_LIMIT = 300;
 /** The hide rule that holds likely look-alike decoys. */
 const DECOY_RULE_ID = "lookalike-decoys";
 const NO_SUMMARIES: EffectSummary[] = [];
@@ -243,9 +247,19 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
       return list && list.length > 0 ? list.every((m) => isDust(m.assetId, BigInt(m.delta), decimalsOf(m.assetId))) : null;
     });
   }, [lookalikes, summariesByWallet, walletStates]);
+  // Primary .sol names, looked up on-chain for the case's wallets and its busiest counterparties that have no better name.
+  const snsCandidates = useMemo(() => {
+    const userLabelled = new Set((labelRows.status === "ready" ? labelRows.data : []).filter((l) => l.name).map((l) => l.address));
+    const activity = new Map<string, number>();
+    for (const sums of summariesByWallet.values()) for (const sum of sums) for (const a of involvedAddresses(sum)) activity.set(a, (activity.get(a) ?? 0) + 1);
+    const unnamed = (a: string) => !userLabelled.has(a) && !registry.lookup(a) && !communityLabel(a);
+    const busiest = [...activity].filter(([a]) => unnamed(a)).sort((x, y) => y[1] - x[1]).slice(0, SNS_LOOKUP_LIMIT).map(([a]) => a);
+    return [...new Set([...c.mappedWallets.map((w) => w.address).filter(unnamed), ...busiest])];
+  }, [labelRows, summariesByWallet, c.mappedWallets]);
+  const snsNames = useSnsNames(snsCandidates, rpc?.url);
   const names = useMemo(
-    () => createNames(new Map((labelRows.status === "ready" ? labelRows.data : []).map((l) => [l.address, l])), registry, lookalikes, verdicts),
-    [labelRows, lookalikes, verdicts],
+    () => createNames(new Map((labelRows.status === "ready" ? labelRows.data : []).map((l) => [l.address, l])), registry, lookalikes, verdicts, snsNames),
+    [labelRows, lookalikes, verdicts, snsNames],
   );
   /** Likely dust decoys, for the "Hide dust decoys" filter. */
   const decoySet = useMemo(() => new Set([...verdicts].filter(([, v]) => v === "decoy").map(([a]) => a)), [verdicts]);
@@ -531,12 +545,26 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   }
 
   async function unmap(address: string) {
+    const index = c.mappedWallets.findIndex((w) => w.address === address);
+    const config = c.mappedWallets[index];
     try {
       await saveCase(getDb(), unmapWallet(c, address));
       if (selectedWallet === address) setSelectedWallet(c.primaryWallet);
       if (justMapped === address) setJustMapped(null);
       setSelectedAddress(null);
-      toast.success(`${names.of(address)} removed from the map. Its label and cached transactions are kept.`);
+      toast.success(`${names.of(address)} removed from the map. Its label and cached transactions are kept.`, {
+        // Undo puts it back where it was, with the same settings; its cached history is still there.
+        action: {
+          label: "Undo",
+          onClick: () => {
+            const latest = latestCase.current;
+            if (!config || latest.mappedWallets.some((w) => w.address === address)) return;
+            const mappedWallets = [...latest.mappedWallets];
+            mappedWallets.splice(Math.min(index, mappedWallets.length), 0, config);
+            void updateCase({ ...latest, mappedWallets, updatedAt: new Date().toISOString() });
+          },
+        },
+      });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not remove this wallet.");
     }
@@ -610,6 +638,15 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
         label={names.label(address)}
         entry={registry.lookup(address)}
         lookalikes={names.lookalikes(address)}
+        publicName={
+          registry.lookup(address)
+            ? undefined
+            : communityLabel(address)
+              ? { source: "community", text: communityLabel(address)! }
+              : snsNames.get(address)
+                ? { source: "sns", text: snsNames.get(address)! }
+                : undefined
+        }
         verdictOf={names.verdict}
         onHideDecoys={decoysHidden ? undefined : hideDecoys}
         onSelectAddress={setSelectedAddress}
@@ -630,7 +667,13 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
         }}
         mapped={
           c.mappedWallets.some((m) => m.address === address) && address !== c.primaryWallet
-            ? { rangeText: rangeText(address), onUnmap: () => void unmap(address) }
+            ? {
+                rangeText: rangeText(address),
+                // eslint-disable-next-line react-hooks/refs -- unmap reads the latest case only in its Undo click handler, never during render
+                onUnmap: () => void unmap(address),
+                paused: Boolean(c.mappedWallets.find((m) => m.address === address)?.paused),
+                onTogglePaused: () => void updateCase(toggleWalletPaused(c, address)),
+              }
             : undefined
         }
         bookmark={{ on: isBookmarked(c, "wallet", address), toggle: () => void updateCase(toggleBookmark(c, { kind: "wallet", target: address })) }}
@@ -1047,6 +1090,11 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                         </span>
                         {names.lookalikes(address).length > 0 && <LookalikeMark count={names.lookalikes(address).length} />}
                         {flagged && <span className="text-destructive" title="State mismatch or partial history">•</span>}
+                        {w.paused && (
+                          <span className="text-[10px] text-muted-foreground" title="Paused: only cached history is shown; it isn't loaded from the RPC">
+                            paused
+                          </span>
+                        )}
                         {address === c.primaryWallet ? (
                           <Badge variant="secondary">primary</Badge>
                         ) : (
@@ -1100,6 +1148,29 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                           >
                             <FocusIcon />
                           </Button>
+                          {address !== c.primaryWallet && (
+                            <>
+                              <Button
+                                variant={w.paused ? "secondary" : "ghost"}
+                                size="icon-xs"
+                                aria-label={w.paused ? "Resume loading from the RPC" : "Pause loading from the RPC"}
+                                aria-pressed={Boolean(w.paused)}
+                                title={w.paused ? "Paused: shows cached history only. Click to load from the RPC again." : "Pause: keep cached history, never load more from the RPC"}
+                                onClick={() => void updateCase(toggleWalletPaused(c, address))}
+                              >
+                                {w.paused ? <PlayIcon /> : <PauseIcon />}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon-xs"
+                                aria-label="Remove from map"
+                                title="Remove from map (label and cached transactions are kept)"
+                                onClick={() => void unmap(address)}
+                              >
+                                <Trash2Icon />
+                              </Button>
+                            </>
+                          )}
                         </span>
                       )}
                     </li>

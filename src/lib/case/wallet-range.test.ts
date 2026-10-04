@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import { createCase } from "./model";
-import { firstInteraction, mapWallet, MappingError, newWalletProblem, unmapWallet, walletRange, walletRanges } from "./wallet-range";
+import { firstInteraction, mapWallet, MappingError, newWalletProblem, toggleWalletPaused, unmapWallet, walletRange, walletRanges } from "./wallet-range";
 
 const A = "dLm61Lvpigiaig9ZHcdh6iE7mFp7WmfqzkFMrDdf5Vo";
 const B = "4VWKf8NrCT5gK3f1YwPRspArUU7KZNKBvYqF8rxVZVCi";
@@ -60,6 +60,16 @@ describe("unmapWallet", () => {
     expect(unmapWallet(mapped, B).mappedWallets.map((w) => w.address)).toEqual([A]);
     expect(() => unmapWallet(mapped, A)).toThrow(/primary/);
     expect(() => unmapWallet(base(), B)).toThrow(/isn't mapped/);
+  });
+});
+
+describe("toggleWalletPaused", () => {
+  it("pauses and resumes a mapped wallet, but never the primary", () => {
+    const mapped = mapWallet(base(), { address: B, rangeMode: "case" });
+    const paused = toggleWalletPaused(mapped, B);
+    expect(paused.mappedWallets.find((w) => w.address === B)?.paused).toBe(true);
+    expect(toggleWalletPaused(paused, B).mappedWallets.find((w) => w.address === B)?.paused).toBe(false);
+    expect(toggleWalletPaused(mapped, A)).toBe(mapped);
   });
 });
 
