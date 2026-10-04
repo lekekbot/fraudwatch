@@ -311,12 +311,14 @@ export function summarizeEffect(
   tx: CanonicalTransaction | undefined,
   nfts: NftCatalog = NO_NFTS,
 ): EffectSummary {
-  const changes = valueChanges(effect);
+  const burnAction = effect.success ? burnInstruction(effect.wallet, tx) : null;
+  // A burn's SOL pays for it (rent for the accounts the program creates, a bridge relayer's fee), so
+  // it isn't value sent to anyone; the tokens leave supply, not to an address. Balances still show it.
+  const changes = burnAction ? valueChanges(effect).filter((c) => c.assetId !== NATIVE_SOL) : valueChanges(effect);
   const outflows = changes.filter((c) => c.delta.startsWith("-"));
   const inflows = changes.filter((c) => !c.delta.startsWith("-"));
   const classified = classifyInstructions(tx);
   const counterparties = tx ? counterpartiesFor(effect.wallet, tx, changes) : [];
-  const burnAction = effect.success ? burnInstruction(effect.wallet, tx) : null;
   const nft = effect.success && !burnAction ? nftTrade(effect, tx, changes, counterparties, nfts) : null;
   const kind: EffectKind = !effect.success
     ? "FAILED"

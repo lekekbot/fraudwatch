@@ -153,4 +153,36 @@ describe("summarizeEffect token operations", () => {
 
     expect(summarizeEffect(effect, { ...burnTx, innerInstructions: [] })).toMatchObject({ kind: "SEND" });
   });
+
+  it("leaves a burn's SOL out of what it sent: it paid rent and a relayer, not a counterparty", () => {
+    const wallet = "Burner";
+    const account = "BurnerUsdc";
+    const bridgeTx: CanonicalTransaction = {
+      ...tx([]),
+      accounts: [{ address: wallet, signer: true, writable: true, source: "transaction" }],
+      nativeChanges: [
+        { account: wallet, pre: "10000000", post: "4376281", delta: "-5623719" },
+        { account: "MessageAccount", pre: "0", post: "3869760", delta: "3869760" },
+        { account: "Relayer", pre: "1", post: "1735775", delta: "1735774" },
+      ],
+      tokenChanges: [{ account, owner: wallet, mint: "USDC", programId: TOKEN_PROGRAM, decimals: 6, pre: "520000000", post: "0", delta: "-520000000" }],
+      innerInstructions: [{ ...ix(TOKEN_PROGRAM, "burn", "spl-token"), info: { account, mint: "USDC", authority: wallet, amount: "520000000" } }],
+    };
+    const effect = {
+      wallet,
+      signature: "sig",
+      slot: 1,
+      timestamp: null,
+      success: true,
+      assetChanges: [
+        { assetId: "SOL", delta: "-5623719" },
+        { assetId: "USDC", delta: "-520000000" },
+      ],
+      feeLamports: "18185",
+    };
+    const summary = summarizeEffect(effect, bridgeTx);
+    expect(summary.kind).toBe("BURN");
+    expect(summary.outflows).toEqual([{ assetId: "USDC", delta: "-520000000" }]);
+    expect(summary.counterparties).toEqual([]);
+  });
 });
