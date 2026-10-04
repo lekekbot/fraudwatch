@@ -11,7 +11,8 @@ import type { EffectKind, EffectSummary, RecipientRole } from "@/lib/state/summa
  * Program calls are a separate connection kind and never join two wallets.
  */
 
-export type GraphNodeKind = "wallet" | "counterparty" | "program" | "aggregate";
+/** `burn`: where burned tokens go; they leave supply instead of reaching an address. */
+export type GraphNodeKind = "wallet" | "counterparty" | "program" | "aggregate" | "burn";
 
 /** `wallet`: a mapped wallet. `txCount`: transactions on the node's connections. */
 export type GraphNode = { id: string; kind: GraphNodeKind; txCount: number };
@@ -160,6 +161,14 @@ export type GraphRanking = "significant" | "interactions" | "incoming" | "outgoi
 
 export const MAX_GRAPH_NODES = 25;
 export const OMITTED_NODE_ID = "__other_addresses__";
+export const BURNED_NODE_ID = "__burned__";
+
+/** `names`, also naming the burn node, for everything that labels graph nodes. */
+export const withGraphNames = (names: Names): Names => ({
+  ...names,
+  of: (address, chars) => (address === BURNED_NODE_ID ? "Burned" : names.of(address, chars)),
+  known: (address) => (address === BURNED_NODE_ID ? "Burned" : names.known(address)),
+});
 
 export const pairId = (x: string, y: string) => (x < y ? `${x}|${y}` : `${y}|${x}`);
 
@@ -242,6 +251,9 @@ export function buildInteractionGraph(
           groupNftMovement(e, s, s.nft.party, { ...movement, role: groupedRole });
         } else move(e, s, movement);
       }
+      if (s.kind === "BURN") {
+        for (const out of s.outflows) move(e, s, { from: wallet, to: BURNED_NODE_ID, assetId: out.assetId, amount: abs(BigInt(out.delta)).toString() });
+      }
       // One semantic NFT leg joins the trade's actual party. Escrow, royalty, fee and rent legs stay
       // available on that transaction instead of scattering one purchase across several relationships.
       if (s.nft?.party) {
@@ -293,7 +305,9 @@ export function buildInteractionGraph(
       }
     }
   }
-  const others = [...txs.keys()].filter((id) => !mapped.has(id));
+  // Burns always show: like the mapped wallets, the burn node isn't ranked against counterparties.
+  const burned = txs.has(BURNED_NODE_ID) ? [BURNED_NODE_ID] : [];
+  const others = [...txs.keys()].filter((id) => !mapped.has(id) && id !== BURNED_NODE_ID);
   const by = (score: (id: string) => number) => [...others].sort((x, y) => score(y) - score(x) || x.localeCompare(y));
   const byInteractions = by((id) => txs.get(id)!.size);
   const rankings: Record<GraphRanking, string[]> = {
@@ -304,7 +318,7 @@ export function buildInteractionGraph(
     recent: by((id) => lastSeen.get(id) ?? -Infinity),
     significant: [],
   };
-  const capacity = Math.max(0, maxNodes - mapped.size);
+  const capacity = Math.max(0, maxNodes - mapped.size - burned.length);
   if ((options.ranking ?? "significant") === "significant") {
     const groups = [rankings.interactions.slice(0, 10), rankings.incoming.slice(0, 5), rankings.outgoing.slice(0, 5), rankings.recent.slice(0, 5)];
     const picked = new Set<string>();
@@ -320,11 +334,11 @@ export function buildInteractionGraph(
     }
     rankings.significant = [...picked];
   }
-  const kept = new Set([...mapped, ...rankings[options.ranking ?? "significant"].slice(0, capacity)]);
+  const kept = new Set([...mapped, ...burned, ...rankings[options.ranking ?? "significant"].slice(0, capacity)]);
   const omittedNodes = new Set([...txs.keys(), ...mapped]).size - kept.size;
   const nodes: GraphNode[] = [...kept].map((id) => ({
     id,
-    kind: mapped.has(id) ? "wallet" : programs.has(id) ? "program" : "counterparty",
+    kind: mapped.has(id) ? "wallet" : id === BURNED_NODE_ID ? "burn" : programs.has(id) ? "program" : "counterparty",
     txCount: txs.get(id)?.size ?? 0,
   }));
   if (omittedNodes > 0) nodes.push({ id: OMITTED_NODE_ID, kind: "aggregate", txCount: omittedNodes });
@@ -335,7 +349,7 @@ export function buildInteractionGraph(
     edges: shown,
     omittedNodes,
     counts: {
-      addresses: nodes.filter((n) => n.kind !== "program" && n.kind !== "aggregate").length,
+      addresses: nodes.filter((n) => n.kind !== "program" && n.kind !== "aggregate" && n.kind !== "burn").length,
       connections: interactions.length,
       transactions: new Set(interactions.flatMap((e) => e.interactions.map((it) => it.signature))).size,
       programConnections: programEdges.length,

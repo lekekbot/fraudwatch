@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { WalletTransactionEffect } from "@/lib/state/reconstruct";
 import type { EffectSummary } from "@/lib/state/summarize";
-import { buildInteractionGraph, edgeFlow, OMITTED_NODE_ID, pairId } from "./build";
+import { BURNED_NODE_ID, buildInteractionGraph, edgeFlow, OMITTED_NODE_ID, pairId } from "./build";
 
 const A = "A-wallet";
 const B = "B-counterparty";
@@ -33,6 +33,27 @@ const summary = (partial: Partial<EffectSummary>): EffectSummary => ({
 const cp = (address: string, assetId: string, delta: string) => ({ address, assetId, delta });
 
 describe("buildInteractionGraph", () => {
+  it("draws a burn into the burn node, which always shows, rather than to any address", () => {
+    const g = buildInteractionGraph(
+      [
+        {
+          wallet: A,
+          effects: [effect(A, "burn", 1), effect(A, "send", 2)],
+          summaries: [summary({ kind: "BURN", outflows: [{ assetId: "USDC", delta: "-520000000" }] }), summary({ counterparties: [cp(B, "SOL", "5")] })],
+        },
+      ],
+      { maxNodes: 2 },
+    );
+    expect(g.nodes.map((n) => [n.id, n.kind])).toEqual([
+      [A, "wallet"],
+      [BURNED_NODE_ID, "burn"],
+      // B is ranked out instead.
+      [OMITTED_NODE_ID, "aggregate"],
+    ]);
+    expect(g.edges[0].interactions[0].movements).toEqual([{ from: A, to: BURNED_NODE_ID, assetId: "USDC", amount: "520000000" }]);
+    expect(g.counts.addresses).toBe(1);
+  });
+
   it("draws ONE line for several A → B transactions plus a B → A one, keeping every transaction and its direction", () => {
     const g = buildInteractionGraph([
       {

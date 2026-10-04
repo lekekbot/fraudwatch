@@ -3,7 +3,7 @@
 import { ArrowDownLeftIcon, ArrowUpRightIcon, ChartNoAxesGanttIcon, ExternalLinkIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { edgeFlow, startedBy, summarizeRelationship, type GraphEdge } from "@/lib/graph/build";
+import { BURNED_NODE_ID, edgeFlow, startedBy, summarizeRelationship, type GraphEdge } from "@/lib/graph/build";
 import type { Names } from "@/lib/labels/labels";
 import { type Assets, assetLabel, formatUtc } from "../asset-format";
 import { AssetFlows } from "../asset-flows";
@@ -43,16 +43,19 @@ export function EdgePanel({
   onViewAll: (counterparty: string) => void;
   onClose: () => void;
 }) {
-  const name = (address: string) => (
-    <button
-      type="button"
-      title={address}
-      onClick={() => onSelectAddress(address)}
-      className={`min-w-0 truncate text-left underline-offset-4 hover:underline ${names.known(address) ? "" : "font-mono"}`}
-    >
-      {names.of(address)}
-    </button>
-  );
+  const name = (address: string) =>
+    address === BURNED_NODE_ID ? (
+      <span className="min-w-0 truncate">Burned</span>
+    ) : (
+      <button
+        type="button"
+        title={address}
+        onClick={() => onSelectAddress(address)}
+        className={`min-w-0 truncate text-left underline-offset-4 hover:underline ${names.known(address) ? "" : "font-mono"}`}
+      >
+        {names.of(address)}
+      </button>
+    );
   const program = edge.kind === "program";
   const flow = edgeFlow(edge);
   const summary = edge.summary ?? summarizeRelationship(edge);
@@ -213,7 +216,7 @@ export function EdgePanel({
             </li>
           ))}
         </ol>
-        {edge.interactions.length > representatives.length && (
+        {edge.interactions.length > representatives.length && counterparty !== BURNED_NODE_ID && (
           <Button variant="outline" size="sm" className="w-full" onClick={() => onViewAll(counterparty)}>
             View all {edge.interactions.length.toLocaleString()} transactions
           </Button>

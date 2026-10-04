@@ -7,7 +7,7 @@ import { ArrowDownLeftIcon, ArrowUpRightIcon, ChevronDownIcon, ChevronUpIcon, Ma
 import { Button } from "@/components/ui/button";
 import type { AddressState } from "@/lib/case/address-state";
 import { graphWheelAction } from "@/lib/gestures";
-import { edgeFlow, OMITTED_NODE_ID, startedBy, summarizeRelationship, type GraphEdge, type GraphNode, type GraphRanking, type WalletGraph as Graph } from "@/lib/graph/build";
+import { BURNED_NODE_ID, edgeFlow, OMITTED_NODE_ID, startedBy, summarizeRelationship, type GraphEdge, type GraphNode, type GraphRanking, type WalletGraph as Graph } from "@/lib/graph/build";
 import { classifyLayout, layoutGraph, nodeRadius, type Point, type Spacing, SPACINGS } from "@/lib/graph/layout";
 import type { Names } from "@/lib/labels/labels";
 import { AssetIcon } from "../asset-icon";
@@ -15,7 +15,7 @@ import { AssetIcon } from "../asset-icon";
 /** Remembers the chosen graph spacing in this browser. */
 const SPACING_KEY = "fraudwatch:graph-spacing";
 
-type Palette = Record<"fg" | "muted" | "border" | "card" | "bg" | "program" | "send" | "receive" | "lookalike", string>;
+type Palette = Record<"fg" | "muted" | "border" | "card" | "bg" | "program" | "send" | "receive" | "lookalike" | "burn", string>;
 
 function readPalette(el: HTMLElement): Palette {
   const css = getComputedStyle(el);
@@ -30,6 +30,7 @@ function readPalette(el: HTMLElement): Palette {
     send: v("--destructive", "#e5484d"),
     receive: "oklch(0.72 0.16 155)",
     lookalike: "oklch(0.77 0.16 70)",
+    burn: "oklch(0.72 0.17 50)",
   };
 }
 
@@ -501,7 +502,7 @@ export function WalletGraph({
       ctx.fillStyle = primaryNode ? p.fg : p.card;
       ctx.fill();
       ctx.lineWidth = n.id === nodeFocus ? 2.5 : role === "core" || role === "bridge" ? 2 : 1.5;
-      ctx.strokeStyle = n.id === nodeFocus ? p.fg : n.kind === "program" ? p.program : role === "core" || role === "bridge" ? p.fg : p.muted;
+      ctx.strokeStyle = n.id === nodeFocus ? p.fg : n.kind === "program" ? p.program : n.kind === "burn" ? p.burn : role === "core" || role === "bridge" ? p.fg : p.muted;
       ctx.stroke();
       // Other mapped wallets get a centre dot, so they stay distinct from counterparties of any size.
       if (n.kind === "wallet" && !primaryNode) {
@@ -528,7 +529,7 @@ export function WalletGraph({
         ctx.fillStyle = p.muted;
         ctx.fillText("PRIMARY", pos.x, pos.y - r - 8);
       }
-      const showLabel = !far && (close || role === "core" || role === "bridge" || names.label(n.id) || topLabels.has(n.id));
+      const showLabel = !far && (close || role === "core" || role === "bridge" || n.kind === "burn" || names.label(n.id) || topLabels.has(n.id));
       if (!showLabel) continue;
       ctx.font = primaryNode ? "600 12px ui-sans-serif, system-ui, sans-serif" : known || n.kind === "wallet" ? "500 11px ui-sans-serif, system-ui, sans-serif" : "11px ui-monospace, monospace";
       const labelPosition = primaryNode ? { x: pos.x, y: pos.y + r + 7, align: "center" as const, baseline: "top" as const } : outwardText(pos, r);
@@ -553,7 +554,7 @@ export function WalletGraph({
     const canvas = canvasRef.current;
     if (!canvas || !zoomRef.current || source.size === 0) return;
     const { graph, primaryWallet, selectedNode, selectedEdge } = latest.current;
-    const important = new Set<string>([primaryWallet, ...graph.nodes.filter((node) => node.kind === "wallet").map((node) => node.id)]);
+    const important = new Set<string>([primaryWallet, ...graph.nodes.filter((node) => node.kind === "wallet" || node.kind === "burn").map((node) => node.id)]);
     if (selectedNode) important.add(selectedNode);
     const selected = selectedEdge ? graph.edges.find((edge) => edge.id === selectedEdge) : undefined;
     if (selected) important.add(selected.a).add(selected.b);
@@ -769,8 +770,8 @@ export function WalletGraph({
           } else if (node) {
             place({
               title: latest.current.names.of(node.id),
-              kicker: node.id === latest.current.primaryWallet ? "Primary wallet" : node.kind === "wallet" ? "Mapped wallet" : node.kind === "program" ? "Program" : "Address",
-              lines: [],
+              kicker: node.id === latest.current.primaryWallet ? "Primary wallet" : node.kind === "wallet" ? "Mapped wallet" : node.kind === "program" ? "Program" : node.kind === "burn" ? "Burned tokens" : "Address",
+              lines: node.kind === "burn" ? ["Burned tokens leave supply; they don't reach any address. Bridges burn tokens to move them to another chain."] : [],
               hint: node.id === latest.current.wallet ? "Drag to reposition" : "Click for transaction details · drag to reposition",
             });
           } else if (edge) {
@@ -835,7 +836,8 @@ export function WalletGraph({
           if (hit.node) {
             if (hit.node === OMITTED_NODE_ID) return onNodeLimitChange(null);
             const relationship = relationshipsByNode.get(hit.node);
-            onSelectNode(hit.node === wallet ? null : hit.node);
+            // The burn node isn't an address: it opens its burns, not an address panel.
+            onSelectNode(hit.node === wallet || hit.node === BURNED_NODE_ID ? null : hit.node);
             onSelectEdge(hit.node === wallet ? null : (relationship?.id ?? null));
           } else if (hit.edge) {
             onSelectNode(null);

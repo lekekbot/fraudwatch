@@ -18,7 +18,7 @@ import { isBookmarked, removeBookmark, toggleBookmark } from "@/lib/case/bookmar
 import { laneOrder, moveLane, toggleLaneHidden, visibleLanes } from "@/lib/case/lanes";
 import { firstInteraction, mapWallet, newWalletProblem, toggleWalletPaused, unmapWallet, walletRange, walletRanges } from "@/lib/case/wallet-range";
 import { mappingSummary, sharedTransactions } from "@/lib/ingest/intersections";
-import { buildInteractionGraph, type GraphRanking } from "@/lib/graph/build";
+import { buildInteractionGraph, type GraphRanking, withGraphNames } from "@/lib/graph/build";
 import type { FraudWatchCase } from "@/lib/case/model";
 import { datesFromRange, extendedToToday, formatRange } from "@/lib/case/range";
 import { getAddressLabels } from "@/lib/db/address-labels";
@@ -261,6 +261,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     () => createNames(new Map((labelRows.status === "ready" ? labelRows.data : []).map((l) => [l.address, l])), registry, lookalikes, verdicts, snsNames),
     [labelRows, lookalikes, verdicts, snsNames],
   );
+  const graphNames = useMemo(() => withGraphNames(names), [names]);
   /** Likely dust decoys, for the "Hide dust decoys" filter. */
   const decoySet = useMemo(() => new Set([...verdicts].filter(([, v]) => v === "decoy").map(([a]) => a)), [verdicts]);
   const decoys = [...verdicts].filter(([, v]) => v === "decoy").map(([a]) => a);
@@ -815,7 +816,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
             graph={graph}
             wallet={graphWallet}
             primaryWallet={c.primaryWallet}
-            names={names}
+            names={graphNames}
             assetInfo={(assetId) => ({ id: assetId, label: assetLabel(assetId, walletStates.assets), logo: assetLogo(assetId, walletStates.assets) })}
             stateOf={(address) => addressState(address, c, registry, programs)}
             selectedNode={selectedAddress}
@@ -839,7 +840,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                     key={edge.id}
                     edge={edge}
                     focusWallet={graphWallet}
-                    names={names}
+                    names={graphNames}
                     assets={walletStates.assets}
                     formatAmount={formatAmount}
                     onSelectAddress={setSelectedAddress}
