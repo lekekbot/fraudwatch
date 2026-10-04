@@ -11,7 +11,9 @@ import type { AddressState } from "@/lib/case/address-state";
 import { describeStorageError, getDb } from "@/lib/db/db";
 import { saveAddressLabel } from "@/lib/db/address-labels";
 import { type AddressLabel, MAX_LABEL_NAME, MAX_LABEL_NOTE, MAX_TAG } from "@/lib/labels/labels";
+import type { LookalikeVerdict } from "@/lib/labels/lookalikes";
 import type { RegistryEntry } from "@/lib/protocols/registry";
+import { LookalikeBadge, LookalikeComparison } from "./lookalike";
 import { PanelSection } from "./panel";
 
 const STATE_TEXT: Record<AddressState, string> = {
@@ -47,6 +49,10 @@ export function AddressPanel({
   onFilterTo,
   bookmark,
   beforeAnnotations,
+  lookalikes = [],
+  verdictOf,
+  onHideDecoys,
+  onSelectAddress,
 }: {
   caseId: string;
   address: string;
@@ -65,6 +71,11 @@ export function AddressPanel({
   onFilterTo?: { active: boolean; toggle: () => void };
   bookmark?: { on: boolean; toggle: () => void };
   beforeAnnotations?: React.ReactNode;
+  /** Other addresses in the case with the same short form. */
+  lookalikes?: readonly string[];
+  verdictOf?: (address: string) => LookalikeVerdict | undefined;
+  onHideDecoys?: () => void;
+  onSelectAddress?: (address: string) => void;
 }) {
   const [name, setName] = useState(label?.name ?? "");
   const [note, setNote] = useState(label?.note ?? "");
@@ -127,8 +138,12 @@ export function AddressPanel({
               {entry.protocolName}
             </Badge>
           )}
+          {lookalikes.length > 0 && <LookalikeBadge verdict={verdictOf?.(address)} />}
         </div>
         <p className="font-mono text-xs break-all text-muted-foreground">{address}</p>
+        {lookalikes.length > 0 && (
+          <LookalikeComparison address={address} twins={lookalikes} onSelect={onSelectAddress} verdictOf={verdictOf} onHideDecoys={onHideDecoys} />
+        )}
         {entry ? (
           <p className="text-xs text-muted-foreground">
             Registry: {entry.label} ({entry.role}, {entry.category.replace("_", " ")})

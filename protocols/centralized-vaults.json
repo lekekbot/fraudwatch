@@ -1,0 +1,136 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "protocols": {
+    "coinbase": {
+      "name": "Coinbase",
+      "category": "exchange",
+      "website": "https://www.coinbase.com",
+      "addresses": {
+        "H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS": { "role": "wallet", "label": "Coinbase 1" },
+        "2AQdpHJ2JpcEgPiATUXjQxA8QmafFegfQwSLWSprPicm": { "role": "wallet", "label": "Coinbase 2" },
+        "GJRs4FwHtemZ5ZE9x3FNvJ8TMwitKTh21yxdRPqn7npE": { "role": "wallet", "label": "Coinbase Hot Wallet 2" },
+        "9obNtb5GyUegcs3a1CbBkLuc5hEWynWfJC6gjz5uWQkE": { "role": "wallet", "label": "Coinbase 4" },
+        "D89hHJT5Aqyx1trP6EnGY9jJUB3whgnq3aUvvCqedvzf": { "role": "wallet", "label": "Coinbase Hot Wallet 3" },
+        "59L2oxymiQQ9Hvhh92nt8Y7nDYjsauFkdb3SybdnsG6h": { "role": "wallet", "label": "Coinbase 5" },
+        "FpwQQhQQoEaVu3WU2qZMfF1hx48YyfwsLoRgXG83E99Q": { "role": "wallet", "label": "Coinbase Hot Wallet 1" }
+      }
+    },
+    "crypto_com": {
+      "name": "Crypto.com",
+      "category": "exchange",
+      "website": "https://crypto.com",
+      "addresses": {
+        "6FEVkH17P9y8Q9aCkDdPcMDjvj7SVxrTETaYEm8f51Jy": { "role": "wallet", "label": "Crypto.com Hot Wallet 1" },
+        "AobVSwdW9BbpMdJvTqeCN4hPAmh4rHm7vwLnQ5ATSyrS": { "role": "wallet", "label": "Crypto.com Hot Wallet 2" }
+      }
+    },
+    "bitget": {
+      "name": "Bitget",
+      "category": "exchange",
+      "website": "https://www.bitget.com",
+      "addresses": {
+        "A77HErqtfN1hLLpvZ9pCtu66FEtM8BveoaKbbMoZ4RiR": { "role": "wallet", "label": "Bitget Exchange" }
+      }
+    },
+    "mexc": {
+      "name": "MEXC",
+      "category": "exchange",
+      "website": "https://www.mexc.com",
+      "addresses": {
+        "ASTyfSima4LLAdDgoFGkgqoKowG1LZFDr9fAQrg7iaJZ": { "role": "wallet", "label": "MEXC" },
+        "5PAhQiYdLBd6SVdjzBQDxUAEFyDdF5ExNPQfcscnPRj5": { "role": "wallet", "label": "MEXC #2" }
+      }
+    },
+    "okx_exchange": {
+      "name": "OKX",
+      "category": "exchange",
+      "website": "https://www.okx.com",
+      "addresses": {
+        "is6MTRHEgyFLNTfYcuV4QBWLjrZBfmhVNYR6ccgr8KV": { "role": "wallet", "label": "OKX Hot Wallet 1" },
+        "C68a6RCGLiPskbPYtAcsCjhG8tfTWYcoB4JjCrXFdqyo": { "role": "wallet", "label": "OKX Hot Wallet (C68a6)" },
+        "9un5wqE3q4oCjyrDkwsdD48KteCJitQX5978Vh7KKxHo": { "role": "wallet", "label": "OKX Hot Wallet (9un5w)" },
+        "5VCwKtCXgCJ6kit5FybXjvriW3xELsFDhYrPSqtJNmcD": { "role": "wallet", "label": "OKX Hot Wallet (5VCwK)" }
+      }
+    },
+    "robinhood": {
+      "name": "Robinhood",
+      "category": "exchange",
+      "website": "https://robinhood.com",
+      "addresses": {
+        "AeBwztwXScyNNuQCEdhS54wttRQrw3Nj1UtqddzB4C7b": { "role": "wallet", "label": "Robinhood Cold Wallet (AeBwz)" }
+      }
+    },
+    "kraken": {
+      "name": "Kraken",
+      "category": "exchange",
+      "website": "https://www.kraken.com",
+      "addresses": {
+        "FWznbcNXWQuHTawe9RxvQ2LdCENssh12dsznf4RiouN5": { "role": "wallet", "label": "Kraken Hot Wallet (FWznb)" },
+        "6LY1JzAFVZsP2a2xKrtU6znQMQ5h4i7tocWdgrkZzkzF": { "role": "wallet", "label": "Kraken Hot Wallet (6LY1J)" }
+      }
+    },
+    "bybit": {
+      "name": "Bybit",
+      "category": "exchange",
+      "website": "https://www.bybit.com",
+      "addresses": {
+        "AC5RDfQFmDS1deWZos921JfqscXdByf8BKHs5ACWjtW2": { "role": "wallet", "label": "Bybit Hot Wallet (AC5RD)" },
+        "2qo8jvuc49pFmTjmUHLiARSV6ppPTaE7gw27ZJ6DnNZy": { "role": "wallet", "label": "Bybit Wallet 12" },
+        "Gem2VAypSg7Ai7vjDKPTtqFahpoQWkfgVkyzx3rPoTka": { "role": "wallet", "label": "Bybit Wallet 14" }
+      }
+    },
+    "bitfinex": {
+      "name": "Bitfinex",
+      "category": "exchange",
+      "website": "https://www.bitfinex.com",
+      "addresses": {
+        "FxteHmLwG9nk1eL4pjNve3Eub2goGkkz6g6TbvdmW46a": { "role": "wallet", "label": "Bitfinex Hot Wallet (FxteH)" }
+      }
+    },
+    "kucoin": {
+      "name": "KuCoin",
+      "category": "exchange",
+      "website": "https://www.kucoin.com",
+      "addresses": {
+        "BmFdpraQhkiDQE6SnfG5omcA1VwzqfXrwtNYBwWTymy6": { "role": "wallet", "label": "KuCoin Hot Wallet (BmFdp)" }
+      }
+    },
+    "gate": {
+      "name": "Gate",
+      "category": "exchange",
+      "website": "https://www.gate.com",
+      "addresses": {
+        "u6PJ8DtQuPFnfmwHbGFULQ4u4EgjDiyYKjVEsynXq2w": { "role": "wallet", "label": "Gate" },
+        "HiRpdAZifEsZGdzQ5Xo5wcnaH3D2Jj9SoNsUzcYNK78J": { "role": "wallet", "label": "Gate 2" }
+      }
+    },
+    "binance": {
+      "name": "Binance",
+      "category": "exchange",
+      "website": "https://www.binance.com",
+      "addresses": {
+        "B3111yJCeHBcA1bizdJjUFPALfhAfSRnAbJzGUtnt56A": { "role": "program", "label": "Binance Wallet Program" },
+        "2ojv9BAiHUrvsm9gxDe7fJSzbNZSJcxZvf8dqmWGHG8S": { "role": "wallet", "label": "Binance 1" },
+        "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9": { "role": "wallet", "label": "Binance 2" },
+        "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM": { "role": "wallet", "label": "Binance 3" }
+      }
+    },
+    "backpack_exchange": {
+      "name": "Backpack Exchange",
+      "category": "exchange",
+      "website": "https://backpack.exchange",
+      "addresses": {
+        "43DbAvKxhXh1oSxkJSqGosNw3HpBnmsWiak6tB5wpecN": { "role": "wallet", "label": "Backpack Exchange" }
+      }
+    },
+    "htx": {
+      "name": "HTX",
+      "category": "exchange",
+      "website": "https://www.htx.com",
+      "addresses": {
+        "88xTWZMeKfiTgbfEmPLdsUCQcZinwUfk25EBQZ21XMAZ": { "role": "wallet", "label": "HTX (Huobi)" }
+      }
+    }
+  }
+}

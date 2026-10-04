@@ -8,6 +8,7 @@ import type { MappedWalletConfig } from "@/lib/case/model";
 import { type CaseRange, datesFromRange } from "@/lib/case/range";
 import { cn } from "cn";
 import { formatUtc } from "./asset-format";
+import { LookalikeComparison } from "./lookalike";
 
 export type MapWalletChoice = { rangeMode: MappedWalletConfig["rangeMode"]; start?: string };
 
@@ -19,6 +20,8 @@ export type MapWalletChoice = { rangeMode: MappedWalletConfig["rangeMode"]; star
  */
 export function MapWalletDialog({
   name,
+  address: givenAddress,
+  lookalikesOf,
   first: givenFirst,
   enterAddress,
   caseRange,
@@ -29,6 +32,10 @@ export function MapWalletDialog({
   onCancel,
 }: {
   name: string;
+  /** The address being mapped, when it's already known (not typed in). */
+  address?: string;
+  /** Addresses in the case that read the same as this one when shortened: warned about before mapping. */
+  lookalikesOf: (address: string) => readonly string[];
   /** Its first loaded transaction with a mapped wallet, if any. */
   first: { timestamp: string } | null;
   /** Ask for the address: why a pasted one can't be added, and its first interaction if loaded. */
@@ -44,6 +51,8 @@ export function MapWalletDialog({
   const [address, setAddress] = useState("");
   const addressProblem = enterAddress ? enterAddress.problem(address) : null;
   const first = enterAddress ? (addressProblem ? null : enterAddress.firstFor(address.trim())) : givenFirst;
+  const target = enterAddress ? (addressProblem ? null : address.trim()) : (givenAddress ?? null);
+  const twins = target ? lookalikesOf(target) : [];
   const [chosen, setMode] = useState<MappedWalletConfig["rangeMode"] | null>(null);
   // Until the user picks, default to first interaction when there is one.
   const mode = chosen === "first_interaction" && !first ? "case" : (chosen ?? (first ? "first_interaction" : "case"));
@@ -127,6 +136,7 @@ export function MapWalletDialog({
         </fieldset>
         {!hasRpc && <p className="text-sm text-destructive">Add an RPC in settings to load its history.</p>}
         {error && <p className="text-sm text-destructive">{error}</p>}
+        {target && twins.length > 0 && <LookalikeComparison address={target} twins={twins} />}
         <DialogFooter>
           <Button variant="ghost" onClick={onCancel}>
             Cancel

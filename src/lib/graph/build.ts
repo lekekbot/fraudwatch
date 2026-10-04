@@ -1,14 +1,14 @@
+import type { Names } from "@/lib/labels/labels";
 import { registry } from "@/lib/protocols/registry";
 import type { WalletTransactionEffect } from "@/lib/state/reconstruct";
-import type { EffectKind, EffectSummary } from "@/lib/state/summarize";
+import type { EffectKind, EffectSummary, RecipientRole } from "@/lib/state/summarize";
 
 /**
- * A wallet interaction map: who exchanged value with whom. One node per
- * address, and exactly one undirected connection per pair that directly
- * interacted, however many transactions, directions, tokens or days that
- * covers. Every underlying transaction stays on the connection, with its real
- * direction and amounts, for the detail list. Program calls are a separate kind
- * of connection (wallet ↔ program) and never join two wallets.
+ * A wallet interaction map: who exchanged value with whom. NFT royalty, fee,
+ * rent and escrow legs stay grouped under the trade's buyer/seller relationship;
+ * other value movements get one node per address and one undirected connection
+ * per pair. Every underlying transaction keeps its real direction and amounts.
+ * Program calls are a separate connection kind and never join two wallets.
  */
 
 export type GraphNodeKind = "wallet" | "counterparty" | "program" | "aggregate";
@@ -18,6 +18,9 @@ export type GraphNode = { id: string; kind: GraphNodeKind; txCount: number };
 
 /** Value that moved between the pair in one transaction. */
 export type Movement = { from: string; to: string; assetId: string; amount: string };
+
+/** Exact on-chain legs kept inside their NFT trade instead of drawn as separate relationships. */
+export type NftRelatedMovement = Movement & { role: RecipientRole | "escrow" };
 
 /** One transaction on a connection. */
 export type Interaction = {
@@ -29,6 +32,10 @@ export type Interaction = {
   kind: EffectKind;
   /** Empty for a program call. */
   movements: Movement[];
+  /** Who approved the transaction: its fee payer, the first signer, which made the first move. */
+  initiator: string;
+  /** Royalty, fee, rent and escrow legs grouped under the NFT buyer/seller relationship. */
+  nftRelated?: NftRelatedMovement[];
 };
 
 export type RelationshipSummary = {
@@ -42,6 +49,10 @@ export type RelationshipSummary = {
   lastInteraction: number | null;
   activeDays: number;
   activityPattern: "One-off" | "Single burst" | "Recurring" | "Long-running";
+  /** Transactions approved (signed) by each end, and by someone else entirely (a delegate, drainer or bot). */
+  initiatedByA: number;
+  initiatedByB: number;
+  initiatedByOthers: number;
 };
 
 export type GraphEdge = {
@@ -56,6 +67,17 @@ export type GraphEdge = {
   summary?: RelationshipSummary;
 };
 
+/** Who made the first move on a connection: how many transactions each end approved (signed), and anyone else. */
+export function startedBy(edge: GraphEdge, names: Pick<Names, "of">): string {
+  const s = edge.summary ?? summarizeRelationship(edge);
+  const parts = [
+    ...(s.initiatedByA ? [`${names.of(edge.a)} ${s.initiatedByA.toLocaleString()}`] : []),
+    ...(s.initiatedByB ? [`${names.of(edge.b)} ${s.initiatedByB.toLocaleString()}`] : []),
+    ...(s.initiatedByOthers ? [`someone else ${s.initiatedByOthers.toLocaleString()}`] : []),
+  ];
+  return `Started by ${parts.join(" · ")}`;
+}
+
 export function summarizeRelationship(edge: Pick<GraphEdge, "a" | "b" | "interactions">): RelationshipSummary {
   const assets = new Map<string, { signatures: Set<string>; aToB: bigint; bToA: bigint }>();
   const kinds = new Map<EffectKind, number>();
@@ -63,8 +85,14 @@ export function summarizeRelationship(edge: Pick<GraphEdge, "a" | "b" | "interac
   const times: number[] = [];
   let aToB = 0;
   let bToA = 0;
+  let initiatedByA = 0;
+  let initiatedByB = 0;
+  let initiatedByOthers = 0;
   for (const interaction of edge.interactions) {
     kinds.set(interaction.kind, (kinds.get(interaction.kind) ?? 0) + 1);
+    if (interaction.initiator === edge.a) initiatedByA++;
+    else if (interaction.initiator === edge.b) initiatedByB++;
+    else initiatedByOthers++;
     if (interaction.time !== null) {
       times.push(interaction.time);
       days.add(new Date(interaction.time).toISOString().slice(0, 10));
@@ -96,6 +124,9 @@ export function summarizeRelationship(edge: Pick<GraphEdge, "a" | "b" | "interac
     lastInteraction,
     activeDays: days.size,
     activityPattern: totalInteractions <= 1 ? "One-off" : days.size <= 1 ? "Single burst" : spanDays >= 30 && days.size >= 3 ? "Recurring" : "Long-running",
+    initiatedByA,
+    initiatedByB,
+    initiatedByOthers,
   };
 }
 
@@ -141,7 +172,12 @@ const abs = (v: bigint) => (v < BigInt(0) ? -v : v);
  */
 export function buildInteractionGraph(
   sides: WalletSide[],
-  options: { hiddenAssets?: ReadonlySet<string>; showPrograms?: boolean; maxNodes?: number; ranking?: GraphRanking } = {},
+  options: {
+    hiddenAssets?: ReadonlySet<string>;
+    showPrograms?: boolean;
+    maxNodes?: number;
+    ranking?: GraphRanking;
+  } = {},
 ): WalletGraph {
   const hidden = options.hiddenAssets ?? new Set<string>();
   const maxNodes = options.maxNodes ?? MAX_GRAPH_NODES;
@@ -149,6 +185,7 @@ export function buildInteractionGraph(
   const edges = new Map<string, GraphEdge & { bySignature: Map<string, Interaction> }>();
   // The same movement seen from both mapped wallets' sides is recorded once.
   const seen = new Set<string>();
+  const seenNftRelated = new Set<string>();
 
   const edgeFor = (x: string, y: string, kind: GraphEdge["kind"]) => {
     const id = kind === "program" ? `program:${pairId(x, y)}` : pairId(x, y);
@@ -163,7 +200,8 @@ export function buildInteractionGraph(
   const interactionOn = (edge: GraphEdge & { bySignature: Map<string, Interaction> }, e: WalletTransactionEffect, s: EffectSummary) => {
     let it = edge.bySignature.get(e.signature);
     if (!it) {
-      it = { signature: e.signature, time: e.timestamp ? Date.parse(e.timestamp) : null, wallet: e.wallet, kind: s.kind, movements: [] };
+      // The summary names the fee payer only when it isn't the wallet; otherwise the wallet approved it itself.
+      it = { signature: e.signature, time: e.timestamp ? Date.parse(e.timestamp) : null, wallet: e.wallet, kind: s.kind, movements: [], initiator: s.actor ?? e.wallet };
       edge.bySignature.set(e.signature, it);
       edge.interactions.push(it);
     }
@@ -176,23 +214,39 @@ export function buildInteractionGraph(
     seen.add(key);
     interactionOn(edgeFor(m.from, m.to, "interaction"), e, s).movements.push(m);
   };
+  const groupNftMovement = (e: WalletTransactionEffect, s: EffectSummary, party: string, m: NftRelatedMovement) => {
+    if (m.from === m.to || hidden.has(m.assetId)) return;
+    const key = `${e.signature}|${m.from}|${m.to}|${m.assetId}|${m.role}`;
+    if (seenNftRelated.has(key)) return;
+    seenNftRelated.add(key);
+    const interaction = interactionOn(edgeFor(e.wallet, party, "interaction"), e, s);
+    (interaction.nftRelated ??= []).push(m);
+  };
 
   for (const { wallet, effects, summaries } of sides) {
     effects.forEach((e, i) => {
       const s = summaries[i];
+      const nftAssets = new Set([...(s.nft?.received ?? []), ...(s.nft?.sent ?? [])]);
+      const nftRecipients = new Map(s.nft?.others.map((recipient) => [recipient.address, recipient.role]) ?? []);
       // Direct value movements: the counterparty's balance moved against the wallet's.
       for (const cp of s.counterparties) {
         if (cp.address === wallet) continue;
         const amount = abs(BigInt(cp.delta)).toString();
         // The counterparty lost what the wallet gained, and the reverse.
-        if (cp.delta.startsWith("-")) move(e, s, { from: cp.address, to: wallet, assetId: cp.assetId, amount });
-        else move(e, s, { from: wallet, to: cp.address, assetId: cp.assetId, amount });
+        const movement = cp.delta.startsWith("-")
+          ? { from: cp.address, to: wallet, assetId: cp.assetId, amount }
+          : { from: wallet, to: cp.address, assetId: cp.assetId, amount };
+        const recipientRole = cp.assetId === s.nft?.payment?.assetId ? nftRecipients.get(cp.address) : undefined;
+        const groupedRole = recipientRole ?? (nftAssets.has(cp.assetId) ? "escrow" : null);
+        if (s.nft?.party && cp.address !== s.nft.party && !mapped.has(cp.address) && groupedRole) {
+          groupNftMovement(e, s, s.nft.party, { ...movement, role: groupedRole });
+        } else move(e, s, movement);
       }
-      // NFTs whose other side isn't a balance counterparty (compressed NFTs, escrowed listings).
+      // One semantic NFT leg joins the trade's actual party. Escrow, royalty, fee and rent legs stay
+      // available on that transaction instead of scattering one purchase across several relationships.
       if (s.nft?.party) {
-        const covered = new Set(s.counterparties.map((c) => c.assetId));
-        for (const mint of s.nft.received) if (!covered.has(mint)) move(e, s, { from: s.nft.party, to: wallet, assetId: mint, amount: "1" });
-        for (const mint of s.nft.sent) if (!covered.has(mint)) move(e, s, { from: wallet, to: s.nft.party, assetId: mint, amount: "1" });
+        for (const mint of s.nft.received) move(e, s, { from: s.nft.party, to: wallet, assetId: mint, amount: "1" });
+        for (const mint of s.nft.sent) move(e, s, { from: wallet, to: s.nft.party, assetId: mint, amount: "1" });
       }
       // Program calls connect the wallet to the program only, never to other wallets.
       const program = s.action?.programId;

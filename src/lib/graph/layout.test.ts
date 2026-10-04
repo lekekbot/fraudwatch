@@ -6,6 +6,7 @@ const movement = (from: string, to: string, signature: string) => ({
   signature,
   time: null,
   wallet: from,
+  initiator: from,
   kind: "SEND" as const,
   movements: [{ from, to, assetId: "SOL", amount: "1" }],
 });

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { NATIVE_SOL } from "@/lib/assets/assets";
 import type { EffectKind } from "@/lib/state/summarize";
 import type { FilterableTx } from "@/lib/timeline/filter";
-import { deleteRule, hiddenBy, hideTransactions, revertHiding, ruleFrom, ruleMatches, saveRule, unhideTransactions } from "./hiding";
+import { deleteRule, hiddenBy, hiddenReasons, hideTransactions, revertHiding, ruleFrom, ruleMatches, saveRule, unhideTransactions, withLaneWallets } from "./hiding";
 import { createCase, type HideRule } from "./model";
 
 const A = "dLm61Lvpigiaig9ZHcdh6iE7mFp7WmfqzkFMrDdf5Vo";
@@ -121,5 +121,20 @@ describe("ruleFrom", () => {
   it("leaves types out when the hide spanned many", () => {
     const many = (["SEND", "RECEIVE", "SWAP", "BURN"] as const).map((kind, i) => tx(String(i), { kind }));
     expect(ruleFrom(many, { protocols: new Set(), tags: new Set(), address: null }, "id", "R").kinds).toBeUndefined();
+  });
+});
+
+describe("hiddenReasons", () => {
+  it("hides a transaction on every lane when a rule matches any side, counting each lane's own wallet", () => {
+    // "t" on the victim's lane involves the decoy; on the decoy's own lane it involves the victim.
+    const rows = withLaneWallets([
+      ["VICTIM", [tx("t", { addresses: ["DECOY"] }), tx("u", { addresses: ["OTHER"] })]],
+      ["DECOY", [tx("t", { addresses: ["VICTIM"] }), tx("v", { addresses: ["ELSEWHERE"] })]],
+    ]);
+    const decoys = rule({ counterparties: ["DECOY"] });
+    const reasons = hiddenReasons({ hideRules: [decoys] }, rows);
+    expect(reasons.get("t")).toBe(decoys);
+    expect(reasons.get("v")).toBe(decoys);
+    expect(reasons.has("u")).toBe(false);
   });
 });

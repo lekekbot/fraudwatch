@@ -7,12 +7,12 @@ import { ArrowDownLeftIcon, ArrowUpRightIcon, ChevronDownIcon, ChevronUpIcon, Ma
 import { Button } from "@/components/ui/button";
 import type { AddressState } from "@/lib/case/address-state";
 import { graphWheelAction } from "@/lib/gestures";
-import { edgeFlow, OMITTED_NODE_ID, type GraphEdge, type GraphNode, type GraphRanking, type WalletGraph as Graph } from "@/lib/graph/build";
+import { edgeFlow, OMITTED_NODE_ID, startedBy, summarizeRelationship, type GraphEdge, type GraphNode, type GraphRanking, type WalletGraph as Graph } from "@/lib/graph/build";
 import { classifyLayout, layoutGraph, nodeRadius, type Point } from "@/lib/graph/layout";
 import type { Names } from "@/lib/labels/labels";
 import { AssetIcon } from "../asset-icon";
 
-type Palette = Record<"fg" | "muted" | "border" | "card" | "bg" | "program" | "send" | "receive", string>;
+type Palette = Record<"fg" | "muted" | "border" | "card" | "bg" | "program" | "send" | "receive" | "lookalike", string>;
 
 function readPalette(el: HTMLElement): Palette {
   const css = getComputedStyle(el);
@@ -26,6 +26,7 @@ function readPalette(el: HTMLElement): Palette {
     program: "oklch(0.7 0.14 250)",
     send: v("--destructive", "#e5484d"),
     receive: "oklch(0.72 0.16 155)",
+    lookalike: "oklch(0.77 0.16 70)",
   };
 }
 
@@ -243,8 +244,10 @@ export function WalletGraph({
     ctx.setTransform(dpr * t.k, 0, 0, dpr * t.k, dpr * t.x, dpr * t.y);
 
     const hover = hoverRef.current;
-    const focusEdge = selectedEdge ?? hover.edge ?? undefined;
-    const focusNode = focusEdge ? undefined : (hover.node ?? selectedNode ?? undefined);
+    // A selection beats hover. A selected node lights all its connections and the addresses they reach, even though
+    // clicking it also selects its line to the focus wallet (for the panel); a selected line alone lights just that line.
+    const focusNode = selectedNode ?? (selectedEdge ? undefined : (hover.node ?? undefined));
+    const focusEdge = focusNode ? undefined : (selectedEdge ?? hover.edge ?? undefined);
     const lit = (e: GraphEdge) => (focusEdge ? e.id === focusEdge : focusNode ? e.a === focusNode || e.b === focusNode : true);
 
     // Relationship significance changes opacity and bounded particle density, never stroke width.
@@ -296,6 +299,37 @@ export function WalletGraph({
       else ctx.lineTo(to.x, to.y);
       ctx.stroke();
       if (edge.kind === "interaction") {
+        // Who made the first move: a solid diamond just outside each end that approved (signed) transactions on this line;
+        // a hollow one at the middle when someone else entirely signed them (a delegate, drainer or bot).
+        const started = edge.summary ?? summarizeRelationship(edge);
+        const diamond = (at: Point, filled: boolean) => {
+          const size = (selected ? 4.2 : 3.4) / t.k;
+          ctx.beginPath();
+          ctx.moveTo(at.x, at.y - size);
+          ctx.lineTo(at.x + size, at.y);
+          ctx.lineTo(at.x, at.y + size);
+          ctx.lineTo(at.x - size, at.y);
+          ctx.closePath();
+          if (filled) ctx.fill();
+          else ctx.stroke();
+        };
+        const beside = (end: "a" | "b") => {
+          const progress = end === "a" ? 0 : 1;
+          const tangent = pathTangent(segment, progress);
+          const length = Math.hypot(tangent.x, tangent.y) || 1;
+          const node = nodesById.get(end === "a" ? edge.a : edge.b);
+          const gap = (node ? nodeRadius(node) + (layoutRoles.get(node.id) === "bridge" ? 3 : 0) : 8) + 6 / t.k;
+          const sign = end === "a" ? 1 : -1;
+          const anchor = end === "a" ? from : to;
+          return { x: anchor.x + (tangent.x / length) * gap * sign, y: anchor.y + (tangent.y / length) * gap * sign };
+        };
+        ctx.globalAlpha = on ? (selected || focusEdge === edge.id || focusNode ? 0.95 : 0.6) : 0.12;
+        ctx.fillStyle = p.fg;
+        ctx.strokeStyle = p.fg;
+        ctx.lineWidth = 1.2 / t.k;
+        if (started.initiatedByA > 0) diamond(beside("a"), true);
+        if (started.initiatedByB > 0) diamond(beside("b"), true);
+        if (started.initiatedByOthers > 0 && started.initiatedByA + started.initiatedByB === 0) diamond(pointOnPath(segment, 0.5), false);
         const { reference, counterparty } = perspective;
         const flows = [
           ...(sent > 0 ? [{ source: reference, target: counterparty, count: sent, color: p.send }] : []),
@@ -382,6 +416,27 @@ export function WalletGraph({
     const far = t.k < 0.55;
     const close = t.k > 1.25;
     const drawNodes = [...graph.nodes].sort((a, b) => Number(a.id === nodeFocus) - Number(b.id === nodeFocus));
+    // A hovered or selected look-alike is tied to its twins on the map by a dashed line, so the pair reads as one
+    // without lines criss-crossing the whole map the rest of the time.
+    ctx.strokeStyle = p.lookalike;
+    ctx.lineWidth = 1.25 / t.k;
+    ctx.setLineDash([4 / t.k, 4 / t.k]);
+    ctx.globalAlpha = 0.75;
+    for (const n of drawNodes) {
+      const from = positions.current.get(n.id);
+      for (const twin of names.lookalikes(n.id)) {
+        if (n.id !== nodeFocus && twin !== nodeFocus) continue;
+        const to = twin > n.id ? positions.current.get(twin) : undefined;
+        if (!from || !to) continue;
+        ctx.beginPath();
+        ctx.moveTo(from.x, from.y);
+        ctx.lineTo(to.x, to.y);
+        ctx.stroke();
+      }
+    }
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+
     for (const n of drawNodes) {
       const pos = positions.current.get(n.id);
       if (!pos) continue;
@@ -444,6 +499,17 @@ export function WalletGraph({
         ctx.fillStyle = p.fg;
         ctx.fill();
       }
+      // A look-alike (reads alike with another address in the case) gets a dashed halo: red for a likely decoy, amber otherwise.
+      const lookalike = names.lookalikes(n.id).length > 0;
+      if (lookalike) {
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, r + 4, 0, Math.PI * 2);
+        ctx.strokeStyle = names.verdict(n.id) === "decoy" ? p.send : p.lookalike;
+        ctx.lineWidth = 1.75;
+        ctx.setLineDash([3, 2.5]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
       if (!far && primaryNode) {
         ctx.font = "700 8px ui-sans-serif, system-ui, sans-serif";
         ctx.textAlign = "center";
@@ -462,7 +528,7 @@ export function WalletGraph({
       ctx.lineWidth = 4;
       ctx.strokeStyle = p.bg;
       ctx.strokeText(label, labelPosition.x, labelPosition.y);
-      ctx.fillStyle = known || n.kind === "wallet" ? p.fg : p.muted;
+      ctx.fillStyle = lookalike ? (names.verdict(n.id) === "decoy" ? p.send : p.lookalike) : known || n.kind === "wallet" ? p.fg : p.muted;
       ctx.fillText(label, labelPosition.x, labelPosition.y);
     }
     ctx.globalAlpha = 1;
@@ -692,7 +758,7 @@ export function WalletGraph({
             place({
               title: latest.current.names.of(node.id),
               kicker: node.id === latest.current.primaryWallet ? "Primary wallet" : node.kind === "wallet" ? "Mapped wallet" : node.kind === "program" ? "Program" : "Address",
-              lines: [`${node.txCount.toLocaleString()} ${node.kind === "program" ? "program calls" : "transactions"}`],
+              lines: [],
               hint: node.id === latest.current.wallet ? "Drag to reposition" : "Click for transaction details · drag to reposition",
             });
           } else if (edge) {
@@ -721,6 +787,7 @@ export function WalletGraph({
                   ? [edge.summary.assets.slice(0, 3).map((asset) => `${assetInfo(asset.assetId).label} ${asset.txCount.toLocaleString()} tx`).join(" · ")]
                   : []),
                 ...(flowSummary ? [flowSummary] : []),
+                ...(edge.kind === "interaction" ? [startedBy(edge, latest.current.names)] : []),
               ],
               flows:
                 edge.kind === "interaction"
@@ -969,6 +1036,24 @@ export function WalletGraph({
                 <span className="size-2.5 rounded-[2px] border border-muted-foreground" />
               </span>
               Square: program or infrastructure
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="flex w-5 justify-center" aria-hidden>
+                <span className="size-3 rounded-full border border-dashed border-[oklch(0.77_0.16_70)]" />
+              </span>
+              Look-alike · starts and ends like another address · hover to see its twin
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="flex w-5 justify-center" aria-hidden>
+                <span className="size-3 rounded-full border border-dashed border-destructive" />
+              </span>
+              Likely decoy · only moves dust while its look-alike moves real value
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="flex w-5 justify-center" aria-hidden>
+                <span className="size-2 rotate-45 bg-foreground" />
+              </span>
+              Diamond at a line&apos;s end: that side approved (signed) the transactions · hollow in the middle: someone else did
             </span>
             <span className="pt-0.5">Dots flow in the direction of transfers · more dots and a stronger line mean more activity</span>
             <span>Hover a line for its transaction count · click a node or line to inspect</span>

@@ -110,3 +110,30 @@ export function ruleFrom(hidden: readonly FilterableTx[], filter: Pick<TxFilter,
     ...(filter.address ? { counterparties: [filter.address] } : {}),
   };
 }
+
+/**
+ * Each lane's transactions with the lane's own wallet counted as involved:
+ * a rule about an address then also covers that wallet's own lane.
+ */
+export function withLaneWallets(lanes: Iterable<[wallet: string, rows: readonly FilterableTx[]]>): FilterableTx[] {
+  const out: FilterableTx[] = [];
+  for (const [wallet, rows] of lanes) {
+    for (const row of rows) out.push(row.addresses.includes(wallet) ? row : { ...row, addresses: [...row.addresses, wallet] });
+  }
+  return out;
+}
+
+/**
+ * Why each transaction is off the map, decided once per signature across
+ * every lane's side of it: hidden on one side means hidden on all, since it's
+ * one on-chain transaction. Rows should come from `withLaneWallets`.
+ */
+export function hiddenReasons(c: Hiding, rows: readonly FilterableTx[], tagsOf?: (address: string) => readonly string[]): Map<string, HiddenReason> {
+  const out = new Map<string, HiddenReason>();
+  for (const row of rows) {
+    if (out.get(row.signature)) continue;
+    const why = hiddenBy(c, row, tagsOf);
+    if (why) out.set(row.signature, why);
+  }
+  return out;
+}

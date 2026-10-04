@@ -19,12 +19,13 @@ import { firstInteraction, mapWallet, newWalletProblem, unmapWallet, walletRange
 import { mappingSummary, sharedTransactions } from "@/lib/ingest/intersections";
 import { buildInteractionGraph, type GraphRanking } from "@/lib/graph/build";
 import type { FraudWatchCase } from "@/lib/case/model";
-import { formatRange } from "@/lib/case/range";
+import { datesFromRange, extendedToToday, formatRange } from "@/lib/case/range";
 import { getAddressLabels } from "@/lib/db/address-labels";
 import { getCase, saveCase, touchCase } from "@/lib/db/cases";
 import { getDb } from "@/lib/db/db";
 import { getRpcSettings } from "@/lib/db/rpc-settings";
 import { createNames } from "@/lib/labels/labels";
+import { isDust, judgeLookalikes, lookalikeGroups, type LookalikeVerdict } from "@/lib/labels/lookalikes";
 import { enrichTransaction, protocolsUsed, registry } from "@/lib/protocols/registry";
 import { buildMapSearch } from "@/lib/routing/map-params";
 import { buildCasePath, isCaseRoute, parseCasePath, type CaseView } from "@/lib/routing/case-path";
@@ -33,12 +34,13 @@ import { shortenAddress } from "@/lib/solana/address";
 import { collectCounterparties } from "@/lib/state/counterparties";
 import { type EffectSummary, type NftCatalog, summarizeEffect } from "@/lib/state/summarize";
 import { counterpartyRows, type TransactedRow, transactedOverview } from "@/lib/state/volume";
-import { type HiddenReason, hiddenBy, hideTransactions, revertHiding, ruleFrom, unhideTransactions } from "@/lib/case/hiding";
+import { type HiddenReason, hiddenBy, hiddenReasons, hideTransactions, revertHiding, ruleFrom, saveRule, unhideTransactions, withLaneWallets } from "@/lib/case/hiding";
 import { EMPTY_FILTER, type FilterableTx, type TxFilter, involvedAddresses, isFilterActive, movedAssets, passesFilter, toggled } from "@/lib/timeline/filter";
 import type { SearchItem } from "@/lib/search";
 import { eventTimes } from "@/lib/timeline/layout";
 import { cn } from "cn";
 import { AddressPanel } from "./address-panel";
+import { LookalikeMark } from "./lookalike";
 import { AssetFlows } from "./asset-flows";
 import { CounterpartyList } from "./counterparty-list";
 import { DeleteCaseButton } from "./delete-case-button";
@@ -55,6 +57,8 @@ import { assetLabel, assetLogo, formatAssetAmount } from "./asset-format";
 import { TransactionDetails } from "./timeline/transaction-details";
 import { type TableNav, WalletStateSummary, WalletStateTable } from "./wallet-state-view";
 
+/** The hide rule that holds likely look-alike decoys. */
+const DECOY_RULE_ID = "lookalike-decoys";
 const NO_SUMMARIES: EffectSummary[] = [];
 const SHOWN_WALLETS = 50;
 
@@ -170,10 +174,6 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     if (route.view === "table") setFilter((current) => (current.address === route.wallet ? current : { ...current, address: route.wallet }));
   }, [route.view, route.wallet]);
   const labelRows = useLocalQuery((db) => getAddressLabels(db, c.id), [c.id]);
-  const names = useMemo(
-    () => createNames(new Map((labelRows.status === "ready" ? labelRows.data : []).map((l) => [l.address, l])), registry),
-    [labelRows],
-  );
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -207,6 +207,57 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     for (const ws of walletStates.states) out.set(ws.wallet, ws.effects.map((e) => summarizeEffect(e, transactions.get(e.signature), nfts)));
     return out;
   }, [walletStates, transactions, nfts]);
+  // Every address the case has met: mapped wallets, labelled ones, and everyone in the loaded transactions.
+  // Any two that start and end alike (see `readsAlike`) are flagged as look-alikes: the address-poisoning trick.
+  const caseAddresses = useMemo(() => {
+    const seen = new Set<string>(c.mappedWallets.map((w) => w.address));
+    for (const l of labelRows.status === "ready" ? labelRows.data : []) seen.add(l.address);
+    for (const sums of summariesByWallet.values()) for (const sum of sums) for (const a of involvedAddresses(sum)) seen.add(a);
+    return seen;
+  }, [c.mappedWallets, labelRows, summariesByWallet]);
+  const lookalikes = useMemo(() => lookalikeGroups(caseAddresses), [caseAddresses]);
+  /** Look-alikes of any address, including one typed in that the case hasn't met. */
+  const lookalikesOf = (address: string) =>
+    caseAddresses.has(address) ? (lookalikes.get(address) ?? []) : (lookalikeGroups([address, ...caseAddresses]).get(address) ?? []);
+  // Decoy or real: a decoy only ever moves dust with the case's wallets, the account it imitates moves real value.
+  const verdicts = useMemo(() => {
+    if (lookalikes.size === 0 || !walletStates) return new Map<string, LookalikeVerdict>();
+    const decimalsOf = (assetId: string) =>
+      walletStates.assets.get(assetId)?.decimals ?? walletStates.states.find((st) => assetId in st.decimals)?.decimals[assetId] ?? 0;
+    const moves = new Map<string, { assetId: string; delta: string }[]>();
+    const add = (address: string, change: { assetId: string; delta: string }) => {
+      if (!lookalikes.has(address)) return;
+      const list = moves.get(address) ?? [];
+      list.push(change);
+      moves.set(address, list);
+    };
+    for (const [wallet, sums] of summariesByWallet) {
+      for (const sum of sums) {
+        // A look-alike's own lane shows what it moved; other lanes show what it moved with them.
+        for (const change of [...sum.inflows, ...sum.outflows]) add(wallet, change);
+        for (const cp of sum.counterparties) add(cp.address, cp);
+      }
+    }
+    return judgeLookalikes(lookalikes, (address) => {
+      const list = moves.get(address);
+      return list && list.length > 0 ? list.every((m) => isDust(m.assetId, BigInt(m.delta), decimalsOf(m.assetId))) : null;
+    });
+  }, [lookalikes, summariesByWallet, walletStates]);
+  const names = useMemo(
+    () => createNames(new Map((labelRows.status === "ready" ? labelRows.data : []).map((l) => [l.address, l])), registry, lookalikes, verdicts),
+    [labelRows, lookalikes, verdicts],
+  );
+  /** Likely dust decoys, for the "Hide dust decoys" filter. */
+  const decoySet = useMemo(() => new Set([...verdicts].filter(([, v]) => v === "decoy").map(([a]) => a)), [verdicts]);
+  const decoys = [...verdicts].filter(([, v]) => v === "decoy").map(([a]) => a);
+  const decoyRule = c.hideRules?.find((r) => r.id === DECOY_RULE_ID);
+  /** True once every likely decoy's transactions are hidden by the decoy rule. */
+  const decoysHidden = decoys.length > 0 && Boolean(decoyRule?.enabled) && decoys.every((d) => decoyRule?.counterparties?.includes(d));
+  // One rule covers every likely decoy, so the views show the accounts they imitate instead; switch it off in Rules to see them again.
+  const hideDecoys = () => {
+    void updateCase(saveRule(c, { id: DECOY_RULE_ID, name: "Look-alike decoys", enabled: true, counterparties: decoys }));
+    toast.success(`Hiding transactions with ${decoys.length} likely decoy${decoys.length === 1 ? "" : "s"}. Turn it off under Hidden transactions → Manage.`);
+  };
   const filterables = useMemo(() => {
     const protocolsOf = new Map<string, string[]>();
     const out = new Map<string, FilterableTx[]>();
@@ -231,9 +282,15 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   // Only the views are filtered; the wallet state panel keeps the full history.
   // Hidden transactions (by hand or by rule) leave every view; the table keeps them, with why, for "Show hidden".
   const { hiddenSignatures, shownSignatures, hideRules } = c;
+  /** Every lane's transactions, each counting its own wallet as involved, for hiding rules. */
+  const hidingRows = useMemo(() => withLaneWallets(filterables), [filterables]);
+  // Decided once per transaction across all lanes: hidden on one side is hidden on every side.
+  const reasons = useMemo(
+    () => hiddenReasons({ hiddenSignatures, shownSignatures, hideRules }, hidingRows, (address) => names.label(address)?.tags ?? []),
+    [hiddenSignatures, shownSignatures, hideRules, hidingRows, names],
+  );
   const perWallet = useMemo(() => {
     const tagsOf = (address: string) => names.label(address)?.tags ?? [];
-    const hiding = { hiddenSignatures, shownSignatures, hideRules };
     const out = new Map<
       string,
       {
@@ -245,8 +302,10 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     >();
     for (const ws of walletStates?.states ?? []) {
       const rows = filterables.get(ws.wallet) ?? [];
-      const passes = rows.map((row) => passesFilter(row, filter, tagsOf));
-      const why = rows.map((row, i) => (passes[i] ? hiddenBy(hiding, row, tagsOf) : null));
+      // A decoy's own lane is all decoy activity: the filter takes it out whole.
+      const decoyLane = filter.hideDecoys && decoySet.has(ws.wallet);
+      const passes = rows.map((row) => !decoyLane && passesFilter(row, filter, tagsOf, (a) => decoySet.has(a)));
+      const why = rows.map((row, i) => (passes[i] ? (reasons.get(row.signature) ?? null) : null));
       const keep = passes.map((p, i) => p && why[i] === null);
       const all = summariesByWallet.get(ws.wallet) ?? [];
       out.set(ws.wallet, {
@@ -261,7 +320,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
       });
     }
     return out;
-  }, [walletStates, filterables, summariesByWallet, filter, names, hiddenSignatures, shownSignatures, hideRules]);
+  }, [walletStates, filterables, summariesByWallet, filter, names, reasons, decoySet]);
   const summaries = summariesByWallet.get(selectedWallet) ?? NO_SUMMARIES;
   const visible = perWallet.get(selectedWallet);
   const visibleState = visible?.state;
@@ -550,6 +609,10 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
         state={addressState(address, c, registry, programs)}
         label={names.label(address)}
         entry={registry.lookup(address)}
+        lookalikes={names.lookalikes(address)}
+        verdictOf={names.verdict}
+        onHideDecoys={decoysHidden ? undefined : hideDecoys}
+        onSelectAddress={setSelectedAddress}
         transactionCount={address === selectedWallet ? undefined : counterparties.find((r) => r.address === address)?.count}
         beforeAnnotations={
           assetFlows ? (
@@ -649,7 +712,12 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     if (!isFilterActive(filter)) return [];
     const tagsOf = (address: string) => names.label(address)?.tags ?? [];
     const shownSet = new Set(shownNow);
-    const out = viewLanes.flatMap((w) => (filterables.get(w) ?? []).filter((row) => !shownSet.has(row.signature) && !passesFilter(row, filter, tagsOf) && hiddenBy(c, row, tagsOf) === null));
+    const isDecoy = (a: string) => decoySet.has(a);
+    const out = viewLanes.flatMap((w) =>
+      (filterables.get(w) ?? []).filter(
+        (row) => !shownSet.has(row.signature) && !(passesFilter(row, filter, tagsOf, isDecoy) && !(filter.hideDecoys && isDecoy(w))) && !reasons.has(row.signature),
+      ),
+    );
     return [...new Set(out.map((row) => row.signature))];
   })();
   const unhideBatch = (signatures: string[]) => {
@@ -657,7 +725,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     const tagsOf = (address: string) => names.label(address)?.tags ?? [];
     const rulesOnly = { hideRules: c.hideRules };
     const wanted = new Set(signatures);
-    const ruleMatched = [...filterables.values()].flat().filter((row) => wanted.has(row.signature) && hiddenBy(rulesOnly, row, tagsOf) !== null).map((row) => row.signature);
+    const ruleMatched = hidingRows.filter((row) => wanted.has(row.signature) && hiddenBy(rulesOnly, row, tagsOf) !== null).map((row) => row.signature);
     changeHiding(unhideTransactions(c, signatures, ruleMatched), `Brought back ${signatures.length.toLocaleString()} transaction${signatures.length === 1 ? "" : "s"}.`);
   };
 
@@ -977,6 +1045,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                         <span className={cn("min-w-0 flex-1 truncate text-xs", !names.known(address) && "font-mono")}>
                           {names.of(address)}
                         </span>
+                        {names.lookalikes(address).length > 0 && <LookalikeMark count={names.lookalikes(address).length} />}
                         {flagged && <span className="text-destructive" title="State mismatch or partial history">•</span>}
                         {address === c.primaryWallet ? (
                           <Badge variant="secondary">primary</Badge>
@@ -1073,6 +1142,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                 filter={filter}
                 shown={view !== "table" ? lanes.reduce((n, l) => n + l.state.effects.length, 0) : visibleState.effects.length}
                 onChange={updateFilter}
+                decoyCount={decoySet.size}
                 // Filtering to the noise, then hiding it, is the everyday way to bulk-hide.
                 hide={{
                   shown: { count: shownNow.length, run: () => hideBatch(shownNow, filter) },
@@ -1083,7 +1153,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
             {walletStates && (
               <HidingSection
                 c={c}
-                rows={[...filterables.values()].flat()}
+                rows={hidingRows}
                 assets={walletStates.assets}
                 names={names}
                 decimalsOf={(assetId) =>
@@ -1184,7 +1254,25 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                 )}
               </PanelSection>
             )}
-            <IngestionPanel names={names} rpc={rpc} ingestion={ingestion} />
+            <IngestionPanel
+              names={names}
+              rpc={rpc}
+              ingestion={ingestion}
+              extend={
+                extendedToToday(c.range)
+                  ? {
+                      lastDay: datesFromRange(c.range).endDate,
+                      // Carry the case on to today, then load: the cache means only the new stretch is fetched.
+                      run: () => {
+                        const range = extendedToToday(c.range);
+                        if (!range || !rpc) return;
+                        const next = { ...c, range, updatedAt: new Date().toISOString() };
+                        void updateCase(next).then(() => ingestion.start(rpc.url, next));
+                      },
+                    }
+                  : undefined
+              }
+            />
             <div className="mt-auto p-2">
               <DeleteCaseButton id={c.id} name={c.name} />
             </div>
@@ -1196,6 +1284,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
       {addingWallet && (
         <MapWalletDialog
           name=""
+          lookalikesOf={lookalikesOf}
           first={null}
           enterAddress={{
             problem: (address) => newWalletProblem(address, c, (a) => addressState(a, c, registry, programs) === "INFRASTRUCTURE"),
@@ -1212,6 +1301,8 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
       {mapTarget && (
         <MapWalletDialog
           name={names.of(mapTarget)}
+          address={mapTarget}
+          lookalikesOf={lookalikesOf}
           first={result ? firstInteraction(mapTarget, result.transactions.values()) : null}
           caseRange={c.range}
           hasRpc={Boolean(rpc)}

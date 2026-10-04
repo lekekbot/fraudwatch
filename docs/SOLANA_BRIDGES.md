@@ -1,6 +1,6 @@
 # Solana bridge inventory
 
-Snapshot: 2026-10-03
+Snapshot: 2026-10-04
 
 This inventory covers public bridge protocols with a distinct, verifiable Solana mainnet deployment. It is designed for transaction attribution in FraudWatch, not as a recommendation to use any service.
 
@@ -26,55 +26,55 @@ This inventory covers public bridge protocols with a distinct, verifiable Solana
 
 Every registry address was checked against Solana mainnet on 2026-10-03. Program entries existed and were executable. Hyperlane's `JAv...` address is intentionally classified as a fee account; its executable owner is the canonical `BhNcat...` gas-paymaster program.
 
-## Cross-chain wallet correlation
+## Solana–Ethereum transaction correlation
 
-“Direct” means one source transaction contains enough data to recover the source wallet, destination chain, and destination wallet. The decoder may still need an IDL, Borsh layout, inner instructions, or a program account lookup. “Conditional” means the protocol exposes only the destination application by default; the final user wallet depends on an application-specific payload.
+The first implementation slice accepts completed token-transfer paths between Solana and Ethereum mainnet. Both retrieved chain transactions must yield a local wallet owner and local asset. A free public protocol API, explorer, or state-chain lookup may correlate the two transaction hashes; the chain transactions remain the final wallet-and-asset evidence.
 
-| Protocol | Source transaction coverage | Extraction | Important caveat |
-| --- | --- | --- | --- |
-| Wormhole | Direct for Wrapped Token Transfers | Read the token owner/authority from Solana accounts, then decode `To` and `ToChain` from the WTT message payload. Join with `(emitter chain, emitter address, sequence)`. [Payload format](https://wormhole.com/docs/products/token-transfers/wrapped-token-transfers/concepts/payload-structure/) | A payload-3 transfer names a destination contract and source contract. Final beneficiary may be inside its application payload. |
-| Circle CCTP | Direct | Decode the depositor/owner account plus `destinationDomain` and `mintRecipient` from `depositForBurn`. Join with CCTP nonce/message hash. [Solana contracts](https://github.com/circlefin/solana-cctp-contracts) | Do not treat fee payer as depositor when another authority signs the token transfer. |
-| deBridge DLN | Direct | Decode maker, give/take chain IDs, and receiver from the create-order instruction or order state. Join fills with deterministic order ID. [Order fields](https://docs.debridge.com/dln-details/protocol-specs/deterministic-order-id) | Hooks may forward assets after the recorded receiver. |
-| Mayan Finance | Direct | Decode swapper account plus `destinationChain` and `destinationAddress` from Mayan instruction data. [Solana swap layout](https://github.com/mayan-finance/swap-sdk/blob/main/src/solana/solanaSwap.ts) | Route-specific programs use different layouts; keep one decoder per Mayan program family. |
-| Allbridge | Direct for Core | Decode `user` account and `BridgeArgs.recipient` plus `destination_chain_id`. [Core IDL](https://github.com/allbridge-io/allbridge-core-js-sdk/blob/main/src/services/models/sol/types/bridge.json) | Classic is deprecated and needs its older instruction layout. |
-| Across | Direct | Decode depositor, recipient, destination chain ID, and deposit ID from the deposit instruction/event. [Deposit event](https://docs.across.to/introduction/tracking-deposits) | Recipient can be a contract or differ from depositor. |
-| Chainflip | API/state-chain correlation | Source transaction shows sender and unique deposit-channel address. Resolve that channel or swap ID through broker/state-chain data to obtain destination chain and recipient. [Deposit-channel design](https://docs.chainflip.io/protocol/vaults/solana-vault-design) | Standard deposit transaction does not contain destination wallet. CCM or encoded vault-swap paths can carry more data. |
-| Relay | API/order correlation | Extract order ID or request ID from depository data or Solana memo, then resolve the Relay request/order. Relay supports transaction-hash-to-request lookup. [Settlement flow](https://github.com/relayprotocol/relay-settlement) and [lookup behavior](https://github.com/relayprotocol/relay-mcp/blob/main/TESTING.md) | Plain transfer to a solver/depository does not reliably expose destination wallet. |
-| Chainlink CCIP | Conditional | Decode source sender, destination chain selector, message ID, and `receiver` from the CCIP message. For token-only SVM delivery, decode `token_receiver`. [SVM message fields](https://docs.chain.link/ccip/v1/svm/api-reference/v1.6.0/messages) | `receiver` normally identifies a destination program/contract. Final beneficiary may live in `data` or application state. |
-| Hyperlane | Conditional; direct for Warp Routes | Mailbox message contains sender, destination domain, recipient application, and body. Warp Route body adds token recipient and amount. [Mailbox dispatch](https://github.com/hyperlane-xyz/hyperlane-monorepo/blob/main/solidity/contracts/Mailbox.sol) and [Warp Route format](https://github.com/hyperlane-xyz/hyperlane-monorepo/blob/main/solidity/contracts/token/README.md) | Generic Mailbox recipient is an application, not necessarily a wallet. Decode that application's body. |
-| LayerZero | Conditional; direct for OFT | OFT `SendParams` contains `dst_eid` and `to`; signer/token-source accounts identify source wallet. Join with emitted GUID. [Solana OFT send](https://github.com/LayerZero-Labs/devtools/blob/main/examples/oft-solana/programs/oft/src/instructions/send.rs) | Generic OApp sends expose destination peer application; final beneficiary is application-specific. |
-| NEAR Omni Bridge | Direct | Decode source signer and `InitTransferPayload.recipient`. Omni Address prefix identifies destination chain, such as `near:` or `base:`. [SDK address format](https://github.com/Near-One/bridge-sdk-js) | Recipient is a variable-length chain-prefixed string, not always a 32-byte address. |
-| Wanchain | Direct plus token-pair lookup | Decode `user` account, `user_account` destination bytes, and `token_pair_id`. Resolve destination chain from the referenced token-pair account. [Solana instruction definitions](https://docs.wanchain.org/developers/wanbridge-api/2.-creating-cross-chain-transactions-for-wanbridge/2.1-direct-interaction-with-on-chain-contracts) | Destination chain ID is not a standalone instruction argument. Preserve historical token-pair state when possible. |
-| Base Bridge | Direct | Solana-to-Base instruction contains `from` and `to`; destination is fixed to Base. Base-to-Solana transfer serialization also includes `to`. Join with outgoing-message account/hash. [Solana bridge builder](https://github.com/base/bridge/blob/main/scripts/src/commands/sol/bridge/solana-to-base/bridge-sol.handler.ts) | Call variants can target contracts and execute further instructions. |
-| Axelar | Conditional; direct for ITS | ITS payload contains source address, destination chain, and destination address. Generic GMP exposes destination contract and payload. [ITS transfer fields](https://github.com/axelarnetwork/interchain-token-service/blob/main/contracts/InterchainTokenService.sol/) and [source-transaction decoder](https://github.com/axelarnetwork/axe/blob/main/docs/axelar-debugging.md) | ITS routes through the Axelar hub, producing multiple message legs/IDs. Generic GMP final beneficiary is application-specific. |
+RPC responses do not literally return a `wallet` field. Decoders must derive the Solana owner from bridge accounts or token-balance owners, and derive the Ethereum owner from bridge events, calldata, or ERC-20 `Transfer` logs. The fee payer, relayer, transaction submitter, token account, bridge vault, and destination application are not automatically the beneficiary wallet.
 
-### Recommended ingestion order
+| Protocol | Coverage | Solana transaction evidence | Ethereum transaction evidence | Correlation method |
+| --- | --- | --- | --- | --- |
+| Wormhole | Accept WTT; payload 3 conditional | Token authority/owner and SPL mint; WTT payload contains recipient and token origin. [Payload format](https://wormhole.com/docs/products/token-transfers/wrapped-token-transfers/concepts/payload-structure/) | VAA redemption identifies recipient and origin token; token transfer identifies local ERC-20 asset. | VAA `(emitter chain, emitter address, sequence)` |
+| Circle CCTP | Accept | `depositForBurn`/receive-message data exposes depositor or mint recipient and USDC mint. [Solana instruction](https://github.com/circlefin/solana-cctp-contracts/blob/master/programs/token-messenger-minter/src/token_messenger/instructions/deposit_for_burn.rs) | `DepositForBurn` or mint/withdraw events expose depositor or mint recipient; asset is USDC. | CCTP source domain and nonce, or message hash |
+| deBridge DLN | Accept | Created order contains maker, give token, receiver, take token, and chain IDs. | Created/fill order data contains the same wallet and asset fields. [Order contract](https://github.com/debridge-finance/dln-contracts/blob/main/contracts/DLN/DlnSource.sol) | Deterministic DLN order ID |
+| Mayan Finance | Accept | Mayan instruction or deposit contains source wallet and mint. [Swap layout](https://github.com/mayan-finance/swap-sdk/blob/main/src/solana/solanaSwap.ts) | Settlement contains the destination wallet and delivered ERC-20 asset. | MCTP/Wormhole use their on-chain message IDs. Swift and MPS use Mayan's free [Explorer API](https://github.com/mayan-finance/swap-sdk#tracking-swaps) by source transaction hash. |
+| Allbridge | Accept Core and Classic transfers | Bridge instruction contains user, source mint, recipient, destination chain, and receive-token bytes. [Core IDL](https://github.com/allbridge-io/allbridge-core-js-sdk/blob/main/src/services/models/sol/types/bridge.json) | Lock/unlock calldata and token logs contain wallet and ERC-20 asset. | Allbridge nonce/message hash |
+| Across | Accept token deposits | Deposit instruction/event contains depositor, recipient, input/output tokens, destination chain, and deposit ID. | Deposit/fill event contains wallet and ERC-20 asset. [Deposit fields](https://docs.across.to/introduction/tracking-deposits) | Origin chain ID and deposit ID |
+| Chainflip | Accept with free lookup | Deposit transaction returns source wallet and asset. | Egress transaction returns destination wallet and asset. | Search the free [Chainflip Explorer](https://scan.chainflip.io/) or read State Chain deposit-channel/swap events, which record destination address and asset. [Deposit-channel data](https://docs.chainflip.io/brokers/broker-deposit-channels-swaps) |
+| Relay | Accept with free lookup | Deposit returns source wallet, asset, and request ID or deposit address. | Withdrawal returns destination wallet and asset. | Relay's public transaction-status lookup accepts an on-chain transaction hash and returns the paired request/transactions. API key is optional for status lookups. [Relay MCP/API behavior](https://github.com/relayprotocol/relay-mcp) |
+| Chainlink CCIP | Accept token transfers; generic messages conditional | Message contains sender, receiver/token receiver, token amounts, and message ID. [SVM message fields](https://docs.chain.link/ccip/v1/svm/api-reference/v1.6.0/messages) | Execution message and token logs contain receiver, ERC-20 asset, and message ID. | CCIP message ID |
+| Hyperlane | Accept Warp Routes; generic Mailbox conditional | Warp transfer body contains recipient and amount; invoked route identifies local SPL mint. | Warp transfer/fill identifies recipient; invoked route and token log identify ERC-20 asset. [Warp Route format](https://github.com/hyperlane-xyz/hyperlane-monorepo/blob/main/solidity/contracts/token/README.md) | Hyperlane message ID |
+| LayerZero | Accept OFT; generic OApp conditional | OFT `SendParams` contains destination endpoint and recipient; signer/token-source accounts identify owner and mint. [Solana OFT send](https://github.com/LayerZero-Labs/devtools/blob/main/examples/oft-solana/programs/oft/src/instructions/send.rs) | OFT send/receive and ERC-20 logs identify wallet and local token. | LayerZero GUID |
+| NEAR Omni Bridge | Accept asset transfers | Init/finalize payload contains chain-prefixed recipient and token; signer/token accounts identify local owner and mint. [Omni Address format](https://github.com/Near-One/bridge-sdk-js) | Init/finalize calldata and token logs identify wallet and ERC-20 asset. | Omni transfer/message hash |
+| Wanchain | Accept with free lookup | Instruction contains user, destination `user_account`, token-pair ID, and local mint. [Solana instruction definitions](https://docs.wanchain.org/developers/wanbridge-api/2.-creating-cross-chain-transactions-for-wanbridge/2.1-direct-interaction-with-on-chain-contracts) | Lock/burn/mint calldata and logs identify wallet and ERC-20 asset. | Free [status API](https://docs.wanchain.org/developers/wanbridge-api/4.-status-query) maps `lockHash` to `redeemHash`; `smgID` alone is not a transfer ID. |
+| Base Bridge | Out of scope | Its transfer instruction contains owner, asset, and recipient. | Destination is Base, not Ethereum mainnet. [Bridge scope](https://github.com/base/bridge) | Outgoing message account/hash |
+| Axelar | Accept ITS; generic GMP conditional | ITS payload contains source address, token ID, destination chain, and destination address. | ITS execution and token logs contain wallet and ERC-20 asset. [ITS fields](https://github.com/axelarnetwork/interchain-token-service/blob/main/contracts/InterchainTokenService.sol/) | Axelar message ID plus ITS token ID |
 
-1. Start with CCTP, deBridge, Mayan, Allbridge Core, Across, Wormhole WTT, NEAR Omni Bridge, and Base Bridge. One source transaction provides the complete wallet pair.
-2. Add Wanchain with a token-pair metadata cache.
-3. Add OFT, Warp Route, CCIP token-transfer, and Axelar ITS decoders. Treat generic application recipients as contracts unless their payload decoder proves a final wallet.
-4. Add Chainflip and Relay only with their API or state-chain correlation. Program-address matching alone cannot recover the destination wallet.
+Generic Wormhole payload-3, CCIP, Hyperlane Mailbox, LayerZero OApp, and Axelar GMP messages are conditionally accepted. Decode the application payload and destination receipt. Accept a record only when a token transfer, native transfer, or application event identifies the final wallet and local asset. Follow a later payout transaction only when a public message ID or application state links it. Otherwise mark that record unresolved; never return the destination application as the user's wallet.
 
-Store both `protocol_recipient` and `beneficiary_wallet`. Never silently label a destination contract as the user's wallet. For Solana, derive `source_wallet` from the bridge's depositor, maker, swapper, or token-authority account; the fee payer is only a fallback. Preserve bridge message/order ID, extraction method, and confidence beside both wallets.
+Use free sources first:
 
-### Solana and Ethereum first slice
+1. Chain RPC and receipt/log decoding.
+2. Mayan Explorer API, Relay transaction-status API, Wanchain status API, or Chainflip Explorer/State Chain.
+3. Application-specific payload and event decoder.
 
-Limit initial correlation to transfers whose two endpoints are Solana and Ethereum mainnet. Do not build a universal chain abstraction for bridge parsing yet.
+No paid provider is required for these paths. Public endpoints are rate-limited and have no availability guarantee. Cache successful correlations. Chainflip has no documented stable public lookup API; its free Explorer works for investigations, while reliable bulk historical ingestion requires indexing State Chain events or operating an archive node.
 
-Start with direct source-transaction decoders for CCTP, Wormhole WTT, deBridge DLN, Mayan, Allbridge Core, and Across. Add LayerZero OFT, Hyperlane Warp Routes, Axelar ITS, and Wanchain after their application or account lookups are available. Leave Chainflip and Relay out of the first slice because their standard source transactions do not contain the destination wallet.
-
-Ethereum ingestion must retain transaction `from`, `to`, `input`, `value`, chain ID, status, block/transaction index, and complete receipt logs with topics and data. Without calldata and logs, FraudWatch cannot recover bridge recipients or message IDs reliably.
-
-Use one normalized result for either direction:
+For each accepted pair, emit:
 
 ```text
-protocol
-source_chain, source_transaction, source_wallet
-destination_chain, protocol_recipient, beneficiary_wallet
-message_or_order_id
-extraction_method: source_transaction | account_lookup | api
-confidence: exact | application_recipient | unresolved
+protocol, bridge_id
+solana_transaction, solana_wallet, solana_asset
+ethereum_transaction, ethereum_wallet, ethereum_asset
+solana_wallet_kind, ethereum_wallet_kind
+correlation: on_chain | free_protocol_lookup | application_decoder
+correlation_source
+evidence: on_chain_verified
 ```
+
+`*_asset` is the local mint or token contract, not a ticker; use an explicit native-asset sentinel for SOL or ETH. Resolve symbols separately. Return a token-account owner on Solana, not the ATA. Return the event recipient on Ethereum, not the relayer's `tx.from`.
+
+No bridge can prove from source calldata alone that a destination address is user-controlled. Classify address kind at the destination block/slot: inspect Ethereum code and Solana account owner/executable state. Keep smart-contract wallets valid, but label them explicitly instead of silently treating every recipient as an EOA.
 
 ## Services that route underlying protocols
 

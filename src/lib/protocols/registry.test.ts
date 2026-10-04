@@ -3,6 +3,11 @@ import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import { enrichTransaction, parseRegistry, protocolsUsed, registry, RegistryError } from "./registry";
 
 const JUPITER = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
+const SNS = "namesLPneVptA9Z5rqUDD9tMTWEJwofgaYwp8cawRkX";
+const COINBASE = "H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS";
+const COINBASE_HOT_WALLET = "D89hHJT5Aqyx1trP6EnGY9jJUB3whgnq3aUvvCqedvzf";
+const KRAKEN_HOT_WALLET = "6LY1JzAFVZsP2a2xKrtU6znQMQ5h4i7tocWdgrkZzkzF";
+const BISONFI = "BiSoNHVpsVZW2F7rx2eQ59yQwKxzU5NvBcmKshCSUypi";
 const UNKNOWN = "HobbakUnknownProgram1111111111111111111111";
 
 const minimal = (addresses: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
@@ -37,8 +42,12 @@ const tx = (programs: string[], accounts: string[] = []): CanonicalTransaction =
 describe("bundled registry", () => {
   it("parses, and identifies configured addresses", () => {
     expect(registry.version).toBeGreaterThanOrEqual(1);
-    expect(registry.size).toBeGreaterThan(30);
+    expect(registry.size).toBeGreaterThan(190);
     expect(registry.lookup(JUPITER)).toMatchObject({ protocolId: "jupiter", category: "dex_aggregator", role: "program" });
+    expect(registry.lookup(SNS)).toMatchObject({ protocolId: "sns", category: "name_service", role: "program", label: "SNS Name Service" });
+    expect(registry.lookup(COINBASE)).toMatchObject({ protocolId: "coinbase", category: "exchange", role: "wallet", label: "Coinbase 1" });
+    expect(registry.lookup(COINBASE_HOT_WALLET)).toMatchObject({ protocolId: "coinbase", protocolName: "Coinbase", role: "wallet" });
+    expect(registry.lookup(KRAKEN_HOT_WALLET)).toMatchObject({ protocolId: "kraken", protocolName: "Kraken", role: "wallet" });
     expect(registry.lookup("11111111111111111111111111111111")).toMatchObject({ category: "core", label: "System Program" });
     expect(registry.protocols.get("jupiter")).toEqual({ name: "Jupiter", category: "dex_aggregator" });
   });
@@ -90,5 +99,24 @@ describe("enrichTransaction", () => {
   it("matches protocol accounts that appear only as accounts", () => {
     const e = enrichTransaction(tx([UNKNOWN], [JUPITER]));
     expect(e.matches.map((m) => m.protocolId)).toEqual(["jupiter"]);
+  });
+
+  it("matches service wallets that appear as accounts", () => {
+    const e = enrichTransaction(tx([UNKNOWN], [COINBASE]));
+    expect(protocolsUsed(e)).toEqual([{ id: "coinbase", name: "Coinbase", category: "exchange" }]);
+  });
+
+  it("matches a centralized vault exposed only as a token account owner", () => {
+    const transaction = tx([UNKNOWN]);
+    transaction.tokenChanges = [
+      { account: "token-account", owner: KRAKEN_HOT_WALLET, mint: "mint", programId: null, decimals: 6, pre: "0", post: "1", delta: "1" },
+    ];
+    expect(protocolsUsed(enrichTransaction(transaction))).toEqual([{ id: "kraken", name: "Kraken", category: "exchange" }]);
+  });
+
+  it("labels popular programs from the Solscan leaderboard", () => {
+    const e = enrichTransaction(tx([BISONFI]));
+    expect(e.matches[0]).toMatchObject({ protocolId: "bisonfi", label: "BisonFi", category: "dex" });
+    expect(protocolsUsed(e)).toEqual([{ id: "bisonfi", name: "BisonFi", category: "dex" }]);
   });
 });

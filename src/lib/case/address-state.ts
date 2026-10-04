@@ -6,7 +6,8 @@ export type AddressState = "PRIMARY" | "MAPPED" | "OBSERVED" | "INFRASTRUCTURE";
 
 /**
  * `programs` holds every program ID the loaded transactions invoked: a program
- * is infrastructure even when the registry doesn't know it.
+ * is infrastructure even when the registry doesn't know it. Registry wallets
+ * stay observable and mappable.
  */
 export function addressState(
   address: string,
@@ -16,6 +17,7 @@ export function addressState(
 ): AddressState {
   if (address === c.primaryWallet) return "PRIMARY";
   if (c.mappedWallets.some((w) => w.address === address)) return "MAPPED";
-  if (reg.lookup(address) || programs.has(address)) return "INFRASTRUCTURE";
+  const entry = reg.lookup(address);
+  if ((entry && entry.role !== "wallet") || programs.has(address)) return "INFRASTRUCTURE";
   return "OBSERVED";
 }

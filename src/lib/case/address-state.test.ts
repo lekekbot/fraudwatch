@@ -17,6 +17,7 @@ describe("addressState", () => {
     expect(addressState(PRIMARY, c, registry)).toBe("PRIMARY");
     expect(addressState(MAPPED, c, registry)).toBe("MAPPED");
     expect(addressState("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4", c, registry)).toBe("INFRASTRUCTURE");
+    expect(addressState("H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS", c, registry)).toBe("OBSERVED");
     expect(addressState("3WNqDSBxxZ7BtdyGYHdLHeZWBu2aXEomkX9YVAeZGy5a", c, registry)).toBe("OBSERVED");
   });
 

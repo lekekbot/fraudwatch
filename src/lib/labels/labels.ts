@@ -1,3 +1,4 @@
+import { distinguishingShort, type LookalikeVerdict } from "./lookalikes";
 import type { ProtocolRegistry, RegistryEntry } from "@/lib/protocols/registry";
 import { shortenAddress } from "@/lib/solana/address";
 
@@ -53,10 +54,28 @@ export type Names = {
   /** A real name (label or registry) if there is one. */
   known: (address: string) => string | undefined;
   label: (address: string) => AddressLabel | undefined;
+  /** Other addresses in the case whose short form matches this one's: possible address poisoning. */
+  lookalikes: (address: string) => readonly string[];
+  /** For a look-alike: whether it's likely the dusting decoy, the real account, or unclear. */
+  verdict: (address: string) => LookalikeVerdict | undefined;
 };
 
-export function createNames(labels: ReadonlyMap<string, AddressLabel>, reg: ProtocolRegistry): Names {
-  const resolve = (address: string, chars?: number) => displayName(address, labels.get(address), reg.lookup(address), chars);
+/**
+ * `lookalikes` maps addresses to others in the case with the same short
+ * form; those are shortened just far enough to tell apart wherever a bare
+ * address is shown.
+ */
+export function createNames(
+  labels: ReadonlyMap<string, AddressLabel>,
+  reg: ProtocolRegistry,
+  lookalikes: ReadonlyMap<string, readonly string[]> = new Map(),
+  verdicts: ReadonlyMap<string, LookalikeVerdict> = new Map(),
+): Names {
+  const resolve = (address: string, chars?: number) => {
+    const name = displayName(address, labels.get(address), reg.lookup(address), chars);
+    const twins = lookalikes.get(address);
+    return name.source === "address" && twins ? { ...name, text: distinguishingShort(address, twins, chars) } : name;
+  };
   return {
     of: (address, chars) => resolve(address, chars).text,
     known: (address) => {
@@ -64,5 +83,7 @@ export function createNames(labels: ReadonlyMap<string, AddressLabel>, reg: Prot
       return name.source === "address" ? undefined : name.text;
     },
     label: (address) => labels.get(address),
+    lookalikes: (address) => lookalikes.get(address) ?? [],
+    verdict: (address) => verdicts.get(address),
   };
 }

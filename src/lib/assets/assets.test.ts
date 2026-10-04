@@ -15,6 +15,9 @@ import {
 
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDG = "2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH";
+const PUMP = "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn";
+const JITOSOL = "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn";
+const QQQX = "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ";
 
 const metadataFixture: Fixture = {
   manifest: { wallets: [] } as unknown as Fixture["manifest"],
@@ -27,6 +30,12 @@ const NOW = new Date("2026-09-24T00:00:00Z");
 describe("asset metadata", () => {
   it("knows native SOL without any lookup", () => {
     expect(builtinAsset(NATIVE_SOL)).toMatchObject({ symbol: "SOL", decimals: 9 });
+  });
+
+  it("knows popular Solscan leaderboard tokens without any lookup", () => {
+    expect(builtinAsset(PUMP)).toMatchObject({ symbol: "PUMP", name: "Pump", decimals: 6 });
+    expect(builtinAsset(JITOSOL)).toMatchObject({ symbol: "JitoSOL", decimals: 9 });
+    expect(builtinAsset(QQQX)).toMatchObject({ symbol: "QQQx", decimals: 8 });
   });
 
   it("derives the Metaplex metadata address for a mint", async () => {

@@ -32,6 +32,8 @@
             "perps",
             "nft",
             "nft_marketplace",
+            "name_service",
+            "exchange",
             "bridge",
             "launchpad"
           ]
@@ -50,7 +52,7 @@
       "required": ["role", "label"],
       "additionalProperties": false,
       "properties": {
-        "role": { "enum": ["program", "pool", "vault", "authority", "fee_account", "market"] },
+        "role": { "enum": ["program", "pool", "vault", "authority", "fee_account", "market", "wallet"] },
         "label": { "type": "string", "minLength": 1 }
       }
     }

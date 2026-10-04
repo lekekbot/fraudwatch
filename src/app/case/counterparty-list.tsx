@@ -3,6 +3,7 @@
 import type { AddressState } from "@/lib/case/address-state";
 import type { Names } from "@/lib/labels/labels";
 import { cn } from "cn";
+import { LookalikeMark } from "./lookalike";
 import { PanelSection, ShowMoreList } from "./panel";
 
 export type CounterpartyRow = { address: string; count: number; state: AddressState };
@@ -44,7 +45,10 @@ export function CounterpartyList({ rows, names, selected, onSelect }: {
                       title={r.address}
                     >
                       <span className="min-w-0 flex-1">
-                        <span className={cn("block truncate", names.known(r.address) ? "" : "font-mono")}>{names.of(r.address)}</span>
+                        <span className="flex min-w-0 items-center gap-1">
+                          <span className={cn("block truncate", names.known(r.address) ? "" : "font-mono")}>{names.of(r.address)}</span>
+                          {names.lookalikes(r.address).length > 0 && <LookalikeMark count={names.lookalikes(r.address).length} />}
+                        </span>
                         {tags.length > 0 && <span className="block truncate text-muted-foreground">{tags.join(" · ")}</span>}
                       </span>
                       <span className="text-[10px] text-muted-foreground uppercase">{STATE_SHORT[r.state]}</span>

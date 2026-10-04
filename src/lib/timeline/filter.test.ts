@@ -91,4 +91,15 @@ describe("toggled", () => {
     expect([...toggled(a, 1)]).toEqual([]);
     expect([...a]).toEqual([1]);
   });
+
+  it("leaves out transactions with a likely decoy only when asked", () => {
+    const withDecoy = tx(summary("RECEIVE", [["SOL", "1"]]), { addresses: ["DECOY"] });
+    const isDecoy = (a: string) => a === "DECOY";
+    expect(passesFilter(withDecoy, EMPTY_FILTER, undefined, isDecoy)).toBe(true);
+    const f = with_({ hideDecoys: true });
+    expect(isFilterActive(f)).toBe(true);
+    expect(passesFilter(withDecoy, f, undefined, isDecoy)).toBe(false);
+    expect(passesFilter(tx(summary("RECEIVE", [["SOL", "1"]]), { addresses: ["FRIEND"] }), f, undefined, isDecoy)).toBe(true);
+  });
 });
+
