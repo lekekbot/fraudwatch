@@ -8,9 +8,12 @@ import { Button } from "@/components/ui/button";
 import type { AddressState } from "@/lib/case/address-state";
 import { graphWheelAction } from "@/lib/gestures";
 import { edgeFlow, OMITTED_NODE_ID, startedBy, summarizeRelationship, type GraphEdge, type GraphNode, type GraphRanking, type WalletGraph as Graph } from "@/lib/graph/build";
-import { classifyLayout, layoutGraph, nodeRadius, type Point } from "@/lib/graph/layout";
+import { classifyLayout, layoutGraph, nodeRadius, type Point, type Spacing, SPACINGS } from "@/lib/graph/layout";
 import type { Names } from "@/lib/labels/labels";
 import { AssetIcon } from "../asset-icon";
+
+/** Remembers the chosen graph spacing in this browser. */
+const SPACING_KEY = "fraudwatch:graph-spacing";
 
 type Palette = Record<"fg" | "muted" | "border" | "card" | "bg" | "program" | "send" | "receive" | "lookalike", string>;
 
@@ -196,7 +199,15 @@ export function WalletGraph({
   const [hoverCard, setHoverCard] = useState<HoverCard | null>(null);
   const [legendOpen, setLegendOpen] = useState(false);
 
-  const layout = useMemo(() => layoutGraph(graph.nodes, graph.edges, primaryWallet, layoutSize), [graph, primaryWallet, layoutSize]);
+  // How spread out the map is; remembered in this browser. The graph only mounts client-side, so storage is there.
+  const [spacing, setSpacing] = useState<Spacing>(() => {
+    const saved = localStorage.getItem(SPACING_KEY);
+    return saved && saved in SPACINGS ? (saved as Spacing) : "normal";
+  });
+  const layout = useMemo(
+    () => layoutGraph(graph.nodes, graph.edges, primaryWallet, layoutSize, undefined, SPACINGS[spacing]),
+    [graph, primaryWallet, layoutSize, spacing],
+  );
   // Positions start from the layout; dragging moves them without re-running it.
   const positions = useRef(new Map<string, Point>());
   const nodesById = useMemo(() => new Map(graph.nodes.map((n) => [n.id, n])), [graph]);
@@ -554,7 +565,8 @@ export function WalletGraph({
     const y0 = Math.min(...pts.map((q) => q.y)) - pad;
     const y1 = Math.max(...pts.map((q) => q.y)) + pad;
     const { width, height } = sizeRef.current;
-    const k = Math.min(1.15, Math.max(0.65, Math.min(width / (x1 - x0), height / (y1 - y0))));
+    // Zoom out as far as it takes to show every wallet: wide spacing can spread them well beyond one screen.
+    const k = Math.min(1.15, Math.max(0.2, Math.min(width / (x1 - x0), height / (y1 - y0))));
     const t = zoomIdentity.translate(width / 2 - (k * (x0 + x1)) / 2, height / 2 - (k * (y0 + y1)) / 2).scale(k);
     select(canvas).call(zoomRef.current.transform, t);
   }, []);
@@ -911,6 +923,25 @@ export function WalletGraph({
               </option>
             ))}
             <option value="all">All</option>
+          </select>
+          <label className="sr-only" htmlFor="graph-spacing">
+            Spacing
+          </label>
+          <select
+            id="graph-spacing"
+            value={spacing}
+            title="How spread out the map is. Secondary wallets always sit beyond the primary's own counterparties."
+            onChange={(event) => {
+              const next = event.target.value as Spacing;
+              setSpacing(next);
+              localStorage.setItem(SPACING_KEY, next);
+            }}
+            className="h-7 rounded-md bg-transparent px-2 text-xs outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <option value="compact">Compact</option>
+            <option value="normal">Normal spacing</option>
+            <option value="wide">Wide</option>
+            <option value="widest">Very wide</option>
           </select>
           <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
           <Button

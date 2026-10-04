@@ -155,13 +155,26 @@ function layoutCore(nodes: GraphNode[], edges: GraphEdge[], primary: string, vie
   return best;
 }
 
-/** Core topology first, then shared bridges, owner satellites, aggregates, and one collision pass. */
+/** How far apart the graph is drawn: 1 is the default; larger spreads every ring and gap. */
+export const SPACINGS = { compact: 0.75, normal: 1, wide: 1.4, widest: 1.9 } as const;
+export type Spacing = keyof typeof SPACINGS;
+
+/** Distance from a wallet to its ring of counterparties: innermost, and between rings. */
+const RING = 190;
+const RING_STEP = 95;
+const ringsFor = (count: number) => (count <= 10 ? 1 : count <= 28 ? 2 : 3);
+
+/**
+ * Core topology first, then shared bridges, owner satellites, aggregates, and one collision pass.
+ * Secondary wallets sit beyond the primary's own counterparties, with room for theirs; `spacing` scales it all.
+ */
 export function layoutGraph(
   nodes: GraphNode[],
   edges: GraphEdge[],
   primary?: string,
   viewport: LayoutViewport = { width: 1100, height: 760 },
   ticks = 220,
+  spacing = 1,
 ): Map<string, Point> {
   if (!primary || !nodes.some((node) => node.id === primary)) return new Map(nodes.map((node, i) => [node.id, { x: (i % 8) * 110, y: Math.floor(i / 8) * 80 }]));
 
@@ -170,16 +183,43 @@ export function layoutGraph(
   const coreIds = new Set(core.map((node) => node.id));
   const coreEdges = edges.filter((edge) => coreIds.has(edge.a) && coreIds.has(edge.b));
   const targets = layoutCore(core, coreEdges, primary, viewport, ticks);
-  const coreCenter = {
-    x: core.reduce((sum, node) => sum + targets.get(node.id)!.x, 0) / core.length,
-    y: core.reduce((sum, node) => sum + targets.get(node.id)!.y, 0) / core.length,
-  };
-  const coreExtent = Math.max(80, ...core.map((node) => Math.hypot(targets.get(node.id)!.x - coreCenter.x, targets.get(node.id)!.y - coreCenter.y)));
   const coreLinks = new Map<string, { id: string; weight: number }[]>();
   for (const edge of edges) {
     if (coreIds.has(edge.a) && !coreIds.has(edge.b)) coreLinks.set(edge.b, [...(coreLinks.get(edge.b) ?? []), { id: edge.a, weight: edgeWeight(edge) }]);
     if (coreIds.has(edge.b) && !coreIds.has(edge.a)) coreLinks.set(edge.a, [...(coreLinks.get(edge.a) ?? []), { id: edge.b, weight: edgeWeight(edge) }]);
   }
+  const satellites = new Map<string, GraphNode[]>();
+  for (const node of nodes) {
+    if (roles.get(node.id) !== "peripheral") continue;
+    const links = coreLinks.get(node.id) ?? [];
+    const owner = [...links].sort((a, b) => b.weight - a.weight || a.id.localeCompare(b.id))[0]?.id ?? primary;
+    satellites.set(owner, [...(satellites.get(owner) ?? []), node]);
+  }
+
+  // Secondary wallets go beyond the primary's outermost ring of counterparties, keeping their direction, so the
+  // primary's cluster and each secondary's own cluster don't overlap.
+  const origin = targets.get(primary)!;
+  const primaryReach = (RING + (ringsFor(satellites.get(primary)?.length ?? 0) - 1) * RING_STEP) * spacing;
+  for (const node of core) {
+    if (node.id === primary) continue;
+    const at = targets.get(node.id)!;
+    let dx = at.x - origin.x;
+    let dy = at.y - origin.y;
+    let length = Math.hypot(dx, dy);
+    if (length < 1) {
+      const angle = stableAngle(node.id);
+      dx = Math.cos(angle);
+      dy = Math.sin(angle);
+      length = 1;
+    }
+    const wanted = Math.max(length * spacing, primaryReach + RING * spacing);
+    targets.set(node.id, { x: origin.x + (dx / length) * wanted, y: origin.y + (dy / length) * wanted });
+  }
+  const coreCenter = {
+    x: core.reduce((sum, node) => sum + targets.get(node.id)!.x, 0) / core.length,
+    y: core.reduce((sum, node) => sum + targets.get(node.id)!.y, 0) / core.length,
+  };
+  const coreExtent = Math.max(80, ...core.map((node) => Math.hypot(targets.get(node.id)!.x - coreCenter.x, targets.get(node.id)!.y - coreCenter.y)));
 
   for (const node of nodes.filter((item) => roles.get(item.id) === "bridge").sort((a, b) => a.id.localeCompare(b.id))) {
     const links = coreLinks.get(node.id) ?? [];
@@ -196,44 +236,37 @@ export function layoutGraph(
       dy = Math.sin(angle);
     }
     const length = Math.hypot(dx, dy);
-    const push = links.length >= 3 ? 70 : 110;
+    const push = (links.length >= 3 ? 70 : 110) * spacing;
     targets.set(node.id, { x: barycenter.x + (dx / length) * push, y: barycenter.y + (dy / length) * push });
   }
 
-  const satellites = new Map<string, GraphNode[]>();
-  for (const node of nodes) {
-    if (roles.get(node.id) !== "peripheral") continue;
-    const links = coreLinks.get(node.id) ?? [];
-    const owner = [...links].sort((a, b) => b.weight - a.weight || a.id.localeCompare(b.id))[0]?.id ?? primary;
-    satellites.set(owner, [...(satellites.get(owner) ?? []), node]);
-  }
   for (const [ownerId, group] of [...satellites].sort(([a], [b]) => a.localeCompare(b))) {
     const owner = targets.get(ownerId) ?? targets.get(primary)!;
     const ownerAngle = Math.hypot(owner.x - coreCenter.x, owner.y - coreCenter.y) < 40 ? stableAngle(ownerId) : Math.atan2(owner.y - coreCenter.y, owner.x - coreCenter.x);
     group.sort((a, b) => b.txCount - a.txCount || a.id.localeCompare(b.id));
-    const rings = group.length <= 10 ? 1 : group.length <= 28 ? 2 : 3;
+    const rings = ringsFor(group.length);
     const spread = Math.hypot(owner.x - coreCenter.x, owner.y - coreCenter.y) < 40 ? Math.PI * 2 : Math.min(Math.PI * 1.35, Math.PI / 2 + group.length * 0.06);
     group.forEach((node, index) => {
       const angle = ownerAngle - spread / 2 + ((index + 0.5) / group.length) * spread;
       const ring = index % rings;
-      const distance = 190 + ring * 95;
+      const distance = (RING + ring * RING_STEP) * spacing;
       let target = { x: owner.x + Math.cos(angle) * distance, y: owner.y + Math.sin(angle) * distance };
-      let dx = target.x - coreCenter.x;
-      let dy = target.y - coreCenter.y;
-      let fromCenter = Math.hypot(dx, dy);
-      if (fromCenter < 1) {
-        dx = Math.cos(angle);
-        dy = Math.sin(angle);
-        fromCenter = 1;
+      // Keep clear of the other wallets: a counterparty stays with its own wallet's cluster.
+      for (const other of core) {
+        if (other.id === ownerId) continue;
+        const at = targets.get(other.id)!;
+        const dx = target.x - at.x;
+        const dy = target.y - at.y;
+        const gap = Math.hypot(dx, dy);
+        const clear = RING * 0.8 * spacing;
+        if (gap < clear) target = gap < 1 ? { x: at.x + clear, y: at.y } : { x: at.x + (dx / gap) * clear, y: at.y + (dy / gap) * clear };
       }
-      const minDistance = coreExtent + 150 + ring * 45;
-      if (fromCenter < minDistance) target = { x: coreCenter.x + (dx / fromCenter) * minDistance, y: coreCenter.y + (dy / fromCenter) * minDistance };
       targets.set(node.id, target);
     });
   }
 
   const aggregate = nodes.find((node) => roles.get(node.id) === "aggregate");
-  if (aggregate) targets.set(aggregate.id, { x: coreCenter.x, y: coreCenter.y + coreExtent + Math.min(360, viewport.height * 0.38) });
+  if (aggregate) targets.set(aggregate.id, { x: coreCenter.x, y: coreCenter.y + coreExtent + Math.min(360, viewport.height * 0.38) * spacing });
 
   type SimNode = SimulationNodeDatum & { id: string; role: LayoutRole; targetX: number; targetY: number; footprint: number };
   const simNodes: SimNode[] = nodes.map((node) => {

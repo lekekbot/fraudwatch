@@ -95,4 +95,25 @@ describe("layoutGraph", () => {
     expect(cp(50)).toBeGreaterThan(cp(40));
     expect(cp(1_000_000)).toBe(21);
   });
+
+  it("puts secondary wallets beyond the primary's counterparties, at every spacing", () => {
+    const wallets: GraphNode[] = [
+      { id: "W", kind: "wallet", txCount: 40 },
+      { id: "S", kind: "wallet", txCount: 10 },
+      ...Array.from({ length: 14 }, (_, i) => ({ id: "C" + i, kind: "counterparty" as const, txCount: 14 - i })),
+      ...Array.from({ length: 4 }, (_, i) => ({ id: "D" + i, kind: "counterparty" as const, txCount: 4 - i })),
+    ];
+    const links = [edge("W", "S", 3), ...Array.from({ length: 14 }, (_, i) => edge("W", "C" + i)), ...Array.from({ length: 4 }, (_, i) => edge("S", "D" + i, 2))];
+    const reach = (pos: Map<string, { x: number; y: number }>) => {
+      const w = pos.get("W")!;
+      const from = (id: string) => Math.hypot(pos.get(id)!.x - w.x, pos.get(id)!.y - w.y);
+      return { secondary: from("S"), farthestOwn: Math.max(...Array.from({ length: 14 }, (_, i) => from("C" + i))) };
+    };
+    for (const spacing of [0.75, 1, 1.4, 1.9]) {
+      const { secondary, farthestOwn } = reach(layoutGraph(wallets, links, "W", undefined, 220, spacing));
+      expect(secondary).toBeGreaterThan(farthestOwn);
+    }
+    expect(reach(layoutGraph(wallets, links, "W", undefined, 220, 1.9)).secondary).toBeGreaterThan(reach(layoutGraph(wallets, links, "W", undefined, 220, 1)).secondary);
+  });
 });
+
