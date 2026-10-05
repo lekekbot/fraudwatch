@@ -40,7 +40,7 @@ export function classifyLayout(nodes: GraphNode[], edges: GraphEdge[]): Map<stri
         ? "core"
         : node.kind === "aggregate"
           ? "aggregate"
-          : node.kind === "counterparty" && (coreConnections.get(node.id)?.size ?? 0) >= 2
+          : (node.kind === "counterparty" || node.kind === "entity") && (coreConnections.get(node.id)?.size ?? 0) >= 2
             ? "bridge"
             : "peripheral",
     ]),
@@ -267,8 +267,10 @@ export function layoutGraph(
     });
   }
 
-  const aggregate = nodes.find((node) => roles.get(node.id) === "aggregate");
-  if (aggregate) targets.set(aggregate.id, { x: coreCenter.x, y: coreCenter.y + coreExtent + Math.min(360, viewport.height * 0.38) * spacing });
+  // Clusters sit in one row just below everything else, in their fixed order.
+  const aggregates = nodes.filter((node) => roles.get(node.id) === "aggregate");
+  const bottom = Math.max(coreCenter.y + coreExtent, ...nodes.filter((node) => roles.get(node.id) !== "aggregate").map((node) => targets.get(node.id)?.y ?? -Infinity));
+  aggregates.forEach((node, i) => targets.set(node.id, { x: coreCenter.x + (i - (aggregates.length - 1) / 2) * 150, y: bottom + 110 * spacing }));
 
   type SimNode = SimulationNodeDatum & { id: string; role: LayoutRole; targetX: number; targetY: number; footprint: number };
   const simNodes: SimNode[] = nodes.map((node) => {
@@ -296,4 +298,29 @@ export function layoutGraph(
     .stop();
   simulation.tick(160);
   return new Map(simNodes.map((node) => [node.id, { x: node.x ?? 0, y: node.y ?? 0 }]));
+}
+
+/** How much detail the map draws at a zoom level: far keeps the case's skeleton, close shows everything. */
+export type ZoomTier = "far" | "medium" | "close";
+
+/**
+ * The detail tier for zoom `k`, given the current one. Each boundary has a gap (enter at one scale, leave at
+ * another), so labels don't flicker while zooming across it.
+ */
+export function zoomTier(current: ZoomTier, k: number): ZoomTier {
+  if (current === "far") return k > 0.6 ? zoomTier("medium", k) : "far";
+  if (current === "close") return k < 1.15 ? zoomTier("medium", k) : "close";
+  return k < 0.5 ? "far" : k > 1.3 ? "close" : "medium";
+}
+
+/** The relationships still drawn at far zoom: the busiest quarter (at least 10), plus every line between mapped wallets or to a service. */
+export function majorEdges(nodes: GraphNode[], edges: GraphEdge[]): Set<string> {
+  const ids = (kind: GraphNode["kind"]) => new Set(nodes.filter((node) => node.kind === kind).map((node) => node.id));
+  const wallets = ids("wallet");
+  const services = ids("entity");
+  const ranked = edges.filter((edge) => edge.kind === "interaction").sort((x, y) => interactionCount(y) - interactionCount(x) || x.id.localeCompare(y.id));
+  return new Set([
+    ...ranked.slice(0, Math.max(10, Math.ceil(ranked.length / 4))),
+    ...ranked.filter((edge) => (wallets.has(edge.a) && wallets.has(edge.b)) || services.has(edge.a) || services.has(edge.b)),
+  ].map((edge) => edge.id));
 }

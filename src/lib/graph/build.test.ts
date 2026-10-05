@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { WalletTransactionEffect } from "@/lib/state/reconstruct";
 import type { EffectSummary } from "@/lib/state/summarize";
-import { BURNED_NODE_ID, buildInteractionGraph, edgeFlow, OMITTED_NODE_ID, pairId } from "./build";
+import { BURNED_NODE_ID, buildInteractionGraph, clusterNodeId, edgeFlow, entityNodeId, pairId } from "./build";
 
 const A = "A-wallet";
 const B = "B-counterparty";
 const C = "C-counterparty";
 const JUPITER = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
+const JUPITER_LIMIT = "j1o2qRpjcyUwEvwtcfhEQefh773ZgjxcVRry7LDqg5X";
 const SYSTEM = "11111111111111111111111111111111";
 
 const effect = (wallet: string, signature: string, day: number): WalletTransactionEffect => ({
@@ -48,7 +49,7 @@ describe("buildInteractionGraph", () => {
       [A, "wallet"],
       [BURNED_NODE_ID, "burn"],
       // B is ranked out instead.
-      [OMITTED_NODE_ID, "aggregate"],
+      [clusterNodeId("one_off"), "aggregate"],
     ]);
     expect(g.edges[0].interactions[0].movements).toEqual([{ from: A, to: BURNED_NODE_ID, assetId: "USDC", amount: "520000000" }]);
     expect(g.counts.addresses).toBe(1);
@@ -219,7 +220,7 @@ describe("buildInteractionGraph", () => {
       },
     ];
     const g = buildInteractionGraph(sides, { maxNodes: 2 });
-    expect(g.nodes.map((n) => n.id)).toEqual([A, B, OMITTED_NODE_ID]);
+    expect(g.nodes.map((n) => n.id)).toEqual([A, B, clusterNodeId("one_off")]);
     expect(g.omittedNodes).toBe(1);
     expect(g.edges.map((e) => e.id)).toEqual([pairId(A, B)]);
   });
@@ -239,8 +240,39 @@ describe("buildInteractionGraph", () => {
       },
     ];
     const g = buildInteractionGraph(sides, { maxNodes: 3 });
-    expect(g.nodes.map((n) => n.id)).toEqual([A, B, D, OMITTED_NODE_ID]);
-    expect(g.nodes.at(-1)).toMatchObject({ kind: "aggregate", txCount: 1 });
+    expect(g.nodes.map((n) => n.id)).toEqual([A, B, D, clusterNodeId("one_off")]);
+    expect(g.nodes.at(-1)).toMatchObject({ kind: "aggregate", txCount: 1, cluster: { kind: "one_off", addresses: 1, wallets: [A] } });
+  });
+
+  it("collapses ranked-out addresses into their clusters, never clusters flagged ones, and expands a cluster on request", () => {
+    const [KNOWN, DECOY, FLAGGED, X, Y] = ["K-known", "Q-decoy", "F-flagged", "X-unknown", "Y-once"];
+    const sides = [
+      {
+        wallet: A,
+        effects: ["b1", "b2", "b3", "k", "q", "f", "x1", "x2", "y"].map((s, i) => effect(A, s, i + 1)),
+        summaries: [B, B, B, KNOWN, DECOY, FLAGGED, X, X, Y].map((to) => summary({ counterparties: [cp(to, "SOL", "1")] })),
+      },
+    ];
+    const clusterOf = (id: string) => (id === KNOWN ? "known" : id === DECOY ? "decoy" : id === FLAGGED ? null : "unknown");
+    const g = buildInteractionGraph(sides, { maxNodes: 2, ranking: "interactions", clusterOf });
+    expect(g.nodes.map((n) => n.id)).toEqual([A, B, FLAGGED, clusterNodeId("known"), clusterNodeId("decoy"), clusterNodeId("unknown"), clusterNodeId("one_off")]);
+    expect(g.nodes.find((n) => n.id === clusterNodeId("unknown"))).toMatchObject({ txCount: 2, cluster: { kind: "unknown", addresses: 1 } });
+    expect(g.nodes.find((n) => n.id === clusterNodeId("one_off"))).toMatchObject({ txCount: 1, cluster: { kind: "one_off", addresses: 1 } });
+    expect(g.omittedNodes).toBe(4);
+
+    const open = buildInteractionGraph(sides, { maxNodes: 2, ranking: "interactions", clusterOf, expandedClusters: new Set(["unknown"]) });
+    expect(open.nodes.map((n) => n.id)).toEqual([A, B, FLAGGED, X, clusterNodeId("known"), clusterNodeId("decoy"), clusterNodeId("one_off")]);
+    expect(open.edges.map((e) => e.id).sort()).toEqual([pairId(A, B), pairId(A, FLAGGED), pairId(A, X)].sort());
+  });
+
+  it("ranks counterparties shared by mapped wallets first in the significant projection", () => {
+    const S = "S-shared";
+    const sides = [
+      { wallet: A, effects: ["b1", "b2", "b3", "s1"].map((s, i) => effect(A, s, i + 1)), summaries: [B, B, B, S].map((to) => summary({ counterparties: [cp(to, "SOL", "1")] })) },
+      { wallet: C, effects: [effect(C, "s2", 5)], summaries: [summary({ counterparties: [cp(S, "SOL", "1")] })] },
+    ];
+    const g = buildInteractionGraph(sides, { maxNodes: 3 });
+    expect(g.nodes.filter((n) => n.kind === "counterparty").map((n) => n.id)).toEqual([S]);
   });
 
   it("records who approved each transaction, and counts it per connection", () => {
@@ -258,5 +290,27 @@ describe("buildInteractionGraph", () => {
     expect(byA).toBe(1);
     expect(edge.summary!.initiatedByOthers).toBe(1);
   });
-});
 
+  it("collapses a protocol's addresses into one entity line, keeping each real address, and expands it on request", () => {
+    const sides = [
+      {
+        wallet: A,
+        effects: [effect(A, "j1", 1), effect(A, "j2", 2)],
+        summaries: [summary({ counterparties: [cp(JUPITER, "SOL", "5")] }), summary({ kind: "RECEIVE", counterparties: [cp(JUPITER_LIMIT, "USDC", "-7")] })],
+      },
+    ];
+    const g = buildInteractionGraph(sides);
+    const jupiter = entityNodeId("jupiter");
+    expect(g.nodes.find((n) => n.id === jupiter)).toMatchObject({ kind: "entity", txCount: 2, entity: { protocolId: "jupiter", addresses: [JUPITER, JUPITER_LIMIT].sort() } });
+    const [edge] = g.edges;
+    expect(edge.id).toBe(pairId(A, jupiter));
+    expect(edge.interactions.flatMap((it) => it.movements)).toEqual([
+      { from: A, to: jupiter, assetId: "SOL", amount: "5", via: JUPITER },
+      { from: jupiter, to: A, assetId: "USDC", amount: "7", via: JUPITER_LIMIT },
+    ]);
+    expect(edge.summary).toMatchObject({ aToB: 1, bToA: 1 });
+
+    const open = buildInteractionGraph(sides, { expandedEntities: new Set(["jupiter"]) });
+    expect(open.edges.map((e) => e.id).sort()).toEqual([pairId(A, JUPITER), pairId(A, JUPITER_LIMIT)].sort());
+  });
+});

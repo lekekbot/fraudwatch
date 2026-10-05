@@ -3,7 +3,7 @@
 import { ArrowDownLeftIcon, ArrowUpRightIcon, ChartNoAxesGanttIcon, ExternalLinkIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { BURNED_NODE_ID, edgeFlow, startedBy, summarizeRelationship, type GraphEdge } from "@/lib/graph/build";
+import { BURNED_NODE_ID, edgeFlow, entityProtocol, startedBy, summarizeRelationship, type GraphEdge } from "@/lib/graph/build";
 import type { Names } from "@/lib/labels/labels";
 import { type Assets, assetLabel, formatUtc } from "../asset-format";
 import { AssetFlows } from "../asset-flows";
@@ -30,6 +30,7 @@ export function EdgePanel({
   onSelectAddress,
   onShowOnTimeline,
   onViewAll,
+  onOpenInTimeline,
   onClose,
 }: {
   edge: GraphEdge;
@@ -41,6 +42,8 @@ export function EdgePanel({
   onSelectAddress: (address: string) => void;
   onShowOnTimeline: (signature: string, wallet: string) => void;
   onViewAll: (counterparty: string) => void;
+  /** The Timeline, narrowed to exactly this connection's transactions. */
+  onOpenInTimeline: () => void;
   onClose: () => void;
 }) {
   const name = (address: string) =>
@@ -163,6 +166,8 @@ export function EdgePanel({
                       <span className="min-w-0 truncate tabular-nums" title={`${names.of(m.from)} → ${names.of(m.to)}`}>
                         {formatAmount(m.amount, m.assetId)} <span className="text-muted-foreground">{assetLabel(m.assetId, assets)}</span>
                       </span>
+                      {/* A service's line keeps the real address each movement went through. */}
+                      {m.via && <span className="flex min-w-0 gap-1 text-muted-foreground">via {name(m.via)}</span>}
                     </div>
                   );
                 })}
@@ -216,10 +221,18 @@ export function EdgePanel({
             </li>
           ))}
         </ol>
-        {edge.interactions.length > representatives.length && counterparty !== BURNED_NODE_ID && (
-          <Button variant="outline" size="sm" className="w-full" onClick={() => onViewAll(counterparty)}>
-            View all {edge.interactions.length.toLocaleString()} transactions
-          </Button>
+        {counterparty !== BURNED_NODE_ID && (
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" className="flex-1" onClick={onOpenInTimeline}>
+              Open in Timeline
+            </Button>
+            {/* The table lists one address's transactions; a service has several, so it opens on the Timeline only. */}
+            {edge.interactions.length > representatives.length && !entityProtocol(counterparty) && (
+              <Button variant="outline" size="sm" className="flex-1" onClick={() => onViewAll(counterparty)}>
+                View all {edge.interactions.length.toLocaleString()}
+              </Button>
+            )}
+          </div>
         )}
       </PanelSection>
     </>

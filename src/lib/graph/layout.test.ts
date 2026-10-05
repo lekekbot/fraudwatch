@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GraphEdge, GraphNode } from "./build";
-import { classifyLayout, layoutGraph, nodeRadius } from "./layout";
+import { classifyLayout, layoutGraph, majorEdges, nodeRadius, zoomTier } from "./layout";
 
 const movement = (from: string, to: string, signature: string) => ({
   signature,
@@ -126,5 +126,37 @@ describe("layoutGraph", () => {
     }
     expect(reach(layoutGraph(wallets, links, "W", undefined, 220, 1.9)).secondary).toBeGreaterThan(reach(layoutGraph(wallets, links, "W", undefined, 220, 1)).secondary);
   });
-});
 
+  it("changes zoom tier only past each boundary's gap", () => {
+    expect(zoomTier("medium", 0.52)).toBe("medium");
+    expect(zoomTier("medium", 0.45)).toBe("far");
+    expect(zoomTier("far", 0.55)).toBe("far");
+    expect(zoomTier("far", 0.7)).toBe("medium");
+    expect(zoomTier("far", 2)).toBe("close");
+    expect(zoomTier("close", 1.2)).toBe("close");
+    expect(zoomTier("close", 1)).toBe("medium");
+  });
+
+  it("keeps the busiest lines, wallet-to-wallet lines and service lines at far zoom", () => {
+    const nodes: GraphNode[] = [
+      { id: "W1", kind: "wallet", txCount: 0 },
+      { id: "W2", kind: "wallet", txCount: 0 },
+      { id: "S", kind: "entity", txCount: 1 },
+      ...Array.from({ length: 12 }, (_, i) => ({ id: `c${i}`, kind: "counterparty" as const, txCount: 1 })),
+    ];
+    const line = (a: string, b: string, count: number): GraphEdge => ({
+      id: `${a}|${b}`,
+      a,
+      b,
+      kind: "interaction",
+      interactions: Array.from({ length: count }, (_, i) => movement(a, b, `${a}${b}${i}`)),
+    });
+    const edges = [line("W1", "W2", 1), line("W1", "S", 1), ...Array.from({ length: 12 }, (_, i) => line("W1", `c${i}`, i + 2))];
+    const major = majorEdges(nodes, edges);
+    expect(major.has("W1|W2")).toBe(true);
+    expect(major.has("W1|S")).toBe(true);
+    expect(major.has("W1|c11")).toBe(true);
+    expect(major.has("W1|c0")).toBe(false);
+    expect(major.size).toBe(12);
+  });
+});

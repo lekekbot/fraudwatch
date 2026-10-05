@@ -66,6 +66,13 @@ describe("passesFilter", () => {
 });
 
 describe("involvedAddresses", () => {
+  it("keeps only a graph relationship's transactions", () => {
+    const f = with_({ relationship: { label: "A ↔ B", signatures: new Set(["sig"]) } });
+    expect(isFilterActive(f)).toBe(true);
+    expect(passesFilter(tx(summary("SEND")), f)).toBe(true);
+    expect(passesFilter(tx(summary("SEND"), { signature: "other" }), f)).toBe(false);
+  });
+
   it("collects counterparties, sender and NFT party once each", () => {
     const s = summary("PROGRAM", [], [], {
       counterparties: [
