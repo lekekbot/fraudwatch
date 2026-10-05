@@ -452,30 +452,6 @@ export function WalletGraph({
           }
         }
       }
-      // The count shows on the selected line, and on lines between mapped wallets when nothing is focused; not on hover.
-      if (edge.kind === "interaction" && (selected || (coreEdge && tier !== "far" && !focusing))) {
-        const point = pointOnPath(segment, 0.72);
-        const tangent = pathTangent(segment, 0.72);
-        const length = Math.hypot(tangent.x, tangent.y) || 1;
-        const side = [...edge.id].reduce((hash, char) => hash + char.charCodeAt(0), 0) % 2 ? 1 : -1;
-        const badgeX = point.x + (-tangent.y / length) * (10 / t.k) * side;
-        const badgeY = point.y + (tangent.x / length) * (10 / t.k) * side;
-        const count = edge.interactions.length.toLocaleString();
-        ctx.font = `600 ${9 / t.k}px ui-sans-serif, system-ui, sans-serif`;
-        const badgeWidth = ctx.measureText(count).width + 8 / t.k;
-        ctx.globalAlpha = on ? (selected ? 1 : 0.9) : 0.12;
-        ctx.fillStyle = p.bg;
-        ctx.strokeStyle = p.border;
-        ctx.lineWidth = 1 / t.k;
-        ctx.beginPath();
-        ctx.roundRect(badgeX - badgeWidth / 2, badgeY - 6.5 / t.k, badgeWidth, 13 / t.k, 4 / t.k);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = p.fg;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(count, badgeX, badgeY);
-      }
     }
     ctx.setLineDash([]);
     ctx.lineCap = "butt";
@@ -529,7 +505,7 @@ export function WalletGraph({
       const primaryNode = n.id === primaryWallet;
       const restingAlpha = role === "core" ? 1 : role === "bridge" ? 0.88 : role === "aggregate" ? 0.58 : 0.66;
       const nodeAlpha = litNodes.size > 0 && !litNodes.has(n.id) ? (role === "core" ? 0.55 : 0.15) : restingAlpha;
-      // An opaque backing in the page colour (the trick the edge badges use) keeps connections
+      // An opaque backing in the page colour keeps connections
       // from showing through a translucent node body — they read as a line across the node
       // once you zoom in.
       ctx.globalAlpha = 1;
@@ -1249,7 +1225,7 @@ export function WalletGraph({
               </span>
               Diamond at a line&apos;s end: that side approved (signed) the transactions · hollow in the middle: someone else did
             </span>
-            <span>Hover a line for its transaction count · click a node or line to inspect · select a node, then Isolate</span>
+            <span>Hover a line for its details · click a node or line to inspect · select a node, then Isolate</span>
             <span>Zoomed out, only wallets, services, flagged addresses and the busiest lines are drawn; zoom in for the rest</span>
             {graph.omittedNodes > 0 && <span>Dashed boxes collapse {graph.omittedNodes.toLocaleString()} lower-ranked addresses by kind · click one to show its addresses</span>}
           </>
