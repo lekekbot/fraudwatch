@@ -438,17 +438,16 @@ export function WalletGraph({
           ctx.closePath();
           ctx.fill();
 
-          // Dots run source → target: 1 for little value, up to 5 for the largest flows of an asset. Each keeps its own
-          // speed, start and slight sideways offset, so a busy line doesn't move in lockstep.
+          // Dots run source → target along the line: 1 for little value, up to 5 for the largest flows of an asset.
+          // Each keeps its own speed and start, so a busy line doesn't move in lockstep.
           const particles = 1 + Math.round(4 * Math.sqrt(flow.share));
           const seed = [...edge.id, ...flow.source].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) % 100_003, 7);
           for (let i = 0; i < particles; i++) {
             const speed = 0.8 + 0.4 * jitter(seed + i * 3);
             const progress = ((now / 5200) * speed + jitter(seed + i * 3 + 1) + i / particles) % 1;
             const point = pointOnPath(flowSegment, progress);
-            const sway = ((jitter(seed + i * 3 + 2) - 0.5) * 4) / t.k;
             ctx.beginPath();
-            ctx.arc(point.x - uy * sway, point.y + ux * sway, (selected ? 2.3 : 1.7) / t.k, 0, Math.PI * 2);
+            ctx.arc(point.x, point.y, (selected ? 2.3 : 1.7) / t.k, 0, Math.PI * 2);
             ctx.fill();
           }
         }
