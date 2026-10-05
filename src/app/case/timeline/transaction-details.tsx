@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronLeftIcon, ChevronRightIcon, CopyIcon, ExternalLinkIcon, EyeOffIcon, StarIcon, XIcon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, CopyIcon, ExternalLinkIcon, EyeOffIcon, StarIcon, WaypointsIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -73,6 +73,7 @@ export function TransactionDetails({
   walletName,
   bookmarked,
   onToggleBookmark,
+  onShowInGraph,
 }: {
   effect: WalletTransactionEffect;
   summary: EffectSummary;
@@ -95,6 +96,8 @@ export function TransactionDetails({
   walletName?: string;
   bookmarked: boolean;
   onToggleBookmark: () => void;
+  /** The Graph, narrowed to the wallets in this event. */
+  onShowInGraph?: () => void;
 }) {
   const enrichment = tx ? enrichTransaction(tx) : null;
   const protocols = enrichment ? protocolsUsed(enrichment) : [];
@@ -126,6 +129,11 @@ export function TransactionDetails({
           >
             <StarIcon className={bookmarked ? "fill-current text-[oklch(0.8_0.15_80)]" : undefined} />
           </Button>
+          {onShowInGraph && (
+            <Button variant="ghost" size="icon-sm" aria-label="Show in graph" title="Show the wallets in this event on the Graph" onClick={onShowInGraph}>
+              <WaypointsIcon />
+            </Button>
+          )}
           <Button variant="ghost" size="icon-sm" aria-label="Hide from map" title="Hide from map" onClick={onHide}>
             <EyeOffIcon />
           </Button>

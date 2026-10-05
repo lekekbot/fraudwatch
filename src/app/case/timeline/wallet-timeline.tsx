@@ -71,6 +71,7 @@ export function WalletTimeline({
   onBookmarkTime,
   initialTime,
   onSelectTransaction,
+  onShowInGraph,
   onDateRangeChange,
   overviewTimes,
   ref,
@@ -110,6 +111,8 @@ export function WalletTimeline({
   initialTime?: number;
   /** A transaction was selected; the inspector should show it over any open address. */
   onSelectTransaction: () => void;
+  /** Show the wallets in one event on the Graph. */
+  onShowInGraph?: (signature: string) => void;
   /** A minimap brush becomes the case's date filter, for every view; resetting the view clears it. */
   onDateRangeChange?: (range: { start: number; end: number } | null) => void;
   /** What the minimap draws: activity through every filter but the date range, so it still shows the whole case. */
@@ -329,6 +332,7 @@ export function WalletTimeline({
           walletName={lanes.length > 1 ? currentLane.label : undefined}
           bookmarked={isBookmarked(current.signature)}
           onToggleBookmark={() => onToggleBookmark(current.signature, currentLane.wallet)}
+          onShowInGraph={onShowInGraph && (() => onShowInGraph(current.signature))}
         />
       ) : (
         inspector

@@ -53,6 +53,9 @@ export const CATEGORIES: { category: EventCategory; label: string; dot: string }
   { category: "FAILED", label: "Failed", dot: "border border-destructive" },
 ];
 
+/** How a semantic event category reads anywhere in the interface. */
+export const categoryLabel = (category: EventCategory) => CATEGORIES.find((c) => c.category === category)?.label ?? category;
+
 function Toggle({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
