@@ -1,3 +1,4 @@
+import type { EventCategory, SemanticEvent } from "@/lib/semantic/events";
 import type { EffectKind, EffectSummary } from "@/lib/state/summarize";
 
 /**
@@ -6,6 +7,10 @@ import type { EffectKind, EffectSummary } from "@/lib/state/summarize";
  * Lasting hides ("Hide from map", hide rules) live on the case, not here.
  */
 export type TxFilter = {
+  /** Semantic event categories to leave out (see `SemanticEvent.category`). */
+  hiddenCategories: ReadonlySet<EventCategory>;
+  /** Leave out events FraudWatch reads with low confidence. */
+  hideLowConfidence: boolean;
   hiddenKinds: ReadonlySet<EffectKind>;
   /** A transaction is hidden only when every asset it moves is hidden. */
   hiddenAssets: ReadonlySet<string>;
@@ -28,6 +33,8 @@ export type TxFilter = {
 };
 
 export const EMPTY_FILTER: TxFilter = {
+  hiddenCategories: new Set(),
+  hideLowConfidence: false,
   hiddenKinds: new Set(),
   hiddenAssets: new Set(),
   direction: "any",
@@ -41,7 +48,8 @@ export const EMPTY_FILTER: TxFilter = {
 };
 
 export const isFilterActive = (f: TxFilter) =>
-  f.hiddenKinds.size + f.hiddenAssets.size + f.protocols.size + f.tags.size > 0 ||
+  f.hiddenCategories.size + f.hiddenKinds.size + f.hiddenAssets.size + f.protocols.size + f.tags.size > 0 ||
+  f.hideLowConfidence ||
   f.direction !== "any" ||
   f.minAmount !== null ||
   f.hideDecoys ||
@@ -58,6 +66,8 @@ export type FilterableTx = {
   /** ms. */
   time: number;
   summary: EffectSummary;
+  /** The transaction's semantic event; null only if it couldn't be interpreted. */
+  event: SemanticEvent | null;
   /** Non-core protocols the transaction used (registry ids). */
   protocols: readonly string[];
   /** Everyone on the other side: counterparties, sender, NFT party. */
@@ -85,7 +95,9 @@ export function passesFilter(
   tagsOf: (address: string) => readonly string[] = () => [],
   isDecoy: (address: string) => boolean = () => false,
 ): boolean {
-  const { summary } = tx;
+  const { summary, event } = tx;
+  if (event && f.hiddenCategories.has(event.category)) return false;
+  if (f.hideLowConfidence && event?.confidence === "LOW") return false;
   if (f.hiddenKinds.has(summary.kind)) return false;
   const moved = movedAssets(summary);
   if (moved.length > 0 && moved.every((a) => f.hiddenAssets.has(a))) return false;

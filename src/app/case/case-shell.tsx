@@ -34,6 +34,9 @@ import { buildCasePath, isCaseRoute, parseCasePath, type CaseView } from "@/lib/
 import type { RpcSettings } from "@/lib/rpc/settings";
 import { shortenAddress } from "@/lib/solana/address";
 import { collectCounterparties } from "@/lib/state/counterparties";
+import type { SemanticEvent } from "@/lib/semantic/events";
+import { interpretTransaction } from "@/lib/semantic/interpret";
+import { eventLabel } from "./timeline/event-card";
 import { type EffectSummary, type NftCatalog, summarizeEffect } from "@/lib/state/summarize";
 import { counterpartyRows, type TransactedRow, transactedOverview } from "@/lib/state/volume";
 import { type HiddenReason, hiddenBy, hiddenReasons, hideTransactions, revertHiding, ruleFrom, saveRule, unhideTransactions, withLaneWallets } from "@/lib/case/hiding";
@@ -205,6 +208,13 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     () => ({ isNft: (m) => assets?.get(m)?.nft === true, royaltyRecipients: (m) => assets?.get(m)?.royaltyRecipients ?? [] }),
     [assets],
   );
+  // One semantic event per loaded transaction, interpreted once here, never while drawing or filtering.
+  // Re-read when NFT metadata arrives, since it can turn a transfer into a trade.
+  const semanticEvents = useMemo(() => {
+    const out = new Map<string, SemanticEvent>();
+    for (const [signature, tx] of transactions ?? []) out.set(signature, interpretTransaction(tx, { nfts })[0]);
+    return out;
+  }, [transactions, nfts]);
   // Summaries once per wallet (the costly part); filtering below is plain comparisons on them.
   const summariesByWallet = useMemo(() => {
     const out = new Map<string, EffectSummary[]>();
@@ -289,12 +299,12 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
             protocols = tx ? protocolsUsed(enrichTransaction(tx)).map((p) => p.id) : [];
             protocolsOf.set(e.signature, protocols);
           }
-          return { signature: e.signature, time: times[i], summary: sums[i], protocols, addresses: involvedAddresses(sums[i]) };
+          return { signature: e.signature, time: times[i], summary: sums[i], event: semanticEvents.get(e.signature) ?? null, protocols, addresses: involvedAddresses(sums[i]) };
         }),
       );
     }
     return out;
-  }, [walletStates, summariesByWallet, transactions, c.range.start]);
+  }, [walletStates, summariesByWallet, semanticEvents, transactions, c.range.start]);
   // Only the views are filtered; the wallet state panel keeps the full history.
   // Hidden transactions (by hand or by rule) leave every view; the table keeps them, with why, for "Show hidden".
   const { hiddenSignatures, shownSignatures, hideRules } = c;
@@ -436,8 +446,8 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
             kind: "transaction",
             id: row.signature,
             label: shortenAddress(row.signature, 6),
-            detail: `${new Date(row.time).toISOString().slice(0, 16).replace("T", " ")} UTC · ${kindLabel(row.summary.kind)} · ${names.of(wallet)}`,
-            keywords: [],
+            detail: `${new Date(row.time).toISOString().slice(0, 16).replace("T", " ")} UTC · ${row.event ? eventLabel(row.event, wallet) : kindLabel(row.summary.kind)} · ${names.of(wallet)}`,
+            keywords: row.event ? [row.event.category.toLowerCase().replaceAll("_", " "), ...(row.event.protocol ? [row.event.protocol.name] : [])] : [],
           });
         }
       }
@@ -845,6 +855,8 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
         key={effect.signature}
         effect={effect}
         summary={table.summaries[index]}
+        event={semanticEvents.get(effect.signature)}
+        wallet={tableTx!.wallet}
         tx={state.result.transactions.get(effect.signature)}
         state={table.state}
         assets={walletStates.assets}
@@ -934,6 +946,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
           initialSignature={focusSignature}
           lanes={lanes}
           transactions={state.result.transactions}
+          events={semanticEvents}
           range={c.range}
           assets={walletStates.assets}
           names={names}

@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import type { Names } from "@/lib/labels/labels";
 import { registry } from "@/lib/protocols/registry";
 import { parseUnits } from "@/lib/solana/amount";
+import type { EventCategory } from "@/lib/semantic/events";
 import type { EffectKind } from "@/lib/state/summarize";
 import { type FilterableTx, type TxFilter, EMPTY_FILTER, isFilterActive, movedAssets, toggled } from "@/lib/timeline/filter";
 import { cn } from "cn";
@@ -30,6 +31,26 @@ export const KINDS: { kind: EffectKind; label: string; dot: string }[] = [
   { kind: "ACCOUNT", label: "Account setup", dot: "bg-muted-foreground" },
   { kind: "PROGRAM", label: "Program call", dot: "bg-muted-foreground" },
   { kind: "FAILED", label: "Failed", dot: "border border-destructive" },
+];
+
+/** Semantic event categories, in the order they're offered, with the timeline card colours. */
+export const CATEGORIES: { category: EventCategory; label: string; dot: string }[] = [
+  { category: "TRANSFER", label: "Transfer", dot: "bg-destructive" },
+  { category: "SWAP", label: "Swap", dot: "bg-[oklch(0.7_0.14_250)]" },
+  { category: "NFT_TRADE", label: "NFT trade", dot: "bg-[oklch(0.72_0.16_310)]" },
+  { category: "NFT_MINT", label: "NFT mint", dot: "bg-[oklch(0.72_0.16_310)]" },
+  { category: "NFT_TRANSFER", label: "NFT transfer", dot: "bg-[oklch(0.72_0.16_310)]" },
+  { category: "STAKE", label: "Stake", dot: "bg-[oklch(0.74_0.12_195)]" },
+  { category: "UNSTAKE", label: "Unstake", dot: "bg-[oklch(0.74_0.12_195)]" },
+  { category: "LENDING", label: "Lending", dot: "bg-[oklch(0.74_0.12_195)]" },
+  { category: "LIQUIDITY", label: "Liquidity", dot: "bg-[oklch(0.74_0.12_195)]" },
+  { category: "BRIDGE", label: "Bridge", dot: "bg-[oklch(0.7_0.15_285)]" },
+  { category: "BURN", label: "Burn", dot: "bg-[oklch(0.72_0.17_50)]" },
+  { category: "APPROVAL", label: "Approval", dot: "bg-[oklch(0.8_0.15_80)]" },
+  { category: "ACCOUNT", label: "Account setup", dot: "bg-muted-foreground" },
+  { category: "PROGRAM_INTERACTION", label: "Program call", dot: "bg-muted-foreground" },
+  { category: "UNKNOWN", label: "Unknown", dot: "bg-muted-foreground" },
+  { category: "FAILED", label: "Failed", dot: "border border-destructive" },
 ];
 
 function Toggle({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
@@ -101,11 +122,15 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
   /** Likely dust decoys (address-poisoning look-alikes) in the case; offers a filter to leave them out. */
   decoyCount?: number;
 }) {
+  const categoryCounts = new Map<EventCategory, number>();
+  let lowConfidence = 0;
   const kindCounts = new Map<EffectKind, number>();
   const assetCounts = new Map<string, number>();
   const protocolCounts = new Map<string, number>();
   const tagCounts = new Map<string, number>();
   for (const row of rows) {
+    if (row.event) categoryCounts.set(row.event.category, (categoryCounts.get(row.event.category) ?? 0) + 1);
+    if (row.event?.confidence === "LOW") lowConfidence++;
     kindCounts.set(row.summary.kind, (kindCounts.get(row.summary.kind) ?? 0) + 1);
     for (const a of movedAssets(row.summary)) assetCounts.set(a, (assetCounts.get(a) ?? 0) + 1);
     for (const p of row.protocols) protocolCounts.set(p, (protocolCounts.get(p) ?? 0) + 1);
@@ -173,8 +198,31 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
         </div>
       )}
 
-      <FilterGroup title="Type" active={filter.hiddenKinds.size} open>
-        <div className="-mx-1 flex flex-col" role="group" aria-label="Transaction type">
+      <FilterGroup title="Event" active={filter.hiddenCategories.size + (filter.hideLowConfidence ? 1 : 0)} open>
+        <div className="-mx-1 flex flex-col" role="group" aria-label="Event type">
+          {CATEGORIES.filter(({ category }) => categoryCounts.has(category)).map(({ category, label, dot }) => (
+            <Toggle
+              key={category}
+              on={!filter.hiddenCategories.has(category)}
+              onClick={() => onChange({ ...filter, hiddenCategories: toggled(filter.hiddenCategories, category) })}
+            >
+              <span className={cn("size-2 shrink-0 rounded-full", dot)} aria-hidden />
+              <span className="flex-1">{label}</span>
+              <span className="tabular-nums">{categoryCounts.get(category)}</span>
+            </Toggle>
+          ))}
+        </div>
+        {lowConfidence > 0 && (
+          <label className="flex items-center gap-2 text-xs" title="Readings from a balance pattern or program call with nothing definitive behind it">
+            <Checkbox checked={filter.hideLowConfidence} onCheckedChange={(checked) => onChange({ ...filter, hideLowConfidence: checked === true })} />
+            <span className="flex-1">Hide low-confidence readings</span>
+            <span className="tabular-nums text-muted-foreground">{lowConfidence}</span>
+          </label>
+        )}
+      </FilterGroup>
+
+      <FilterGroup title="Wallet effect" active={filter.hiddenKinds.size}>
+        <div className="-mx-1 flex flex-col" role="group" aria-label="Wallet effect">
           {KINDS.filter(({ kind }) => kindCounts.has(kind)).map(({ kind, label, dot }) => (
             <Toggle key={kind} on={!filter.hiddenKinds.has(kind)} onClick={() => onChange({ ...filter, hiddenKinds: toggled(filter.hiddenKinds, kind) })}>
               <span className={cn("size-2 shrink-0 rounded-full", dot)} aria-hidden />
