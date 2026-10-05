@@ -333,6 +333,15 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
       return observeWallet(ws.wallet, sequence, { exchangeOf, decimalsOf });
     });
   }, [walletStates, semanticEvents, reasons, c.range.start]);
+  /** How many behaviour observations each counterparty appears in, for the graph's ranking. */
+  const observedAddresses = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const o of observations) {
+      const involved = new Set([...o.events.map((e) => e.counterparty), o.values.counterparty, o.values.depositAddress].filter((a): a is string => typeof a === "string" && !a.startsWith("bridge:")));
+      for (const address of involved) out.set(address, (out.get(address) ?? 0) + 1);
+    }
+    return out;
+  }, [observations]);
   const perWallet = useMemo(() => {
     const tagsOf = (address: string) => names.label(address)?.tags ?? [];
     const out = new Map<
@@ -744,9 +753,10 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     if (view !== "graph") return null;
     const sides = shownLanes.flatMap((wallet) => {
       const data = perWallet.get(wallet);
-      return data ? [{ wallet, effects: data.state.effects, summaries: data.summaries }] : [];
+      return data ? [{ wallet, effects: data.state.effects, summaries: data.summaries, events: data.state.effects.map((e) => semanticEvents.get(e.signature)) }] : [];
     });
     return buildInteractionGraph(sides, {
+      observed: observedAddresses,
       hiddenAssets: filter.hiddenAssets,
       showPrograms,
       maxNodes: graphNodeLimit ?? Infinity,
@@ -761,7 +771,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
       expandedClusters: graphClusters,
       expandedEntities: graphEntities,
     });
-  }, [view, shownLanes, perWallet, filter.hiddenAssets, showPrograms, c, graphNodeLimit, graphRanking, names, programs, graphClusters, graphEntities]);
+  }, [view, shownLanes, perWallet, semanticEvents, observedAddresses, filter.hiddenAssets, showPrograms, c, graphNodeLimit, graphRanking, names, programs, graphClusters, graphEntities]);
   const edge = graph?.edges.find((e) => e.id === selectedEdge);
   // The Timeline narrowed to exactly the transactions behind some graph lines.
   const openInTimeline = (label: string, lines: readonly GraphEdge[]) => {
@@ -937,6 +947,12 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                     names={graphNames}
                     assets={walletStates.assets}
                     formatAmount={formatAmount}
+                    events={semanticEvents}
+                    observations={observations.filter((o) => {
+                      // Patterns one end of the line was in, with the other end on the other side.
+                      const other = o.wallet === edge.a ? edge.b : o.wallet === edge.b ? edge.a : null;
+                      return other !== null && (o.values.counterparty === other || o.values.depositAddress === other || o.events.some((e) => e.counterparty === other));
+                    })}
                     onSelectAddress={setSelectedAddress}
                     onShowOnTimeline={(signature, wallet) => {
                       setSelectedEdge(null);
@@ -966,6 +982,11 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
           transactions={state.result.transactions}
           events={semanticEvents}
           observations={observations}
+          onShowInGraph={(signature) => {
+            // The same event identity on both views: the Graph narrowed to this one event's wallets.
+            setFilter((current) => ({ ...current, relationship: { label: `the wallets in ${shortenAddress(signature, 4)}`, signatures: new Set([signature]) } }));
+            routeTo("graph");
+          }}
           range={c.range}
           assets={walletStates.assets}
           names={names}

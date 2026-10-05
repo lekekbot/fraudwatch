@@ -11,7 +11,7 @@ import { BURNED_NODE_ID, CLUSTER_LABELS, type ClusterKind, entityNodeId, flowSha
 import { classifyLayout, hashId, layoutGraph, majorEdges, nodeRadius, type Point, type Spacing, SPACINGS, type ZoomTier, zoomTier } from "@/lib/graph/layout";
 import type { Names } from "@/lib/labels/labels";
 import { AssetIcon } from "../asset-icon";
-import { kindLabel } from "../filter-panel";
+import { categoryLabel, kindLabel } from "../filter-panel";
 
 /** Remembers the chosen graph spacing in this browser. */
 const SPACING_KEY = "fraudwatch:graph-spacing";
@@ -863,6 +863,7 @@ export function WalletGraph({
                       `${node.txCount.toLocaleString()} transactions${facts.assets ? ` · ${facts.assets.toLocaleString()} asset${facts.assets === 1 ? "" : "s"}` : ""}`,
                       ...(facts.first !== null && facts.last !== null ? [`${shortDate(facts.first)} → ${shortDate(facts.last)}`] : []),
                       ...(shared ? [`Connected to ${facts.connected.map((id) => latest.current.names.of(id)).join(", ")}`] : []),
+                      ...(node.reasons?.length ? [`Shown because: ${node.reasons.join("; ").toLowerCase()}`] : []),
                     ],
               hint: node.id === latest.current.wallet ? "Drag to reposition" : "Click for transaction details · drag to reposition",
             });
@@ -885,9 +886,11 @@ export function WalletGraph({
               kicker: edge.kind === "program" ? "Program connection" : "Wallet interaction",
               lines: [
                 `${edge.interactions.length.toLocaleString()} ${edge.kind === "program" ? "program calls" : "transactions"}`,
-                ...(edge.summary.transactionTypes.length
-                  ? [edge.summary.transactionTypes.slice(0, 3).map((type) => `${kindLabel(type.kind)} ${type.count.toLocaleString()}`).join(" · ")]
-                  : []),
+                ...(edge.summary.eventCategories.length
+                  ? [edge.summary.eventCategories.slice(0, 3).map((c) => `${categoryLabel(c.category)} ${c.count.toLocaleString()}`).join(" · ")]
+                  : edge.summary.transactionTypes.length
+                    ? [edge.summary.transactionTypes.slice(0, 3).map((type) => `${kindLabel(type.kind)} ${type.count.toLocaleString()}`).join(" · ")]
+                    : []),
                 ...(edge.summary.assets.length
                   ? [edge.summary.assets.slice(0, 3).map((asset) => `${assetInfo(asset.assetId).label} ${asset.txCount.toLocaleString()} tx`).join(" · ")]
                   : []),
@@ -1000,8 +1003,11 @@ export function WalletGraph({
             onChange={(event) => onRankingChange(event.target.value as GraphRanking)}
             className="h-7 rounded-md bg-transparent px-2 text-xs outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <option value="significant">Significant</option>
+            <option value="significant" title="Shared counterparties first, then the most events, value moved, behaviour observations, and recency">
+              Significant
+            </option>
             <option value="interactions">Most interactions</option>
+            <option value="value">Most value moved</option>
             <option value="incoming">Most incoming</option>
             <option value="outgoing">Most outgoing</option>
             <option value="recent">Most recent</option>

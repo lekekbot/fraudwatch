@@ -3,12 +3,16 @@
 import { ArrowDownLeftIcon, ArrowUpRightIcon, ChartNoAxesGanttIcon, ExternalLinkIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import type { BehaviorObservation } from "@/lib/behavior/observations";
 import { BURNED_NODE_ID, entityProtocol, startedBy, type GraphEdge } from "@/lib/graph/build";
 import type { Names } from "@/lib/labels/labels";
+import type { SemanticEvent } from "@/lib/semantic/events";
 import { type Assets, assetLabel, formatUtc } from "../asset-format";
 import { AssetFlows } from "../asset-flows";
 import { PanelSection } from "../panel";
-import { kindLabel } from "../filter-panel";
+import { categoryLabel, kindLabel } from "../filter-panel";
+import { eventLabel } from "../timeline/event-card";
+import { BEHAVIOR_LABEL, observationSummary } from "../timeline/observation-details";
 
 const NFT_RELATED_LABEL = {
   royalty: "Royalty",
@@ -28,6 +32,8 @@ export function EdgePanel({
   names,
   assets,
   formatAmount,
+  events,
+  observations = [],
   onSelectAddress,
   onShowOnTimeline,
   onViewAll,
@@ -40,6 +46,10 @@ export function EdgePanel({
   assets: Assets;
   /** Base units → display amount for an asset. */
   formatAmount: (amount: string, assetId: string) => string;
+  /** Semantic events by signature: what each transaction on the line was. */
+  events: ReadonlyMap<string, SemanticEvent>;
+  /** Behaviour observations this pair took part in. */
+  observations?: readonly BehaviorObservation[];
   onSelectAddress: (address: string) => void;
   onShowOnTimeline: (signature: string, wallet: string) => void;
   onViewAll: (counterparty: string) => void;
@@ -112,14 +122,56 @@ export function EdgePanel({
           </div>
           <div className="flex flex-wrap gap-1.5 text-[10px]">
             <Badge variant="outline">{direction}</Badge>
-            {/* Types add something only when they're mixed; a single type is already the direction. */}
-            {summary.transactionTypes.length > 1 &&
-              summary.transactionTypes.slice(0, 4).map((type) => (
-                <Badge key={type.kind} variant="outline">{kindLabel(type.kind)} · {type.count}</Badge>
-              ))}
+            <Badge variant="outline">{summary.activityPattern}</Badge>
           </div>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+            <dt className="text-muted-foreground">First</dt>
+            <dd className="tabular-nums">{formatUtc(summary.firstInteraction)} UTC</dd>
+            <dt className="text-muted-foreground">Last</dt>
+            <dd className="tabular-nums">{formatUtc(summary.lastInteraction)} UTC</dd>
+            <dt className="text-muted-foreground">Active days</dt>
+            <dd className="tabular-nums">{summary.activeDays.toLocaleString()}</dd>
+          </dl>
           {/* Who made the first move: each side's approved (signed) transactions, and any signed by someone else. */}
           <p className="text-xs text-muted-foreground">{startedBy(edge, names)}</p>
+        </PanelSection>
+      )}
+
+      {!program && summary.eventCategories.length > 0 && (
+        <PanelSection title="What the events were" collapsible>
+          <ul className="flex flex-col gap-0.5 text-xs">
+            {summary.eventCategories.map((c) => (
+              <li key={c.category} className="flex justify-between gap-2">
+                <span>{categoryLabel(c.category)}</span>
+                <span className="tabular-nums text-muted-foreground">{c.count.toLocaleString()}</span>
+              </li>
+            ))}
+          </ul>
+        </PanelSection>
+      )}
+
+      {observations.length > 0 && (
+        <PanelSection title="Behaviour seen" collapsible>
+          <ul className="flex flex-col gap-1">
+            {observations.slice(0, 8).map((o) => (
+              <li key={o.id} className="flex items-start justify-between gap-2 text-xs">
+                <span className="min-w-0">
+                  <span className="font-medium text-[oklch(0.83_0.16_92)]">◆ {BEHAVIOR_LABEL[o.type]}</span>{" "}
+                  <span className="text-muted-foreground">{observationSummary(o, formatAmount, assets, names)}</span>
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Show on timeline"
+                  title="Show where it starts on the timeline"
+                  onClick={() => onShowOnTimeline(o.events[0].signature, o.wallet)}
+                >
+                  <ChartNoAxesGanttIcon />
+                </Button>
+              </li>
+            ))}
+          </ul>
+          {observations.length > 8 && <p className="text-xs text-muted-foreground">And {observations.length - 8} more.</p>}
         </PanelSection>
       )}
 
@@ -148,7 +200,7 @@ export function EdgePanel({
                 <div className="flex items-center gap-2">
                   <span className="text-xs tabular-nums">{formatUtc(it.time)} UTC</span>
                   <Badge variant="outline" className="text-[10px]">
-                    {kindLabel(it.kind)}
+                    {events.get(it.signature) ? eventLabel(events.get(it.signature)!, it.wallet) : kindLabel(it.kind)}
                   </Badge>
                 </div>
                 {it.initiator !== edge.a && it.initiator !== edge.b && (
