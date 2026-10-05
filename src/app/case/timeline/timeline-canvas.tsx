@@ -5,8 +5,8 @@ import { select } from "d3-selection";
 import { type ZoomBehavior, type ZoomTransform, zoom, zoomIdentity } from "d3-zoom";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react";
 import { wheelAction } from "@/lib/gestures";
-import type { EffectKind } from "@/lib/state/summarize";
 import { connectors, type Flow, mergeConnectors } from "@/lib/timeline/lanes";
+import type { Tone } from "./event-card";
 import {
   chooseBucket,
   fitTransform,
@@ -18,11 +18,13 @@ import {
   splitByBucket,
 } from "@/lib/timeline/layout";
 
-/** One lane's view of a transaction. */
+/** One lane's view of a transaction's semantic event. */
 export type LaneEntry = {
   lane: number;
-  kind: EffectKind;
-  /** Card text, top to bottom: date, kind, amount, counterparty. */
+  tone: Tone;
+  /** What it was ("Swap", "NFT purchase"), for cluster breakdowns. */
+  label: string;
+  /** Card text, top to bottom: date, event type, amount, counterparty or protocol. */
   lines: string[];
   /** Which way value moved for this lane's wallet; orients connectors between lanes. */
   flow: Flow;
@@ -91,7 +93,7 @@ type Hit =
   | { type: "event"; x0: number; y0: number; x1: number; y1: number; first: number; last: number; lane: number; label?: string }
   | { type: "lane"; x0: number; y0: number; x1: number; y1: number; lane: number };
 
-type Palette = Record<"fg" | "muted" | "border" | "card" | "bg" | "send" | "receive" | "swap" | "nft" | "burn" | "approval" | "neutral" | "failed", string>;
+type Palette = Record<"fg" | "muted" | "border" | "card" | "bg" | Tone, string>;
 
 function readPalette(el: HTMLElement): Palette {
   const css = getComputedStyle(el);
@@ -106,6 +108,8 @@ function readPalette(el: HTMLElement): Palette {
     receive: "oklch(0.72 0.16 155)",
     swap: "oklch(0.7 0.14 250)",
     nft: "oklch(0.72 0.16 310)",
+    defi: "oklch(0.74 0.12 195)",
+    bridge: "oklch(0.7 0.15 285)",
     burn: "oklch(0.72 0.17 50)",
     approval: "oklch(0.8 0.15 80)",
     neutral: v("--muted-foreground", "#999"),
@@ -113,20 +117,6 @@ function readPalette(el: HTMLElement): Palette {
   };
 }
 
-const KIND_COLOR: Partial<Record<EffectKind, keyof Palette>> = {
-  SEND: "send",
-  RECEIVE: "receive",
-  SWAP: "swap",
-  NFT_BUY: "nft",
-  NFT_SELL: "nft",
-  NFT_MINT: "nft",
-  NFT_SWAP: "nft",
-  NFT_TRANSFER: "nft",
-  BURN: "burn",
-  APPROVAL: "approval",
-  FAILED: "failed",
-};
-const kindColor = (p: Palette, kind: EffectKind) => p[KIND_COLOR[kind] ?? "neutral"];
 
 const formatUtc = (options: Intl.DateTimeFormatOptions) => {
   const formatter = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", ...options });
@@ -154,23 +144,6 @@ function axisLabel(date: Date): string {
 const timeFormat = axisFormats.minute;
 const contextDay = formatUtc({ weekday: "short", day: "numeric", month: "short", year: "numeric" });
 const contextYear = formatUtc({ year: "numeric" });
-
-const KIND_WORD: Partial<Record<EffectKind, string>> = {
-  SEND: "send",
-  RECEIVE: "receive",
-  SWAP: "swap",
-  NFT_BUY: "NFT buy",
-  NFT_SELL: "NFT sale",
-  NFT_MINT: "NFT mint",
-  NFT_SWAP: "NFT swap",
-  NFT_TRANSFER: "NFT transfer",
-  BURN: "burn",
-  APPROVAL: "approval",
-  STAKE: "stake",
-  ACCOUNT: "account setup",
-  PROGRAM: "program call",
-  FAILED: "failed",
-};
 
 /**
  * Text widths by font and string. Pill labels ("12 tx", "3 Sep") repeat across
@@ -470,21 +443,21 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
           const w = pillWidth(g);
           const x = g.x - w / 2;
           // What's inside, by type: a composition bar along the bottom and a hover breakdown.
-          const kinds = new Map<EffectKind, number>();
+          const kinds = new Map<string, { n: number; tone: Tone }>();
           for (let k = g.first; k <= g.last; k++) {
-            const kind = entryOf(indices[k], l).kind;
-            kinds.set(kind, (kinds.get(kind) ?? 0) + 1);
+            const { label, tone } = entryOf(indices[k], l);
+            kinds.set(label, { n: (kinds.get(label)?.n ?? 0) + 1, tone });
           }
-          const breakdown = [...kinds].sort((a, b) => b[1] - a[1]);
+          const breakdown = [...kinds].sort((a, b) => b[1].n - a[1].n);
           roundRect(ctx, x, y - PILL_H / 2, w, PILL_H, 10);
           ctx.fillStyle = p.card;
           ctx.fill();
           ctx.save();
           ctx.clip();
           let bx = x;
-          for (const [kind, n] of breakdown) {
+          for (const [, { n, tone }] of breakdown) {
             const bw = (n / g.count) * w;
-            ctx.fillStyle = kindColor(p, kind);
+            ctx.fillStyle = p[tone];
             ctx.fillRect(bx, y + PILL_H / 2 - 3, bw, 3);
             bx += bw;
           }
@@ -502,13 +475,13 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
           ctx.font = "10px ui-sans-serif, system-ui, sans-serif";
           ctx.fillText(when, g.x, y + 7);
           ctx.textBaseline = "alphabetic";
-          const label = `${count} · ${when}\n${breakdown.map(([kind, n]) => `${n} ${KIND_WORD[kind] ?? kind}`).join(" · ")}\nClick to open`;
+          const label = `${count} · ${when}\n${breakdown.map(([label, { n }]) => `${n} ${label.toLowerCase()}`).join(" · ")}\nClick to open`;
           hits.push({ type: "event", x0: x, y0: y - PILL_H / 2, x1: x + w, y1: y + PILL_H / 2, first, last, lane: l, label });
           return;
         }
 
         const entry = entryOf(first, l);
-        const color = kindColor(p, entry.kind);
+        const color = p[entry.tone];
         const placement = placements[gi];
         if (placement) {
           const top = placement.tier === 0 ? y - CARD_GAP - CARD_H : y + CARD_GAP;
@@ -548,7 +521,7 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
 
         ctx.beginPath();
         ctx.arc(g.x, y, isSelected ? 7 : 5, 0, Math.PI * 2);
-        if (entry.kind === "FAILED") {
+        if (entry.tone === "failed") {
           ctx.fillStyle = p.bg;
           ctx.fill();
           ctx.lineWidth = 2;

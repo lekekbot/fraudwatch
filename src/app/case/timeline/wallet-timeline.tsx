@@ -6,70 +6,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import type { Names } from "@/lib/labels/labels";
+import type { SemanticEvent } from "@/lib/semantic/events";
 import type { WalletState } from "@/lib/state/reconstruct";
-import { describeAction, type EffectSummary } from "@/lib/state/summarize";
+import type { EffectSummary } from "@/lib/state/summarize";
 import { eventAtOrAfter, eventTimes, minimapTarget, type SpacingMode, stepEvent } from "@/lib/timeline/layout";
-import { type Flow, mergeLaneEvents } from "@/lib/timeline/lanes";
+import { mergeLaneEvents } from "@/lib/timeline/lanes";
 import { buildRelationships } from "@/lib/timeline/relationships";
-import { type Assets, assetLabel, formatAssetAmount, nftLabel } from "../asset-format";
+import type { Assets } from "../asset-format";
 import { SidePanel } from "../panel";
 import { type TimelineHandle, type TimelineItem, type TimelineLane, type TimelineSelection, TimelineCanvas } from "./timeline-canvas";
 import { TimelineMinimap } from "./timeline-minimap";
 import { RelationshipChart, type RelationshipChartHandle } from "./relationship-chart";
+import { eventCard } from "./event-card";
 import { TransactionDetails } from "./transaction-details";
-import { kindLabel } from "../filter-panel";
-
-const cardDate = (ms: number) => {
-  const d = new Date(ms);
-  // The year only when it isn't this one, matching the nodes' labels on the canvas.
-  const options: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", timeZone: "UTC" };
-  if (d.getUTCFullYear() !== new Date().getUTCFullYear()) options.year = "numeric";
-  return `${d.toLocaleDateString("en-GB", options)} · ${d.toISOString().slice(11, 16)}`;
-};
-
-function headline(summary: EffectSummary, state: WalletState, assets: Assets, names: Names): string {
-  const show = (c: { assetId: string; delta: string }) =>
-    `${formatAssetAmount(c.delta, c.assetId, state, assets, true)} ${assetLabel(c.assetId, assets)}`;
-  if (summary.nft) {
-    const { received, sent, payment } = summary.nft;
-    if (received.length > 0 && sent.length > 0) return `${nftLabel(sent, assets)} → ${nftLabel(received, assets)}`;
-    const price = payment && `${formatAssetAmount(payment.delta.replace("-", ""), payment.assetId, state, assets)} ${assetLabel(payment.assetId, assets)}`;
-    // The NFT's name goes on the type line (see items), leaving the price room on a narrow card.
-    return price ?? nftLabel(received.length > 0 ? received : sent, assets);
-  }
-  if (summary.kind === "SWAP") return `${show(summary.outflows[0])} → ${show(summary.inflows[0])}`;
-  const main = summary.kind === "RECEIVE" ? summary.inflows[0] : summary.outflows[0];
-  if (main) return show(main);
-  return summary.kind === "FAILED" ? "No balance change" : describeAction(summary.action, summary.action ? names.known(summary.action.programId) : undefined);
-}
-
-/** How value moved for one wallet, to orient connectors between lanes. */
-function flowOf(s: EffectSummary): Flow {
-  if (s.kind === "SEND" || s.kind === "BURN" || s.kind === "NFT_BUY" || s.kind === "NFT_MINT") return "out";
-  if (s.kind === "RECEIVE" || s.kind === "NFT_SELL") return "in";
-  if (s.kind === "NFT_TRANSFER" && s.nft) return s.nft.received.length > 0 ? "in" : "out";
-  return "none";
-}
-
-function cardLines(s: EffectSummary, time: number, state: WalletState, assets: Assets, names: Names): string[] {
-  const cp = s.counterparties[0];
-  const arrow = s.kind === "RECEIVE" ? "←" : "→";
-  return [
-    cardDate(time),
-    s.nft && s.nft.payment && !(s.nft.received.length > 0 && s.nft.sent.length > 0)
-      ? `${kindLabel(s.kind).toUpperCase()} · ${nftLabel(s.nft.received.length > 0 ? s.nft.received : s.nft.sent, assets)}`
-      : kindLabel(s.kind).toUpperCase(),
-    headline(s, state, assets, names),
-    s.nft?.party
-      ? // Buyers and receivers get the NFT from the other party; sellers and senders give it to them.
-        `${s.nft.received.length > 0 && s.nft.sent.length > 0 ? "⇄" : s.nft.received.length > 0 ? "←" : "→"} ${names.of(s.nft.party, 3)}`
-      : cp
-        ? `${arrow} ${names.of(cp.address, 3)}`
-        : s.actor
-          ? `by ${names.of(s.actor, 3)}`
-          : "",
-  ];
-}
 
 /** One mapped wallet's lane: its (filtered) effects and summaries, and where its history starts. */
 export type WalletLane = {
@@ -94,12 +43,14 @@ export type WalletTimelineHandle = {
 };
 
 /**
- * The case's chronological mapper: one lane per mapped wallet, one event per
- * transaction however many lanes it touches. A single wallet is one lane.
+ * The case's chronological mapper: one lane per mapped wallet, one semantic
+ * event per transaction however many lanes it touches, each lane showing its
+ * own side of it. A single wallet is one lane.
  */
 export function WalletTimeline({
   lanes,
   transactions,
+  events: semanticEvents,
   range,
   assets,
   names,
@@ -124,6 +75,8 @@ export function WalletTimeline({
   ref?: React.Ref<WalletTimelineHandle>;
   lanes: WalletLane[];
   transactions: Map<string, CanonicalTransaction>;
+  /** The semantic event of every loaded transaction, interpreted once by the workspace. */
+  events: ReadonlyMap<string, SemanticEvent>;
   /** The case range: the x axis. */
   range: { start: string; end: string };
   assets: Assets;
@@ -186,12 +139,15 @@ export function WalletTimeline({
         signature: ev.signature,
         time: ev.time,
         entries: ev.entries.map(({ lane, effectIndex }) => {
-          const { state, summaries } = lanes[lane];
-          const s = summaries[effectIndex];
-          return { lane, kind: s.kind, flow: flowOf(s), lines: cardLines(s, ev.time, state, assets, names) };
+          const { wallet, state, summaries } = lanes[lane];
+          const event = semanticEvents.get(ev.signature);
+          // Every loaded transaction has an event; one that somehow doesn't still shows, as unknown.
+          if (!event) return { lane, tone: "neutral" as const, label: "Unknown", flow: "none" as const, lines: ["", "UNKNOWN", "", ""] };
+          const { tone, label, flow, lines } = eventCard(event, wallet, ev.time, state, summaries[effectIndex], assets, names);
+          return { lane, tone, label, flow, lines };
         }),
       })),
-    [events, lanes, assets, names],
+    [events, lanes, semanticEvents, assets, names],
   );
   const relationships = useMemo(
     () =>
@@ -302,6 +258,8 @@ export function WalletTimeline({
         <TransactionDetails
           effect={current}
           summary={currentLane.summaries[currentEntry.effectIndex]}
+          event={semanticEvents.get(current.signature)}
+          wallet={currentLane.wallet}
           tx={transactions.get(current.signature)}
           state={currentLane.state}
           assets={assets}
