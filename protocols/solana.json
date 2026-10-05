@@ -1,6 +1,6 @@
 {
   "$schema": "./schema.json",
-  "version": 8,
+  "version": 9,
   "protocols": {
     "solana": {
       "name": "Solana",
@@ -183,7 +183,9 @@
       "addresses": {
         "M2mx93ekt1fmXSVkTrUL9xVFHkmME8HTUi5Cyc5aF7K": { "role": "program", "label": "Magic Eden v2" },
         "M3mxk5W2tt27WGT7THox7PmgRDp4m6NEhL5xvxrBfS1": { "role": "program", "label": "Magic Eden cNFT" },
-        "MEisE1HzehtrDpAAT8PnLHjpSSkRYakotTuJRPjTpo8": { "role": "program", "label": "Magic Eden Marketplace (legacy)" }
+        "MEisE1HzehtrDpAAT8PnLHjpSSkRYakotTuJRPjTpo8": { "role": "program", "label": "Magic Eden Marketplace (legacy)" },
+        "rFqFJ9g7TGBD8Ed7TPDnvGKZ5pWLPDyxLcvcH2eRCtt": { "role": "fee_account", "label": "Magic Eden Treasury" },
+        "1BWutmTvYPwDtmw9abTkS4Ssr8no61spGAvW1X6NDix": { "role": "authority", "label": "Magic Eden v2 Escrow Authority" }
       }
     },
     "sns": {

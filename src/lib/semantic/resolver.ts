@@ -31,7 +31,7 @@ export type ProtocolResolution = {
   protocols: ProtocolRef[];
   /** Programs invoked that the registry doesn't list. */
   unknownPrograms: string[];
-  /** Programs, token accounts and verified pools, vaults and authorities. */
+  /** Programs, token accounts and verified pools, vaults, authorities and fee accounts. */
   infrastructure: Infrastructure[];
   /** The verified entry for an address, the only lookup that may shape an interpretation. */
   verified: (address: string) => RegistryEntry | undefined;
@@ -50,7 +50,9 @@ function infrastructureRole(entry: RegistryEntry): InfrastructureRole | null {
       return "VAULT";
     case "authority":
       return "PDA";
-    // Fee accounts and wallets (exchange hot wallets) receive value: they're participants.
+    case "fee_account":
+      return "FEE_ACCOUNT";
+    // Wallets (exchange hot wallets) are services someone deals with: they're participants.
     default:
       return null;
   }

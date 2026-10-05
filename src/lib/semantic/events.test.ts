@@ -94,12 +94,14 @@ describe("interpretTransaction", () => {
     const e = only(interpretTransaction(tx, { nfts }));
     expect([e.category, e.action]).toEqual(["NFT_TRADE", "BUY"]);
     expect(e.flows).toEqual([
-      { assetId: NATIVE_SOL, amount: String(394 * TENTH), from: "A", to: "B", source: "balance" },
-      { assetId: NATIVE_SOL, amount: String(8 * TENTH), from: "A", to: FEES, source: "balance" },
-      { assetId: NATIVE_SOL, amount: String(18 * TENTH), from: "A", to: "Creator", source: "balance" },
-      { assetId: "NFTX", amount: "1", from: "B", to: "A", source: "balance" },
+      { assetId: NATIVE_SOL, amount: String(394 * TENTH), from: "A", to: "B", source: "balance", role: "payment" },
+      { assetId: NATIVE_SOL, amount: String(18 * TENTH), from: "A", to: "Creator", source: "balance", role: "royalty" },
+      { assetId: NATIVE_SOL, amount: String(8 * TENTH), from: "A", to: FEES, source: "balance", role: "marketplace_fee" },
+      { assetId: "NFTX", amount: "1", from: "B", to: "A", source: "balance", role: "nft" },
     ]);
-    expect(roles(e)).toEqual(["A:BUYER", "B:SELLER", "Creator:ROYALTY_RECIPIENT", `${FEES}:FEE_RECIPIENT`].sort());
+    expect(e.nft).toEqual({ assets: ["NFTX"], buyer: "A", seller: "B", price: { assetId: NATIVE_SOL, amount: String(42 * SOL) }, bundle: false, compressed: false });
+    expect(roles(e)).toEqual(["A:BUYER", "B:SELLER", "Creator:ROYALTY_RECIPIENT"]);
+    expect(e.infrastructure).toContainEqual({ address: FEES, role: "FEE_ACCOUNT", label: "Solflare: Swap Fees" });
     expect(e.evidence).toEqual(expect.arrayContaining([{ kind: "NFT_TRADE_PARSER" }, { kind: "ASSET_METADATA", assetId: "NFTX" }]));
   });
 

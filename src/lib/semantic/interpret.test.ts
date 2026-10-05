@@ -41,7 +41,7 @@ describe("resolveProtocols", () => {
     expect(r.attributions("Prog1111")).toEqual([]);
   });
 
-  it("classifies pools, vaults and authorities as infrastructure, and fee accounts and wallets as not", () => {
+  it("classifies pools, vaults, authorities and fee accounts as infrastructure, and exchange wallets as not", () => {
     const [POOL, VAULT, AUTH, FEES, HOT] = [
       "JAvHW21tYXE9dtdG83DReqU2b4LUexFuCbtJT5tF8X6M",
       "2rbMgYvzAb3xDk6vXrzKkY3VwsmyDZsJTkvB3JJYsRzA",
@@ -67,7 +67,7 @@ describe("resolveProtocols", () => {
     });
     const tx = makeTx({ native: { A: [SOL, SOL - FEE], [POOL]: [1, 1], [VAULT]: [1, 1], [AUTH]: [1, 1], [FEES]: [1, 1], [HOT]: [1, 1] }, tokens: [token("ataA", "A", USDC, 0, 0)] });
     const roles = Object.fromEntries(resolveProtocols(tx, { registry: reg }).infrastructure.map((i) => [i.address, i.role]));
-    expect(roles).toEqual({ [POOL]: "POOL", [VAULT]: "VAULT", [AUTH]: "PDA", ataA: "TOKEN_ACCOUNT" });
+    expect(roles).toEqual({ [POOL]: "POOL", [VAULT]: "VAULT", [AUTH]: "PDA", [FEES]: "FEE_ACCOUNT", ataA: "TOKEN_ACCOUNT" });
   });
 
   it("keeps community and user attribution separate from verified attribution", () => {
