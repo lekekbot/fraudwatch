@@ -45,6 +45,9 @@ export type TimelineLane = {
 
 export type TimelineSelection = { index: number; lane: number };
 
+/** A behaviour observation drawn over a lane: a pattern across events, not an event itself. */
+export type TimelineObservation = { key: string; lane: number; start: number; end: number; label: string };
+
 export type TimelineHandle = {
   fit: () => void;
   zoomBy: (factor: number) => void;
@@ -56,6 +59,10 @@ export type TimelineHandle = {
 
 type Props = {
   items: TimelineItem[];
+  observations?: TimelineObservation[];
+  selectedObservation?: string | null;
+  /** One observation picked; `together` lists any others that start at the same moment and can't be zoomed apart. */
+  onSelectObservation?: (key: string, together: string[]) => void;
   lanes: TimelineLane[];
   range: { start: number; end: number };
   mode: SpacingMode;
@@ -91,9 +98,10 @@ const AXIS_SPACE = 44;
 
 type Hit =
   | { type: "event"; x0: number; y0: number; x1: number; y1: number; first: number; last: number; lane: number; label?: string }
-  | { type: "lane"; x0: number; y0: number; x1: number; y1: number; lane: number };
+  | { type: "lane"; x0: number; y0: number; x1: number; y1: number; lane: number }
+  | { type: "observation"; x0: number; y0: number; x1: number; y1: number; keys: string[]; start: number; end: number; label: string };
 
-type Palette = Record<"fg" | "muted" | "border" | "card" | "bg" | Tone, string>;
+type Palette = Record<"fg" | "muted" | "border" | "card" | "bg" | "behavior" | Tone, string>;
 
 function readPalette(el: HTMLElement): Palette {
   const css = getComputedStyle(el);
@@ -109,6 +117,7 @@ function readPalette(el: HTMLElement): Palette {
     swap: "oklch(0.7 0.14 250)",
     nft: "oklch(0.72 0.16 310)",
     defi: "oklch(0.74 0.12 195)",
+    behavior: "oklch(0.83 0.16 92)",
     bridge: "oklch(0.7 0.15 285)",
     burn: "oklch(0.72 0.17 50)",
     approval: "oklch(0.8 0.15 80)",
@@ -187,7 +196,7 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
  * several lanes share is drawn once at one x, joined across lanes.
  */
 export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function TimelineCanvas(
-  { items, lanes, range, mode, selected, onSelect, onSelectLane, onViewChange, onNeedsEventSpacing },
+  { items, lanes, range, mode, selected, onSelect, onSelectLane, onViewChange, onNeedsEventSpacing, observations, selectedObservation, onSelectObservation },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -199,9 +208,9 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
   const viewportRef = useRef({ top: 0, height: MIN_HEIGHT });
   const hitsRef = useRef<Hit[]>([]);
   const frameRef = useRef<number | null>(null);
-  const latest = useRef({ items, lanes, range, mode, selected, onViewChange });
+  const latest = useRef({ items, lanes, range, mode, selected, onViewChange, observations, selectedObservation });
   useLayoutEffect(() => {
-    latest.current = { items, lanes, range, mode, selected, onViewChange };
+    latest.current = { items, lanes, range, mode, selected, onViewChange, observations, selectedObservation };
   });
 
   const stacked = () => latest.current.lanes.length > 1;
@@ -227,7 +236,7 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const { items, lanes, range, mode, selected } = latest.current;
+    const { items, lanes, range, mode, selected, observations = [], selectedObservation } = latest.current;
     const width = widthRef.current;
     const height = heightRef.current;
     const multi = lanes.length > 1;
@@ -540,6 +549,92 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
       });
     });
 
+    // Behaviour observations over the events: a bar along the lane for the span, a diamond where it starts.
+    // Ones that overlap at this zoom merge into a count; opening it zooms to them.
+    {
+      const timeX = (time: number) => {
+        if (mode === "time") return scale(time);
+        const i = items.findIndex((it) => it.time >= time);
+        return xOf(i === -1 ? items.length - 1 : i);
+      };
+      const endX = (time: number) => {
+        if (mode === "time") return scale(time);
+        let i = items.length - 1;
+        while (i > 0 && items[i].time > time) i--;
+        return xOf(i);
+      };
+      for (let l = 0; l < lanes.length; l++) {
+        const y = laneY(l);
+        const placed = observations
+          .filter((o) => o.lane === l)
+          .map((o) => ({ o, x0: timeX(o.start), x1: Math.max(timeX(o.start), endX(o.end)) }))
+          .filter((m) => m.x1 >= -20 && m.x0 <= width + 20)
+          .sort((a, b) => a.x0 - b.x0);
+        // Spans are drawn one by one, thin; only the selected one stands out.
+        for (const m of placed) {
+          const on = m.o.key === selectedObservation;
+          ctx.globalAlpha = on ? 1 : 0.45;
+          ctx.fillStyle = p.behavior;
+          ctx.fillRect(m.x0, y - (on ? 3 : 1), Math.max(2, m.x1 - m.x0), on ? 6 : 2);
+        }
+        ctx.globalAlpha = 1;
+        // Markers merge by where they start, so a long span never swallows the ones inside it.
+        const groups: (typeof placed)[] = [];
+        for (const m of placed) {
+          const last = groups[groups.length - 1];
+          if (last && m.x0 - last[last.length - 1].x0 <= 16) last.push(m);
+          else groups.push([m]);
+        }
+        groups.forEach((group, gi) => {
+          const x0 = group[0].x0;
+          const on = group.some((g) => g.o.key === selectedObservation);
+          ctx.save();
+          ctx.translate(x0, y);
+          ctx.rotate(Math.PI / 4);
+          ctx.fillStyle = p.behavior;
+          ctx.fillRect(-4.5, -4.5, 9, 9);
+          if (on) {
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = p.fg;
+            ctx.strokeRect(-4.5, -4.5, 9, 9);
+          }
+          ctx.restore();
+          const text = group.length === 1 ? `◆ ${group[0].o.label}` : `◆ ${group.length}`;
+          ctx.font = "600 10px ui-sans-serif, system-ui, sans-serif";
+          let w = ctx.measureText(text).width;
+          const left = Math.max(4, Math.min(x0 - 4, width - w - 8));
+          // A label that would run into the next marker shortens to its count.
+          const next = groups[gi + 1]?.[0].x0 ?? Number.POSITIVE_INFINITY;
+          const shown = left + w + 6 < next - 4 ? text : group.length === 1 ? "◆" : `◆ ${group.length}`;
+          w = ctx.measureText(shown).width;
+          ctx.fillStyle = p.bg;
+          ctx.globalAlpha = 0.85;
+          ctx.fillRect(left - 2, y + 6, w + 6, 13);
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = p.behavior;
+          ctx.textAlign = "left";
+          ctx.textBaseline = "alphabetic";
+          ctx.fillText(shown, left + 1, y + 16);
+          const label =
+            group.length === 1
+              ? `${group[0].o.label}\nClick for what triggered it`
+              : `${group.length} observations: ${[...new Set(group.map((g) => g.o.label))].join(", ")}\nClick to open`;
+          // Only the marker and its label take clicks: the span runs along the lane, over the events.
+          hits.push({
+            type: "observation",
+            x0: Math.min(x0 - 6, left - 2),
+            y0: y - 6,
+            x1: Math.max(x0 + 6, left + w + 4),
+            y1: y + 20,
+            keys: group.map((g) => g.o.key),
+            start: Math.min(...group.map((g) => g.o.start)),
+            end: Math.max(...group.map((g) => g.o.start)),
+            label,
+          });
+        });
+      }
+    }
+
     // OPEN and CLOSE on top of the events, each on a background so it reads over lines and pill edges.
     ctx.font = "600 11px ui-sans-serif, system-ui, sans-serif";
     ctx.textBaseline = "alphabetic";
@@ -828,7 +923,7 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
     schedule();
   }, [items, applyTransform, maxZoom, schedule]);
 
-  useEffect(schedule, [selected, lanes, schedule]);
+  useEffect(schedule, [selected, lanes, observations, selectedObservation, schedule]);
 
   function hitAt(event: React.MouseEvent<HTMLCanvasElement>): Hit | undefined {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -848,6 +943,15 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
         const hit = hitAt(event);
         if (!hit) return;
         if (hit.type === "lane") return onSelectLane(hit.lane);
+        if (hit.type === "observation") {
+          if (hit.keys.length === 1 || hit.end - hit.start < UNRESOLVABLE_MS) return onSelectObservation?.(hit.keys[0], hit.keys);
+          const pad = Math.max((hit.end - hit.start) * 0.1, 60_000);
+          if (latest.current.mode === "time") return showBaseRange(hit.start - pad, hit.end + pad);
+          const { items } = latest.current;
+          const first = Math.max(0, items.findIndex((it) => it.time >= hit.start));
+          const last = items.findLastIndex((it) => it.time <= hit.end);
+          return showBaseRange(first - 1, Math.max(first, last) + 1);
+        }
         if (hit.first === hit.last) onSelect(hit.first, hit.lane);
         else {
           const { items } = latest.current;
@@ -865,7 +969,7 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
         const hit = hitAt(event);
         event.currentTarget.style.cursor = hit ? "pointer" : "";
         // Clusters say what's inside on hover.
-        const label = hit?.type === "event" ? (hit.label ?? "") : "";
+        const label = hit?.type === "event" || hit?.type === "observation" ? (hit.label ?? "") : "";
         if (event.currentTarget.title !== label) event.currentTarget.title = label;
       }}
     />
