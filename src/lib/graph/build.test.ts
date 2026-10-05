@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { WalletTransactionEffect } from "@/lib/state/reconstruct";
 import type { EffectSummary } from "@/lib/state/summarize";
-import { BURNED_NODE_ID, buildInteractionGraph, clusterNodeId, edgeFlow, entityNodeId, pairId } from "./build";
+import { BURNED_NODE_ID, buildInteractionGraph, clusterNodeId, edgeFlow, entityNodeId, flowShares, pairId } from "./build";
 
 const A = "A-wallet";
 const B = "B-counterparty";
@@ -312,5 +312,29 @@ describe("buildInteractionGraph", () => {
 
     const open = buildInteractionGraph(sides, { expandedEntities: new Set(["jupiter"]) });
     expect(open.edges.map((e) => e.id).sort()).toEqual([pairId(A, JUPITER), pairId(A, JUPITER_LIMIT)].sort());
+  });
+
+  it("scores each direction's value against the largest flow of the same asset, ignoring one-unit assets", () => {
+    const g = buildInteractionGraph([
+      {
+        wallet: A,
+        effects: [effect(A, "big", 1), effect(A, "small", 2), effect(A, "usdc", 3), effect(A, "nft", 4)],
+        summaries: [
+          summary({ counterparties: [cp(B, "SOL", "1000")] }),
+          summary({ counterparties: [cp(C, "SOL", "10")] }),
+          summary({ kind: "RECEIVE", counterparties: [cp(C, "USDC", "-5")] }),
+          summary({ counterparties: [cp(B, "NFT", "1")] }),
+        ],
+      },
+    ]);
+    const shares = flowShares(g.edges);
+    const toward = (to: string) => {
+      const edge = g.edges.find((e) => e.id === pairId(A, to))!;
+      const s = shares.get(edge.id)!;
+      return edge.a === A ? { sent: s.aToB, received: s.bToA } : { sent: s.bToA, received: s.aToB };
+    };
+    expect(toward(B)).toEqual({ sent: 1, received: 0 });
+    // C's 10 SOL is 1% of the largest SOL flow; its USDC is the largest USDC flow.
+    expect(toward(C)).toEqual({ sent: 0.01, received: 1 });
   });
 });

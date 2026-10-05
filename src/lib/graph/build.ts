@@ -173,6 +173,31 @@ export function edgeFlow(edge: GraphEdge) {
     : { from: edge.a, to: edge.b, forward: aToB, reverse: bToA, bidirectional: aToB > 0 && bToA > 0 };
 }
 
+/**
+ * How much value each direction of each line moved, 0–1, comparable across lines without prices: per asset, the
+ * amount over the largest amount of that asset any line moved one way; a direction takes its best asset. Assets that
+ * never move more than one unit (NFTs) say nothing about size and score 0.
+ */
+export function flowShares(edges: readonly GraphEdge[]): Map<string, { aToB: number; bToA: number }> {
+  const largest = new Map<string, bigint>();
+  for (const edge of edges) {
+    for (const asset of edge.summary?.assets ?? []) {
+      const most = BigInt(asset.aToB) > BigInt(asset.bToA) ? BigInt(asset.aToB) : BigInt(asset.bToA);
+      if (most > (largest.get(asset.assetId) ?? BigInt(0))) largest.set(asset.assetId, most);
+    }
+  }
+  const share = (amount: string, assetId: string) => {
+    const max = largest.get(assetId) ?? BigInt(0);
+    return max > BigInt(1) ? Number(amount) / Number(max) : 0;
+  };
+  return new Map(
+    edges.map((edge) => {
+      const assets = edge.summary?.assets ?? [];
+      return [edge.id, { aToB: Math.max(0, ...assets.map((a) => share(a.aToB, a.assetId))), bToA: Math.max(0, ...assets.map((a) => share(a.bToA, a.assetId))) }];
+    }),
+  );
+}
+
 export type WalletGraph = {
   nodes: GraphNode[];
   edges: GraphEdge[];
