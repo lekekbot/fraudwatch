@@ -129,6 +129,21 @@ Do not use force-directed positioning for the main graph.
 | 10 | Boundary context, case portability, export/import |
 | 11 | Reliability, privacy, deployment, private beta |
 
+## Chronology & Semantic Events initiative
+
+Follows the MVP sprints. Each file in `docs/sprints/SPRINT_C*.md` opens with the initiative's shared principles and rules.
+
+| Sprint | Outcome |
+|---|---|
+| C1 | Semantic event domain model |
+| C2 | Interpreter framework and protocol resolution |
+| C3 | NFT trade reconstruction consolidation |
+| C4 | DeFi and protocol semantic events |
+| C5 | Event-centric timeline |
+| C6 | Behavioral sequence detection |
+| C7 | Relationship intelligence and graph integration |
+| C8 | Evidence, reliability and investigation polish |
+
 ## MVP completion gate
 
 The MVP is complete after Sprint 11 when a user can:

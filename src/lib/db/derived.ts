@@ -8,6 +8,8 @@ import type { FraudWatchDB } from "./db";
  * rebuilt on demand. Raw transactions are never in this list.
  *
  * Protocol annotations keyed to the registry version register here in Sprint 06.
+ * Semantic events (`SEMANTIC_VERSION`) are computed on read and not stored; a
+ * table for them registers here with that version.
  */
 export type DerivedCache = {
   name: string;
