@@ -25,6 +25,17 @@ const nodes: GraphNode[] = [
 const edges = nodes.slice(1).map((node) => edge("W", node.id, node.txCount));
 
 describe("layoutGraph", () => {
+  it("lays out when the primary is only another wallet's counterparty (its lane hidden)", () => {
+    const shown: GraphNode[] = [
+      { id: "S", kind: "wallet", txCount: 3 },
+      { id: "P", kind: "counterparty", txCount: 2 },
+      { id: "C", kind: "counterparty", txCount: 1 },
+    ];
+    const pos = layoutGraph(shown, [edge("S", "P", 2), edge("S", "C")], "P");
+    expect([...pos.keys()].sort()).toEqual(["C", "P", "S"]);
+    for (const p of pos.values()) expect(Number.isFinite(p.x) && Number.isFinite(p.y)).toBe(true);
+  });
+
   it("keeps the primary near the core center and is deterministic", () => {
     const a = layoutGraph(nodes, edges, "W");
     expect(Math.hypot(a.get("W")!.x, a.get("W")!.y)).toBeLessThan(80);

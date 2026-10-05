@@ -176,7 +176,9 @@ export function layoutGraph(
   ticks = 220,
   spacing = 1,
 ): Map<string, Point> {
-  if (!primary || !nodes.some((node) => node.id === primary)) return new Map(nodes.map((node, i) => [node.id, { x: (i % 8) * 110, y: Math.floor(i / 8) * 80 }]));
+  // With the primary's lane hidden it can still appear as another wallet's counterparty: anchor on a shown wallet.
+  if (!nodes.some((node) => node.id === primary && node.kind === "wallet")) primary = nodes.filter((node) => node.kind === "wallet").map((node) => node.id).sort()[0];
+  if (!primary) return new Map(nodes.map((node, i) => [node.id, { x: (i % 8) * 110, y: Math.floor(i / 8) * 80 }]));
 
   const roles = classifyLayout(nodes, edges);
   const core = nodes.filter((node) => roles.get(node.id) === "core");
