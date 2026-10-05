@@ -30,7 +30,6 @@ Open the app, add your Solana RPC endpoint in settings and create a case for a w
 | `pnpm dev` | Start the dev server |
 | `pnpm build` | Build the production app |
 | `pnpm preview` | Serve the production build |
-| `pnpm test` | Run the Vitest suite |
 | `pnpm typecheck` | Generate Next route types and run `tsc` |
 | `pnpm lint` | Run ESLint |
 
@@ -42,8 +41,6 @@ src/lib/          Core logic: RPC adapter, ingestion, IndexedDB cache, state rec
                   timeline and graph projection, labels, protocols, search
 src/components/   Shared UI components
 protocols/        Protocol registry (solana.json) and its JSON schema
-fixtures/solana/  Replayable RPC fixtures used by the tests
-scripts/fixtures/ Scripts to capture mainnet fixtures and generate synthetic ones
 docs/             Architecture, terminology and the sprint plan
 ```
 
