@@ -1,74 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { NATIVE_SOL } from "@/lib/assets/assets";
 import { parseRegistry } from "@/lib/protocols/registry";
-import type { CanonicalInstruction, CanonicalTransaction, TokenBalanceChange } from "@/lib/solana/canonical";
 import { MEMO_PROGRAMS, SYSTEM_PROGRAM, TOKEN_PROGRAM } from "@/lib/solana/programs";
 import { reconstructWalletState } from "@/lib/state/reconstruct";
 import { type NftCatalog, summarizeEffect } from "@/lib/state/summarize";
-import { eventId, interpretTransaction, type SemanticEvent } from "./events";
-
-const SOL = 1_000_000_000;
-const TENTH = SOL / 10;
-const FEE = 5000;
-const USDC = "EPjFWdd5AufqSSqeM2qFxEaxx5Fe8M6M6V5WUfGjDtJ";
-
-const ix = (programId: string, type: string | null, info: unknown = {}): CanonicalInstruction => ({
-  programId,
-  program: null,
-  type,
-  info,
-  accounts: [],
-  data: null,
-  outerIndex: null,
-  stackHeight: null,
-});
-
-const token = (account: string, owner: string, mint: string, pre: number, post: number): TokenBalanceChange => ({
-  account,
-  owner,
-  mint,
-  programId: TOKEN_PROGRAM,
-  decimals: 6,
-  pre: String(pre),
-  post: String(post),
-  delta: String(post - pre),
-});
-
-/** `native` lists [pre, post] lamports per account; the first entry is the fee payer. */
-function makeTx(o: {
-  native: Record<string, [number, number]>;
-  tokens?: TokenBalanceChange[];
-  instructions?: CanonicalInstruction[];
-  signers?: string[];
-  success?: boolean;
-  signature?: string;
-}): CanonicalTransaction {
-  const addresses = [...Object.keys(o.native), ...(o.tokens ?? []).map((t) => t.account)];
-  const payer = addresses[0];
-  return {
-    signature: o.signature ?? "sig1",
-    slot: 100,
-    transactionIndex: 0,
-    timestamp: "2026-01-01T00:00:00.000Z",
-    success: o.success ?? true,
-    feeLamports: String(FEE),
-    accounts: addresses.map((address) => ({ address, signer: address === payer || (o.signers ?? []).includes(address), writable: true, source: "transaction" })),
-    nativeChanges: addresses.map((account) => {
-      const [pre, post] = o.native[account] ?? [2_039_280, 2_039_280];
-      return { account, pre: String(pre), post: String(post), delta: String(post - pre) };
-    }),
-    tokenChanges: o.tokens ?? [],
-    instructions: o.instructions ?? [],
-    innerInstructions: [],
-    raw: null,
-  };
-}
-
-const only = (events: SemanticEvent[]) => {
-  expect(events).toHaveLength(1);
-  return events[0];
-};
-const roles = (e: SemanticEvent) => e.participants.map((p) => `${p.address}:${p.role}`).sort();
+import { eventId } from "./events";
+import { interpretTransaction } from "./interpret";
+import { FEE, ix, makeTx, only, roles, SOL, TENTH, token, USDC } from "./testing";
 
 const solSend = makeTx({
   native: { A: [10 * SOL, 9 * SOL - FEE], B: [SOL, 2 * SOL] },
@@ -85,7 +23,7 @@ describe("interpretTransaction", () => {
 
   it("reads a simple SOL send, with the fee left out of the flows", () => {
     const e = only(interpretTransaction(solSend));
-    expect([e.category, e.action, e.confidence]).toEqual(["TRANSFER", "SEND", "high"]);
+    expect([e.category, e.action, e.confidence]).toEqual(["TRANSFER", "SEND", "HIGH"]);
     expect(e.flows).toEqual([{ assetId: NATIVE_SOL, amount: String(SOL), from: "A", to: "B", source: "balance" }]);
     expect(roles(e)).toEqual(["A:SENDER", "B:RECEIVER"]);
     expect(e.metadata).toEqual({ feePayer: "A", feeLamports: String(FEE) });
@@ -131,7 +69,7 @@ describe("interpretTransaction", () => {
   it("reads a failed transaction as FAILED with no flows", () => {
     const tx = makeTx({ native: { A: [SOL, SOL - FEE], B: [SOL, SOL] }, success: false, instructions: [ix(SYSTEM_PROGRAM, "transfer")] });
     const e = only(interpretTransaction(tx));
-    expect([e.category, e.action, e.confidence]).toEqual(["FAILED", "FAILED", "high"]);
+    expect([e.category, e.action, e.confidence]).toEqual(["FAILED", "FAILED", "HIGH"]);
     expect(e.flows).toEqual([]);
     expect(roles(e)).toEqual(["A:SIGNER"]);
     expect(e.evidence).toContainEqual({ kind: "TRANSACTION_STATUS", success: false });
@@ -140,7 +78,7 @@ describe("interpretTransaction", () => {
   it("reads a call that moved no value as a program interaction", () => {
     const tx = makeTx({ native: { A: [SOL, SOL - FEE] }, instructions: [ix("Prog1111", "updateConfig")] });
     const e = only(interpretTransaction(tx));
-    expect([e.category, e.action, e.confidence]).toEqual(["PROGRAM_INTERACTION", "UPDATE_CONFIG", "medium"]);
+    expect([e.category, e.action, e.confidence]).toEqual(["PROGRAM_INTERACTION", "UPDATE_CONFIG", "LOW"]);
     expect(e.flows).toEqual([]);
     expect(roles(e)).toEqual(["A:SIGNER"]);
     expect(e.infrastructure).toEqual([{ address: "Prog1111", role: "PROGRAM", label: null }]);
@@ -153,7 +91,7 @@ describe("interpretTransaction", () => {
       native: { A: [50 * SOL, 8 * SOL - FEE], B: [SOL, 404 * TENTH], [FEES]: [SOL, 18 * TENTH], Creator: [SOL, 28 * TENTH] },
       tokens: [token("ataB", "B", "NFTX", 1, 0), token("ataA", "A", "NFTX", 0, 1)],
     });
-    const e = only(interpretTransaction(tx, nfts));
+    const e = only(interpretTransaction(tx, { nfts }));
     expect([e.category, e.action]).toEqual(["NFT_TRADE", "BUY"]);
     expect(e.flows).toEqual([
       { assetId: NATIVE_SOL, amount: String(394 * TENTH), from: "A", to: "B", source: "balance" },
@@ -170,7 +108,7 @@ describe("interpretTransaction", () => {
     const e = only(interpretTransaction(tx));
     expect(e.flows.every((f) => (f.from === null) !== (f.to === null))).toBe(true);
     expect(e.flows).toHaveLength(4);
-    expect(e.confidence).toBe("low");
+    expect(e.confidence).toBe("LOW");
   });
 
   it("separates routers and vaults from participants", () => {
@@ -188,7 +126,7 @@ describe("interpretTransaction", () => {
       tokens: [token("vaultUsdc", VAULT, USDC, 1000, 800), token("ataA", "A", USDC, 0, 200)],
       instructions: [ix(ROUTER, null)],
     });
-    const e = only(interpretTransaction(tx, undefined, reg));
+    const e = only(interpretTransaction(tx, { registry: reg }));
     expect([e.category, e.action]).toEqual(["SWAP", "SWAP"]);
     expect(roles(e)).toEqual(["A:TRADER"]);
     expect(e.infrastructure).toEqual(
@@ -208,7 +146,7 @@ describe("interpretTransaction", () => {
   it("reads a transaction with nothing recognisable as UNKNOWN", () => {
     const tx = makeTx({ native: { A: [SOL, SOL - FEE] }, instructions: [ix(MEMO_PROGRAMS[0], null)] });
     const e = only(interpretTransaction(tx));
-    expect([e.category, e.action, e.confidence]).toEqual(["UNKNOWN", "UNKNOWN", "low"]);
+    expect([e.category, e.action, e.confidence]).toEqual(["UNKNOWN", "UNKNOWN", "LOW"]);
   });
 
   it("agrees with the fee payer's existing transaction summary", () => {
