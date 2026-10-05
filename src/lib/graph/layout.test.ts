@@ -127,6 +127,31 @@ describe("layoutGraph", () => {
     expect(reach(layoutGraph(wallets, links, "W", undefined, 220, 1.9)).secondary).toBeGreaterThan(reach(layoutGraph(wallets, links, "W", undefined, 220, 1)).secondary);
   });
 
+  it("puts shared counterparties between their wallets, in a row across them, even when one wallet is far busier", () => {
+    const shared = ["X1", "X2", "X3"];
+    const sharedNodes: GraphNode[] = [
+      { id: "A", kind: "wallet", txCount: 0 },
+      { id: "B", kind: "wallet", txCount: 0 },
+      ...shared.map((id) => ({ id, kind: "counterparty" as const, txCount: 201 })),
+    ];
+    const sharedEdges = [edge("A", "B"), ...shared.flatMap((id) => [edge("A", id, 1), edge("B", id, 200)])];
+    for (const spacing of [1, 1.4]) {
+      const pos = layoutGraph(sharedNodes, sharedEdges, "A", undefined, undefined, spacing);
+      const a = pos.get("A")!;
+      const b = pos.get("B")!;
+      const length = Math.hypot(b.x - a.x, b.y - a.y);
+      const along = (p: { x: number; y: number }) => ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / (length * length);
+      for (const id of shared) {
+        // Between the wallets, near the middle: not dragged onto (or behind) the busier one.
+        expect(along(pos.get(id)!)).toBeGreaterThan(0.3);
+        expect(along(pos.get(id)!)).toBeLessThan(0.7);
+      }
+      // Side by side across the axis, so their lines don't lie on top of each other.
+      const offsets = shared.map((id) => along(pos.get(id)!));
+      expect(Math.max(...offsets) - Math.min(...offsets)).toBeLessThan(0.1);
+    }
+  });
+
   it("changes zoom tier only past each boundary's gap", () => {
     expect(zoomTier("medium", 0.52)).toBe("medium");
     expect(zoomTier("medium", 0.45)).toBe("far");

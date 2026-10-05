@@ -223,23 +223,33 @@ export function layoutGraph(
   };
   const coreExtent = Math.max(80, ...core.map((node) => Math.hypot(targets.get(node.id)!.x - coreCenter.x, targets.get(node.id)!.y - coreCenter.y)));
 
-  for (const node of nodes.filter((item) => roles.get(item.id) === "bridge").sort((a, b) => a.id.localeCompare(b.id))) {
-    const links = coreLinks.get(node.id) ?? [];
-    const total = links.reduce((sum, link) => sum + link.weight, 0) || 1;
-    const barycenter = {
-      x: links.reduce((sum, link) => sum + targets.get(link.id)!.x * link.weight, 0) / total,
-      y: links.reduce((sum, link) => sum + targets.get(link.id)!.y * link.weight, 0) / total,
-    };
-    let dx = barycenter.x - coreCenter.x;
-    let dy = barycenter.y - coreCenter.y;
-    if (Math.hypot(dx, dy) < 1) {
-      const angle = stableAngle(node.id);
-      dx = Math.cos(angle);
-      dy = Math.sin(angle);
-    }
-    const length = Math.hypot(dx, dy);
-    const push = (links.length >= 3 ? 70 : 110) * spacing;
-    targets.set(node.id, { x: barycenter.x + (dx / length) * push, y: barycenter.y + (dy / length) * push });
+  // Shared counterparties sit between the wallets they connect: at the midpoint of two, the centroid of more,
+  // never weighted toward the busier wallet (that dragged them behind it, with lines crossing the whole map).
+  // Each wallet set's group is a row across the line between its wallets (lines along that line would lie on
+  // top of each other), wrapping into further rows toward either wallet; busiest nearest the middle.
+  const bridgeGroups = new Map<string, GraphNode[]>();
+  for (const node of nodes.filter((item) => roles.get(item.id) === "bridge")) {
+    const key = [...new Set((coreLinks.get(node.id) ?? []).map((link) => link.id))].sort().join("|");
+    bridgeGroups.set(key, [...(bridgeGroups.get(key) ?? []), node]);
+  }
+  const gap = 64 * spacing;
+  for (const [key, group] of [...bridgeGroups].sort(([a], [b]) => a.localeCompare(b))) {
+    const ends = key.split("|").map((id) => targets.get(id)!);
+    const center = { x: ends.reduce((sum, p) => sum + p.x, 0) / ends.length, y: ends.reduce((sum, p) => sum + p.y, 0) / ends.length };
+    // Along: the axis between two wallets (or a fixed direction for more); across: perpendicular to it, where the row runs.
+    const axisAngle = ends.length === 2 ? Math.atan2(ends[1].y - ends[0].y, ends[1].x - ends[0].x) : stableAngle(key);
+    const along = { x: Math.cos(axisAngle), y: Math.sin(axisAngle) };
+    const across = { x: -along.y, y: along.x };
+    // A row as wide as the wallets are apart; further rows step toward the wallets.
+    const room = ends.length === 2 ? Math.hypot(ends[1].x - ends[0].x, ends[1].y - ends[0].y) : 2 * Math.min(...ends.map((p) => Math.hypot(p.x - center.x, p.y - center.y)));
+    const perRow = Math.max(1, Math.min(group.length, Math.floor(room / gap)));
+    group.sort((a, b) => b.txCount - a.txCount || a.id.localeCompare(b.id));
+    group.forEach((node, index) => {
+      const column = (index % perRow) - (perRow - 1) / 2;
+      const row = Math.floor(index / perRow);
+      const side = row === 0 ? 0 : (row % 2 ? 1 : -1) * Math.ceil(row / 2);
+      targets.set(node.id, { x: center.x + across.x * column * gap + along.x * side * gap, y: center.y + across.y * column * gap + along.y * side * gap });
+    });
   }
 
   for (const [ownerId, group] of [...satellites].sort(([a], [b]) => a.localeCompare(b))) {
