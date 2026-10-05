@@ -6,18 +6,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import type { Names } from "@/lib/labels/labels";
+import type { BehaviorObservation } from "@/lib/behavior/observations";
 import type { SemanticEvent } from "@/lib/semantic/events";
 import type { WalletState } from "@/lib/state/reconstruct";
 import type { EffectSummary } from "@/lib/state/summarize";
 import { eventAtOrAfter, eventTimes, minimapTarget, type SpacingMode, stepEvent } from "@/lib/timeline/layout";
 import { mergeLaneEvents } from "@/lib/timeline/lanes";
 import { buildRelationships } from "@/lib/timeline/relationships";
-import type { Assets } from "../asset-format";
+import { type Assets, formatAssetAmount } from "../asset-format";
 import { SidePanel } from "../panel";
-import { type TimelineHandle, type TimelineItem, type TimelineLane, type TimelineSelection, TimelineCanvas } from "./timeline-canvas";
+import { type TimelineHandle, type TimelineItem, type TimelineLane, type TimelineObservation, type TimelineSelection, TimelineCanvas } from "./timeline-canvas";
 import { TimelineMinimap } from "./timeline-minimap";
 import { RelationshipChart, type RelationshipChartHandle } from "./relationship-chart";
 import { eventCard } from "./event-card";
+import { BEHAVIOR_LABEL, ObservationDetails } from "./observation-details";
 import { TransactionDetails } from "./transaction-details";
 
 /** One mapped wallet's lane: its (filtered) effects and summaries, and where its history starts. */
@@ -51,6 +53,7 @@ export function WalletTimeline({
   lanes,
   transactions,
   events: semanticEvents,
+  observations = [],
   range,
   assets,
   names,
@@ -77,6 +80,8 @@ export function WalletTimeline({
   transactions: Map<string, CanonicalTransaction>;
   /** The semantic event of every loaded transaction, interpreted once by the workspace. */
   events: ReadonlyMap<string, SemanticEvent>;
+  /** Behaviour patterns across each mapped wallet's events, detected once by the workspace. */
+  observations?: readonly BehaviorObservation[];
   /** The case range: the x axis. */
   range: { start: string; end: string };
   assets: Assets;
@@ -120,6 +125,11 @@ export function WalletTimeline({
     initialSignature ? { signature: initialSignature, wallet: null } : null,
   );
   const [view, setView] = useState<{ start: number; end: number } | null>(null);
+  /** An open behaviour observation; it and a transaction are never selected at once. */
+  const [observationId, setObservationId] = useState<string | null>(null);
+  /** Observations starting at the same moment as the open one, offered alongside it. */
+  const [together, setTogether] = useState<string[]>([]);
+  const [showBehavior, setShowBehavior] = useState(true);
   const [jumpDate, setJumpDate] = useState("");
 
   const bounds = useMemo(() => ({ start: Date.parse(range.start), end: Date.parse(range.end) }), [range.start, range.end]);
@@ -176,6 +186,22 @@ export function WalletTimeline({
     }));
   }, [lanes]);
   const times = useMemo(() => items.map((i) => i.time), [items]);
+  // Observations on the shown lanes that still have one of their events in view.
+  const laneObservations = useMemo<TimelineObservation[]>(() => {
+    const laneOf = new Map(lanes.map((l, i) => [l.wallet, i]));
+    const shown = lanes.map((l) => new Set(l.state.effects.map((e) => e.signature)));
+    return observations.flatMap((o) => {
+      const lane = laneOf.get(o.wallet);
+      if (lane === undefined || !o.events.some((e) => shown[lane].has(e.signature))) return [];
+      return [{ key: o.id, lane, start: o.start, end: o.end, label: BEHAVIOR_LABEL[o.type] }];
+    });
+  }, [observations, lanes]);
+  const openObservation = observationId ? observations.find((o) => o.id === observationId) : undefined;
+  const observationBreakdown = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const o of laneObservations) counts.set(o.label, (counts.get(o.label) ?? 0) + 1);
+    return [...counts].sort((a, b) => b[1] - a[1]).map(([label, n]) => `${n} ${label.toLowerCase()}`).join(" · ");
+  }, [laneObservations]);
 
   const selectedIndex = selection ? items.findIndex((i) => i.signature === selection.signature) : -1;
   const selectedLane =
@@ -188,6 +214,7 @@ export function WalletTimeline({
         })();
   const selected: TimelineSelection | null = selectedIndex === -1 ? null : { index: selectedIndex, lane: selectedLane };
   const setSelected = (index: number | null, lane?: number) => {
+    setObservationId(null);
     if (index === null || !items[index]) return setSelection(null);
     // The inspector shows the last thing selected: this transaction now.
     onSelectTransaction();
@@ -239,7 +266,10 @@ export function WalletTimeline({
       select(index, lane);
       return true;
     },
-    clearSelection: () => setSelection(null),
+    clearSelection: () => {
+      setSelection(null);
+      setObservationId(null);
+    },
     showTime: (time) => {
       const span = view ? view.end - view.start : bounds.end - bounds.start;
       timeline.current?.showTimeRange(time - span / 2, time + span / 2, false);
@@ -250,10 +280,30 @@ export function WalletTimeline({
   const currentEntry = selected ? events[selected.index].entries.find((e) => e.lane === selected.lane) : undefined;
   const current = currentLane && currentEntry ? currentLane.state.effects[currentEntry.effectIndex] : null;
 
-  const panel = (inspectorOpen || current || addressPanel) && (
+  const panel = (inspectorOpen || current || addressPanel || openObservation) && (
     <SidePanel side="right" label="Inspector">
       {addressPanel ? (
         addressPanel
+      ) : openObservation ? (
+        <ObservationDetails
+          observation={openObservation}
+          events={semanticEvents}
+          format={(amount, assetId) => {
+            const lane = lanes.find((l) => l.wallet === openObservation.wallet);
+            return lane ? formatAssetAmount(amount, assetId, lane.state, assets) : amount;
+          }}
+          assets={assets}
+          names={names}
+          onSelectAddress={onSelectAddress}
+          onSelectEvent={(signature) => {
+            const index = items.findIndex((i) => i.signature === signature);
+            if (index === -1) return;
+            select(index, items[index].entries.find((e) => lanes[e.lane].wallet === openObservation.wallet)?.lane);
+          }}
+          onClose={() => setObservationId(null)}
+          together={observations.filter((o) => together.includes(o.id) && o.id !== openObservation.id)}
+          onSelectObservation={setObservationId}
+        />
       ) : current && selected && currentLane && currentEntry ? (
         <TransactionDetails
           effect={current}
@@ -332,6 +382,15 @@ export function WalletTimeline({
             <TimelineCanvas
               ref={timeline}
               items={items}
+              observations={showBehavior ? laneObservations : []}
+              selectedObservation={observationId}
+              onSelectObservation={(key, keys) => {
+                // The inspector shows the last thing picked: this observation now.
+                onSelectTransaction();
+                setSelection(null);
+                setObservationId(key);
+                setTogether(keys);
+              }}
               lanes={canvasLanes}
               range={bounds}
               mode={mode}
@@ -380,6 +439,16 @@ export function WalletTimeline({
                   Relationships
                 </Button>
               </div>
+              <Button
+                size="xs"
+                variant={showBehavior && chart === "lanes" ? "secondary" : "ghost"}
+                title={`Behaviour observations: patterns across events, read by fixed rules. Click to ${showBehavior ? "hide" : "show"} them.\n${observationBreakdown}`}
+                aria-pressed={showBehavior}
+                disabled={chart !== "lanes"}
+                onClick={() => setShowBehavior((v) => !v)}
+              >
+                ◆ {laneObservations.length}
+              </Button>
               <Divider />
               <Button variant="ghost" size="icon-sm" aria-label="Zoom out" title="Zoom out" onClick={() => (chart === "relationships" ? relationshipChart.current : timeline.current)?.zoomBy(1 / 1.6)}>
                 <MinusIcon />

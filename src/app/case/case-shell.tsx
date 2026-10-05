@@ -34,6 +34,7 @@ import { buildCasePath, isCaseRoute, parseCasePath, type CaseView } from "@/lib/
 import type { RpcSettings } from "@/lib/rpc/settings";
 import { shortenAddress } from "@/lib/solana/address";
 import { collectCounterparties } from "@/lib/state/counterparties";
+import { type BehaviorObservation, observeWallet } from "@/lib/behavior/observations";
 import type { SemanticEvent } from "@/lib/semantic/events";
 import { interpretTransaction } from "@/lib/semantic/interpret";
 import { eventLabel } from "./timeline/event-card";
@@ -315,6 +316,23 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     () => hiddenReasons({ hiddenSignatures, shownSignatures, hideRules }, hidingRows, (address) => names.label(address)?.tags ?? []),
     [hiddenSignatures, shownSignatures, hideRules, hidingRows, names],
   );
+  // Behaviour patterns across each mapped wallet's whole history (not the filtered view), without hidden transactions.
+  const observations = useMemo<BehaviorObservation[]>(() => {
+    if (!walletStates) return [];
+    const exchangeOf = (address: string) => {
+      const entry = registry.lookup(address);
+      return entry?.category === "exchange" ? entry.protocolName : undefined;
+    };
+    const decimalsOf = (assetId: string) => walletStates.assets.get(assetId)?.decimals ?? walletStates.states.find((st) => assetId in st.decimals)?.decimals[assetId];
+    return walletStates.states.flatMap((ws) => {
+      const times = eventTimes(ws.effects.map((e) => e.timestamp), Date.parse(c.range.start));
+      const sequence = ws.effects.flatMap((e, i) => {
+        const event = semanticEvents.get(e.signature);
+        return event && !reasons.get(e.signature) ? [{ event, time: times[i] }] : [];
+      });
+      return observeWallet(ws.wallet, sequence, { exchangeOf, decimalsOf });
+    });
+  }, [walletStates, semanticEvents, reasons, c.range.start]);
   const perWallet = useMemo(() => {
     const tagsOf = (address: string) => names.label(address)?.tags ?? [];
     const out = new Map<
@@ -947,6 +965,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
           lanes={lanes}
           transactions={state.result.transactions}
           events={semanticEvents}
+          observations={observations}
           range={c.range}
           assets={walletStates.assets}
           names={names}
