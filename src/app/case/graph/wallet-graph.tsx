@@ -7,7 +7,7 @@ import { ArrowDownLeftIcon, ArrowUpRightIcon, ChevronDownIcon, ChevronUpIcon, Fo
 import { Button } from "@/components/ui/button";
 import type { AddressState } from "@/lib/case/address-state";
 import { graphWheelAction } from "@/lib/gestures";
-import { BURNED_NODE_ID, CLUSTER_LABELS, type ClusterKind, edgeFlow, entityNodeId, startedBy, summarizeRelationship, type GraphEdge, type GraphNode, type GraphRanking, type WalletGraph as Graph } from "@/lib/graph/build";
+import { BURNED_NODE_ID, CLUSTER_LABELS, type ClusterKind, edgeFlow, entityNodeId, flowShares, startedBy, summarizeRelationship, type GraphEdge, type GraphNode, type GraphRanking, type WalletGraph as Graph } from "@/lib/graph/build";
 import { classifyLayout, layoutGraph, majorEdges, nodeRadius, type Point, type Spacing, SPACINGS, type ZoomTier, zoomTier } from "@/lib/graph/layout";
 import type { Names } from "@/lib/labels/labels";
 import { AssetIcon } from "../asset-icon";
@@ -88,6 +88,12 @@ function nodeFacts(id: string, graph: Graph) {
   }
   return { assets: assets.size, connected: [...connected], first: Number.isFinite(first) ? first : null, last: Number.isFinite(last) ? last : null };
 }
+
+/** A fixed pseudo-random number in [0, 1) for `seed`: the same every frame, different per particle. */
+const jitter = (seed: number) => {
+  const x = Math.sin(seed * 12.9898) * 43758.5453;
+  return x - Math.floor(x);
+};
 
 /** Distance from `p` to the segment `a`–`b`. */
 function distanceToSegment(p: Point, a: Point, b: Point): number {
@@ -244,6 +250,7 @@ export function WalletGraph({
   const nodesById = useMemo(() => new Map(graph.nodes.map((n) => [n.id, n])), [graph]);
   const layoutRoles = useMemo(() => classifyLayout(graph.nodes, graph.edges), [graph]);
   const major = useMemo(() => majorEdges(graph.nodes, graph.edges), [graph]);
+  const shares = useMemo(() => flowShares(graph.edges), [graph]);
   // Semantic zoom: how much detail is drawn, with hysteresis (see zoomTier).
   const tierRef = useRef<ZoomTier>("medium");
   const relationshipsByNode = useMemo(
@@ -267,10 +274,10 @@ export function WalletGraph({
     return shown;
   }, [graph, isolated]);
 
-  const latest = useRef({ graph, wallet, primaryWallet, names, stateOf, selectedNode, selectedEdge, nodesById, layoutRoles, relationshipsByNode, visible, major });
+  const latest = useRef({ graph, wallet, primaryWallet, names, stateOf, selectedNode, selectedEdge, nodesById, layoutRoles, relationshipsByNode, visible, major, shares });
   // Drawing reads props through this ref; refresh it before any effect or frame uses it.
   useLayoutEffect(() => {
-    latest.current = { graph, wallet, primaryWallet, names, stateOf, selectedNode, selectedEdge, nodesById, layoutRoles, relationshipsByNode, visible, major };
+    latest.current = { graph, wallet, primaryWallet, names, stateOf, selectedNode, selectedEdge, nodesById, layoutRoles, relationshipsByNode, visible, major, shares };
   });
 
   const segments = useCallback((): Segment[] => {
@@ -290,7 +297,8 @@ export function WalletGraph({
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
-    const { names, stateOf, selectedNode, selectedEdge, graph, wallet, primaryWallet, nodesById, layoutRoles, visible, major } = latest.current;
+    const { names, stateOf, selectedNode, selectedEdge, graph, wallet, primaryWallet, nodesById, layoutRoles, visible, major, shares } = latest.current;
+    const now = performance.now();
     const { width, height } = sizeRef.current;
     const dpr = window.devicePixelRatio || 1;
     const t = transformRef.current;
@@ -344,7 +352,17 @@ export function WalletGraph({
       const intensity = coreEdge ? Math.min(0.85, 0.72 + Math.log1p(edge.interactions.length) / 40) : bridgeEdge ? 0.52 : Math.min(0.48, 0.3 + Math.log1p(edge.interactions.length) / 24);
       ctx.globalAlpha = on ? (selected ? 1 : intensity) : 0.05;
       // One neutral line per relationship; direction is carried by the coloured arrowheads, not the line.
-      ctx.strokeStyle = edge.kind === "program" ? p.program : selected || (on && focusing) ? p.fg : p.muted;
+      // One-way lines take the direction's colour (red: the focus sent, green: it received); two-way lines stay neutral.
+      ctx.strokeStyle =
+        edge.kind === "program"
+          ? p.program
+          : sent > 0 && received === 0
+            ? p.send
+            : received > 0 && sent === 0
+              ? p.receive
+              : selected || (on && focusing)
+                ? p.fg
+                : p.muted;
       // Thickness: transactions on a log scale (1 → 1px, 10 → 1.9, 100 → 2.8, 1,000+ → 3.7), so one busy pair can't dominate.
       const weight = edge.kind === "program" ? 1 : Math.min(3.7, 1 + 0.9 * Math.log10(edge.interactions.length));
       ctx.lineWidth = (weight + (selected ? 0.75 : 0)) / t.k;
@@ -390,9 +408,12 @@ export function WalletGraph({
         if (started.initiatedByB > 0) diamond(beside("b"), true);
         if (started.initiatedByOthers > 0 && started.initiatedByA + started.initiatedByB === 0) diamond(pointOnPath(segment, 0.5), false);
         const { reference, counterparty } = perspective;
+        const share = shares.get(edge.id);
+        const sentShare = (reference === edge.a ? share?.aToB : share?.bToA) ?? 0;
+        const receivedShare = (reference === edge.a ? share?.bToA : share?.aToB) ?? 0;
         const flows = [
-          ...(sent > 0 ? [{ source: reference, target: counterparty, count: sent, color: p.send }] : []),
-          ...(received > 0 ? [{ source: counterparty, target: reference, count: received, color: p.receive }] : []),
+          ...(sent > 0 ? [{ source: reference, target: counterparty, share: sentShare, color: p.send }] : []),
+          ...(received > 0 ? [{ source: counterparty, target: reference, share: receivedShare, color: p.receive }] : []),
         ];
         for (const flow of flows) {
           const source = positions.current.get(flow.source);
@@ -416,10 +437,24 @@ export function WalletGraph({
           ctx.lineTo(tipX - ux * arrow + uy * arrow * 0.55, tipY - uy * arrow - ux * arrow * 0.55);
           ctx.closePath();
           ctx.fill();
+
+          // Dots run source → target: 1 for little value, up to 5 for the largest flows of an asset. Each keeps its own
+          // speed, start and slight sideways offset, so a busy line doesn't move in lockstep.
+          const particles = 1 + Math.round(4 * Math.sqrt(flow.share));
+          const seed = [...edge.id, ...flow.source].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) % 100_003, 7);
+          for (let i = 0; i < particles; i++) {
+            const speed = 0.8 + 0.4 * jitter(seed + i * 3);
+            const progress = ((now / 5200) * speed + jitter(seed + i * 3 + 1) + i / particles) % 1;
+            const point = pointOnPath(flowSegment, progress);
+            const sway = ((jitter(seed + i * 3 + 2) - 0.5) * 4) / t.k;
+            ctx.beginPath();
+            ctx.arc(point.x - uy * sway, point.y + ux * sway, (selected ? 2.3 : 1.7) / t.k, 0, Math.PI * 2);
+            ctx.fill();
+          }
         }
       }
-      // The count shows for the line under the cursor or selected, and on lines between mapped wallets when nothing is focused.
-      if (edge.kind === "interaction" && (selected || focusEdge === edge.id || (coreEdge && tier !== "far" && !focusing))) {
+      // The count shows on the selected line, and on lines between mapped wallets when nothing is focused; not on hover.
+      if (edge.kind === "interaction" && (selected || (coreEdge && tier !== "far" && !focusing))) {
         const point = pointOnPath(segment, 0.72);
         const tangent = pathTangent(segment, 0.72);
         const length = Math.hypot(tangent.x, tangent.y) || 1;
@@ -622,6 +657,14 @@ export function WalletGraph({
   }, []);
 
   useEffect(schedule, [selectedNode, selectedEdge, names, visible, schedule]);
+  // The value dots move, so the map redraws every frame while it's on screen.
+  useEffect(() => {
+    let animation = requestAnimationFrame(function tick() {
+      draw();
+      animation = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(animation);
+  }, [draw]);
   // Entering or leaving isolation frames what's shown.
   useEffect(() => fit(), [isolated, fit]);
 
@@ -1144,12 +1187,13 @@ export function WalletGraph({
         {legendOpen && (
           <>
             <Legend color="bg-destructive">
-              Red arrowhead · sent from focus <span className="font-semibold text-destructive">→</span>
+              Sent from focus <span className="font-semibold text-destructive">→</span>
             </Legend>
             <Legend color="bg-emerald-500">
-              <span className="font-semibold text-emerald-500">←</span> Green arrowhead · received by focus
+              <span className="font-semibold text-emerald-500">←</span> Received by focus
             </Legend>
             <Legend color="bg-muted-foreground">Both ways · red and green arrows · thicker line: more transactions</Legend>
+            <span>Dots flow in the direction value moved · more dots: more value, against the largest flow of the same token</span>
             {showPrograms ? (
               <Legend color="border-t-2 border-dotted border-[oklch(0.7_0.14_250)] bg-transparent">Program called ({graph.counts.programConnections})</Legend>
             ) : (
