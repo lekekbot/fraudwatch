@@ -657,5 +657,28 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
     for (const w of results) w.coverage.warnings.push(`Results were not fully saved locally: ${cacheWriteError}`);
   }
 
+  for (const w of results) addSharedTransactions(w, transactions, options.ranges?.[w.wallet] ?? options.range);
   return { transactions, wallets: results, cancelled };
+}
+
+/**
+ * A busy wallet's own history can stop short of its range start, missing transactions another mapped wallet
+ * loaded with it. Those are added to its list, so its timeline lane, table and state still show them.
+ */
+export function addSharedTransactions(w: WalletIngestion, transactions: Map<string, CanonicalTransaction>, range: CaseRange) {
+  if (w.coverage.complete) return;
+  const have = new Set(w.signatures);
+  const shared = [...transactions.values()].filter(
+    (tx) =>
+      !have.has(tx.signature) &&
+      tx.timestamp != null &&
+      tx.timestamp >= range.start &&
+      tx.timestamp < range.end &&
+      (tx.accounts.some((a) => a.address === w.wallet) || tx.tokenChanges.some((c) => c.owner === w.wallet)),
+  );
+  if (shared.length === 0) return;
+  // Newest first, as ingestion orders them; ones that never loaded keep their place at the end.
+  const loaded = [...w.signatures.filter((s) => transactions.has(s)).map((s) => transactions.get(s)!), ...shared].sort((a, b) => compareTransactions(b, a));
+  w.signatures = [...loaded.map((tx) => tx.signature), ...w.signatures.filter((s) => !transactions.has(s))];
+  w.coverage.warnings.push(`${shared.length} transaction(s) added from other mapped wallets' history.`);
 }

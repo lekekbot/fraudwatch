@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { generateHighActivity } from "../../../fixtures/solana/synthetic/generate";
 import { createGenericAdapter } from "@/lib/rpc/generic-adapter";
 import { type Fixture, loadFixture, type ReplayLog, replayFetch } from "@/test/fixture-rpc";
-import { type IngestionProgress, type IngestOptions, ingestWallets } from "./ingest";
+import type { CanonicalTransaction } from "@/lib/solana/canonical";
+import { addSharedTransactions, type IngestionProgress, type IngestOptions, ingestWallets, type WalletIngestion } from "./ingest";
 
 function run(fixture: Fixture, overrides: Partial<IngestOptions> & { fetchImpl?: typeof fetch; wallets?: string[] } = {}) {
   const { fetchImpl = replayFetch(fixture), ...rest } = overrides;
@@ -64,7 +65,9 @@ describe("ingestWallets against recorded mainnet fixtures", () => {
     const result = await run(fixture, { fetchImpl: replayFetch(fixture, log), cacheOnly: new Set([paused]) });
     expect(log.filter((c) => c.params[0] === paused)).toEqual([]);
     const w = result.wallets.find((x) => x.wallet === paused)!;
-    expect(w.signatures).toEqual([]);
+    // Only what the other wallets loaded with it.
+    const loadedByOthers = new Set(result.wallets.filter((x) => x.wallet !== paused).flatMap((x) => x.signatures));
+    expect(w.signatures.every((s) => loadedByOthers.has(s))).toBe(true);
     expect(w.coverage.complete).toBe(false);
     expect(w.coverage.warnings.join(" ")).toMatch(/Paused/);
     for (const other of others) expect(result.wallets.find((x) => x.wallet === other)!.signatures.length).toBeGreaterThan(0);
@@ -350,5 +353,34 @@ describe("ingestWallets transaction pipeline", () => {
     expect(replay.peak()).toBeLessThanOrEqual(21);
     expect(result.wallets[0].signatures).toHaveLength(signaturesOf(large).length);
     expectMatchesManifest(large, result);
+  });
+});
+
+describe("addSharedTransactions", () => {
+  const tx = (signature: string, slot: number, timestamp: string, accounts: string[]) =>
+    ({ signature, slot, transactionIndex: 0, timestamp, accounts: accounts.map((address) => ({ address })), tokenChanges: [] }) as unknown as CanonicalTransaction;
+  const range = { start: "2026-04-01T00:00:00.000Z", end: "2026-05-01T00:00:00.000Z" };
+  const transactions = new Map(
+    [
+      tx("own", 30, "2026-04-20T00:00:00.000Z", ["B"]),
+      tx("shared", 10, "2026-04-02T00:00:00.000Z", ["A", "B"]),
+      tx("before", 5, "2026-03-30T00:00:00.000Z", ["A", "B"]),
+      tx("other", 20, "2026-04-10T00:00:00.000Z", ["A"]),
+    ].map((t) => [t.signature, t]),
+  );
+  const wallet = (complete: boolean): WalletIngestion =>
+    ({ wallet: "B", signatures: ["own"], coverage: { complete, warnings: [] } }) as unknown as WalletIngestion;
+
+  it("adds in-range transactions another wallet loaded with an incomplete wallet, newest first", () => {
+    const w = wallet(false);
+    addSharedTransactions(w, transactions, range);
+    expect(w.signatures).toEqual(["own", "shared"]);
+    expect(w.coverage.warnings).toHaveLength(1);
+  });
+
+  it("leaves a complete wallet's history alone", () => {
+    const w = wallet(true);
+    addSharedTransactions(w, transactions, range);
+    expect(w.signatures).toEqual(["own"]);
   });
 });
