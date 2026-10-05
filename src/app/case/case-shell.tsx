@@ -885,6 +885,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
         summary={table.summaries[index]}
         event={semanticEvents.get(effect.signature)}
         wallet={tableTx!.wallet}
+        observations={observations.filter((o) => o.events.some((e) => e.signature === effect.signature))}
         tx={state.result.transactions.get(effect.signature)}
         state={table.state}
         assets={walletStates.assets}

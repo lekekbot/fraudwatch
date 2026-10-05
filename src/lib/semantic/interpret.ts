@@ -258,6 +258,7 @@ export function interpretTransaction(
         confidence: tx.success ? "LOW" : "HIGH",
         evidence: [{ kind: "TRANSACTION_STATUS", success: tx.success }],
         interpreter: FALLBACK,
+        trace: [],
         warnings: [`Couldn't read the transaction: ${message(error)}`],
         nft: null,
         bridge: null,
@@ -271,14 +272,17 @@ export function interpretTransaction(
     interpreter: FALLBACK,
     reading: { category: "UNKNOWN", action: "UNKNOWN", confidence: "LOW" },
   };
+  const trace: SemanticEvent["trace"] = [];
   for (const interpreter of options.interpreters ?? INTERPRETERS) {
     let reading: Interpretation | null;
     try {
       reading = interpreter.interpret(ctx);
     } catch (error) {
       warnings.push(`Interpreter ${interpreter.id} failed: ${message(error)}`);
+      trace.push({ id: interpreter.id, version: interpreter.version, outcome: "failed" });
       continue;
     }
+    trace.push({ id: interpreter.id, version: interpreter.version, outcome: reading ? "matched" : "no_match" });
     if (!reading) continue;
     chosen = { interpreter: { id: interpreter.id, version: interpreter.version }, reading };
     break;
@@ -314,6 +318,7 @@ export function interpretTransaction(
         return !seen.has(key) && seen.add(key);
       }),
       interpreter: chosen.interpreter,
+      trace,
       warnings,
       nft: reading.nft ?? null,
       bridge: reading.bridge ?? null,

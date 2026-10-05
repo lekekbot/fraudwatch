@@ -9,6 +9,9 @@ import { projectEvent } from "@/lib/semantic/projection";
  * ranks a wallet.
  */
 
+/** Bump when a rule, a threshold or the observation shape changes. Observations are computed on read, never stored. */
+export const BEHAVIOR_VERSION = 1;
+
 export type BehaviorType =
   | "RAPID_FORWARDING"
   | "FUND_SPLIT"

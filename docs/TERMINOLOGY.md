@@ -54,3 +54,23 @@ Terms used across the architecture and sprint docs. When code names differ, the 
 
 - **Protocol registry:** versioned JSON (`protocols/`) mapping program IDs and addresses to protocol names, categories and roles.
 - **Protocol enrichment:** attaching registry matches to addresses and transactions. It is cached locally.
+
+## Semantic model (Chronology initiative, C1–C8)
+
+See `ARCHITECTURE.md` → Semantic model for how these fit together.
+
+- **Semantic event** (`SemanticEvent`): what one transaction means (a swap, an NFT purchase, a bridge out), the same for every wallet in it. Its ID is `solana:<signature>:event:<index>`.
+- **Category / action:** the event's broad kind (`NFT_TRADE`, `SWAP`, `LENDING`…) and finer meaning (`BUY`, `BORROW`…).
+- **Interpreter:** code that reads one kind of activity from a transaction context. They run in priority order, specific before generic, and the first reading wins.
+- **Interpreter trace** (`trace`): every interpreter tried for an event and what each returned (matched, no match, failed).
+- **Flow** (`SemanticFlow`): one asset movement inside an event, with a role. `spent`/`received` are the actor's own legs; `payment`, `royalty`, `marketplace_fee`, `rent`, `unidentified` and `nft` come from the NFT parser; `settlement` is routing and closures that only reconcile balances.
+- **Participant:** a meaningful actor in an event (buyer, seller, sender, trader…). Never infrastructure.
+- **Infrastructure:** programs, token accounts, pools, vaults, escrows, fee accounts and authorities an event went through. Never shown as a wallet counterparty.
+- **Confidence:** HIGH (decoded instruction matching the balances), MEDIUM (known protocol plus a balance pattern), LOW (a pattern only, or nothing recognisable). Never a number.
+- **Wallet projection** (`EventProjection`): one wallet's view of an event: its roles, its own action (buyer BUY, seller SELL) and its flows.
+- **Relationship** (`GraphEdge`, `RelationshipSummary`): all events between two addresses aggregated into one graph connection, with per-direction statistics and event composition.
+- **Behaviour observation** (`BehaviorObservation`): a deterministic pattern across a wallet's events (rapid forwarding, fund split, consolidation, repeated counterparty, circular movement, bridge milestone, exchange deposit). It records its rule, thresholds, values and triggering events. Not a verdict or a score.
+- **Evidence reference** (`EvidenceRef`): a pointer from an event into its canonical transaction or a lookup that supports the reading.
+- **Evidence categories:** fact, verified attribution, derived interpretation, heuristic observation, user label, community label. Kept apart in the inspector; labels are shown but never used to interpret.
+- **Bridge envelope** (`BridgeEnvelope`): the Solana side of a cross-chain transfer, with the identifiers (nonce, message account, domains) that could find the other side.
+- **Analysis versions** (`analysisVersions`): parser, reconstruction, semantic model, each interpreter, registry and behaviour rule versions, reported together; the stored caches clear when theirs change.

@@ -13,12 +13,15 @@ import { enrichTransaction, protocolsUsed } from "@/lib/protocols/registry";
 import { formatLamports } from "@/lib/solana/amount";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import type { WalletState, WalletTransactionEffect } from "@/lib/state/reconstruct";
+import type { BehaviorObservation } from "@/lib/behavior/observations";
 import type { SemanticEvent } from "@/lib/semantic/events";
 import { describeAction, type EffectSummary } from "@/lib/state/summarize";
 import { type Assets, assetLabel, formatAssetAmount, formatUtc } from "../asset-format";
 import { kindLabel } from "../filter-panel";
 import { eventLabel } from "./event-card";
+import { DebugDetails } from "./debug-details";
 import { EventEvidence, EventSummary } from "./event-details";
+import { BEHAVIOR_LABEL, observationSummary } from "./observation-details";
 import { AddressButton, Section } from "./inspector-ui";
 
 function Raw({ label, value }: { label: string; value: unknown }) {
@@ -74,6 +77,7 @@ export function TransactionDetails({
   bookmarked,
   onToggleBookmark,
   onShowInGraph,
+  observations = [],
 }: {
   effect: WalletTransactionEffect;
   summary: EffectSummary;
@@ -98,6 +102,8 @@ export function TransactionDetails({
   onToggleBookmark: () => void;
   /** The Graph, narrowed to the wallets in this event. */
   onShowInGraph?: () => void;
+  /** Behaviour observations this transaction is part of. */
+  observations?: readonly BehaviorObservation[];
 }) {
   const enrichment = tx ? enrichTransaction(tx) : null;
   const protocols = enrichment ? protocolsUsed(enrichment) : [];
@@ -279,7 +285,18 @@ export function TransactionDetails({
         </Section>
       )}
 
-      {event && <EventEvidence event={event} tx={tx} state={state} assets={assets} names={names} onSelectAddress={onSelectAddress} />}
+      {event && (
+        <EventEvidence
+          event={event}
+          tx={tx}
+          state={state}
+          assets={assets}
+          names={names}
+          onSelectAddress={onSelectAddress}
+          observations={observations.map((o) => `◆ ${BEHAVIOR_LABEL[o.type]}: ${observationSummary(o, (amount, assetId) => formatAssetAmount(amount, assetId, state, assets), assets, names)}`)}
+        />
+      )}
+      {event && <DebugDetails event={event} tx={tx} effect={effect} summary={summary} observations={observations} />}
 
       {tx && (
         <Section title="Raw">
