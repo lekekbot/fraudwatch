@@ -1,7 +1,7 @@
 import { NATIVE_SOL } from "@/lib/assets/assets";
 import type { AddressLabel } from "@/lib/labels/labels";
 import type { ProtocolRegistry } from "@/lib/protocols/registry";
-import { BUBBLEGUM_PROGRAM, cnftMoves } from "@/lib/solana/bubblegum";
+import { BUBBLEGUM_PROGRAM, type CnftMove, cnftMoves } from "@/lib/solana/bubblegum";
 import type { CanonicalInstruction, CanonicalTransaction } from "@/lib/solana/canonical";
 import { reconstructWalletState } from "@/lib/state/reconstruct";
 import { type EffectSummary, NO_NFTS, type NftCatalog, summarizeEffect } from "@/lib/state/summarize";
@@ -10,6 +10,9 @@ import {
   type EventConfidence,
   eventId,
   type EvidenceRef,
+  type FlowRole,
+  type Infrastructure,
+  type NftDetail,
   type Participant,
   type ParticipantRole,
   type ProtocolRef,
@@ -20,7 +23,7 @@ import {
 import { INTERPRETERS } from "./interpreters";
 import { type ProtocolResolution, resolveProtocols } from "./resolver";
 
-type Delta = { address: string; account: string; assetId: string; delta: bigint };
+export type Delta = { address: string; account: string; assetId: string; delta: bigint };
 
 /** Facts about one transaction, worked out once and shared by every interpreter. */
 export type TransactionContext = {
@@ -29,16 +32,28 @@ export type TransactionContext = {
   signers: string[];
   /** The fee payer's reading of the transaction, as the existing UI shows it. */
   summary: EffectSummary;
+  /**
+   * The NFT parser's reading from the first side that has one: the fee payer,
+   * else a wallet that received an NFT, else one that sent one (a mint or
+   * transfer someone else paid for).
+   */
+  nft: { wallet: string; summary: EffectSummary } | null;
   /** Outer instructions, then inner ones, each with the evidence that points at it. */
   instructions: { ix: CanonicalInstruction; ref: EvidenceRef }[];
   flows: SemanticFlow[];
+  cnftMoves: CnftMove[];
   /** Assets whose senders and receivers balances can't pair. */
   ambiguousAssets: string[];
+  /** Value deltas by owner, the fee payer's fee added back, token accounts' rent left out. */
+  deltas: Delta[];
   resolution: ProtocolResolution;
   nfts: NftCatalog;
 };
 
-/** One interpreter's reading. Flows, participants and infrastructure come from the context. */
+/**
+ * One interpreter's reading. Flows default to the context's balance pairing;
+ * participants always come from the flows and the category.
+ */
 export type Interpretation = {
   category: EventCategory;
   action: string;
@@ -46,6 +61,11 @@ export type Interpretation = {
   protocol?: ProtocolRef | null;
   evidence?: EvidenceRef[];
   warnings?: string[];
+  /** Replaces the context's flows when the interpreter knows what each movement is for. */
+  flows?: SemanticFlow[];
+  /** Addresses the interpreter found to be infrastructure, beyond what the resolver knows. */
+  infrastructure?: Infrastructure[];
+  nft?: NftDetail;
 };
 
 /**
@@ -81,7 +101,7 @@ function deltas(tx: CanonicalTransaction, feePayer: string | null): Delta[] {
  * receiver) whose amount covers the other side; otherwise each side is kept
  * with the other left unknown rather than guessed.
  */
-function balanceFlows(all: Delta[]): { flows: SemanticFlow[]; ambiguousAssets: string[] } {
+export function balanceFlows(all: Delta[]): { flows: SemanticFlow[]; ambiguousAssets: string[] } {
   const byAddress = new Map<string, bigint>();
   const assets: string[] = [];
   for (const d of all) {
@@ -116,25 +136,47 @@ function balanceFlows(all: Delta[]): { flows: SemanticFlow[]; ambiguousAssets: s
 export function buildContext(
   tx: CanonicalTransaction,
   options: { nfts?: NftCatalog; registry?: ProtocolRegistry; labels?: ReadonlyMap<string, AddressLabel> } = {},
-): TransactionContext & { deltas: Delta[] } {
+): TransactionContext {
   const nfts = options.nfts ?? NO_NFTS;
   const feePayer = tx.accounts[0]?.address ?? null;
+  const summarize = (wallet: string) => summarizeEffect(reconstructWalletState(wallet, [tx], { historyComplete: true }).effects[0], tx, nfts);
   const summary: EffectSummary = feePayer
-    ? summarizeEffect(reconstructWalletState(feePayer, [tx], { historyComplete: true }).effects[0], tx, nfts)
+    ? summarize(feePayer)
     : { kind: tx.success ? "PROGRAM" : "FAILED", outflows: [], inflows: [], counterparties: [], action: null, actor: null };
   const all = deltas(tx, feePayer);
   const balance = balanceFlows(all);
-  const cnftFlows: SemanticFlow[] = cnftMoves(tx).map((m) => ({ assetId: m.assetId, amount: "1", from: m.from, to: m.to, source: "compressed_nft" }));
+  const moves = cnftMoves(tx);
+  const cnftFlows: SemanticFlow[] = moves.map((m) => ({ assetId: m.assetId, amount: "1", from: m.from, to: m.to, source: "compressed_nft" }));
+
+  let nft: TransactionContext["nft"] = feePayer && summary.nft ? { wallet: feePayer, summary } : null;
+  if (!nft && tx.success) {
+    const nftTokens = tx.tokenChanges.filter((t) => t.owner && nfts.isNft(t.mint));
+    const sides = [
+      ...moves.map((m) => m.to),
+      ...nftTokens.filter((t) => BigInt(t.delta) > ZERO).map((t) => t.owner!),
+      ...moves.map((m) => m.from),
+      ...nftTokens.filter((t) => BigInt(t.delta) < ZERO).map((t) => t.owner!),
+    ];
+    for (const wallet of new Set(sides.filter((w) => w !== null && w !== feePayer))) {
+      const other = summarize(wallet!);
+      if (other.nft) {
+        nft = { wallet: wallet!, summary: other };
+        break;
+      }
+    }
+  }
   return {
     tx,
     feePayer,
     signers: tx.accounts.filter((a) => a.signer).map((a) => a.address),
     summary,
+    nft,
     instructions: [
       ...tx.instructions.map((ix, index) => ({ ix, ref: { kind: "OUTER_INSTRUCTION", index } as const })),
       ...tx.innerInstructions.map((ix, index) => ({ ix, ref: { kind: "INNER_INSTRUCTION", index } as const })),
     ],
     flows: [...balance.flows, ...cnftFlows],
+    cnftMoves: moves,
     ambiguousAssets: balance.ambiguousAssets,
     resolution: resolveProtocols(tx, options),
     nfts,
@@ -145,6 +187,7 @@ export function buildContext(
 function primaryRole(category: EventCategory, action: string, sent: boolean, received: boolean): ParticipantRole {
   if (category === "NFT_TRADE") return action === "BUY" ? "BUYER" : action === "SELL" ? "SELLER" : "TRADER";
   if (category === "SWAP") return "TRADER";
+  if (category === "NFT_MINT") return "RECEIVER";
   if (category === "STAKE") return "DEPOSITOR";
   if (category === "UNSTAKE") return "WITHDRAWER";
   if (sent) return "SENDER";
@@ -152,25 +195,46 @@ function primaryRole(category: EventCategory, action: string, sent: boolean, rec
   return "SIGNER";
 }
 
-function participantsOf(ctx: TransactionContext, category: EventCategory, action: string): Participant[] {
-  const { feePayer, flows } = ctx;
-  const infrastructure = new Set(ctx.resolution.infrastructure.map((i) => i.address));
+const SUPPORTING = new Set<FlowRole | undefined>(["rent", "settlement"]);
+
+function participantsOf(
+  ctx: TransactionContext,
+  category: EventCategory,
+  action: string,
+  allFlows: SemanticFlow[],
+  infrastructure: Set<string>,
+  detail: NftDetail | undefined,
+): Participant[] {
+  const { feePayer } = ctx;
+  const nftCategory = category === "NFT_TRADE" || category === "NFT_TRANSFER" || category === "NFT_MINT";
+  // The side the reading was taken from; the fee payer, unless the NFT parser read someone else's.
+  const primary = nftCategory && ctx.nft ? ctx.nft.wallet : feePayer;
+  // Rent and settlement movements are evidence, not relationships.
+  const flows = allFlows.filter((f) => !SUPPORTING.has(f.role));
   const out: Participant[] = [];
   const add = (address: string | null, role: ParticipantRole) => {
     if (!address || infrastructure.has(address) || out.some((p) => p.address === address && p.role === role)) return;
     out.push({ address, role });
   };
   const roled = new Set<string>();
-  if (feePayer) {
-    add(feePayer, primaryRole(category, action, flows.some((f) => f.from === feePayer), flows.some((f) => f.to === feePayer)));
-    roled.add(feePayer);
+  if (primary) {
+    add(primary, primaryRole(category, action, flows.some((f) => f.from === primary), flows.some((f) => f.to === primary)));
+    roled.add(primary);
   }
-  const nft = category === "NFT_TRADE" || category === "NFT_TRANSFER" || category === "NFT_MINT" ? ctx.summary.nft : undefined;
+  const nft = nftCategory ? ctx.nft?.summary.nft : undefined;
   if (nft) {
     // The other side: seller of a buy, buyer of a sale, payee of a mint, the other end of a transfer.
     const partyRole: ParticipantRole =
       action === "BUY" ? "SELLER" : action === "SELL" ? "BUYER" : category === "NFT_TRADE" ? "TRADER" : action === "RECEIVE" ? "SENDER" : "RECEIVER";
-    if (nft.party) add(nft.party, partyRole);
+    for (const [address, role] of [
+      [detail?.buyer, "BUYER"],
+      [detail?.seller, "SELLER"],
+    ] as const) {
+      if (!address) continue;
+      add(address, role);
+      roled.add(address);
+    }
+    if (nft.party && !infrastructure.has(nft.party) && !roled.has(nft.party)) add(nft.party, partyRole);
     for (const o of nft.others) {
       if (o.role === "royalty") add(o.address, "ROYALTY_RECIPIENT");
       else if (o.role === "marketplace_fee") add(o.address, "FEE_RECIPIENT");
@@ -183,6 +247,7 @@ function participantsOf(ctx: TransactionContext, category: EventCategory, action
     if (f.from && !roled.has(f.from)) add(f.from, "SENDER");
     if (f.to && !roled.has(f.to)) add(f.to, "RECEIVER");
   }
+  if (feePayer && !out.some((p) => p.address === feePayer)) add(feePayer, "SIGNER");
   return out;
 }
 
@@ -210,7 +275,7 @@ export function interpretTransaction(
   const base = { id: eventId(tx.signature, 0), version: SEMANTIC_VERSION, signature: tx.signature, slot: tx.slot, timestamp: tx.timestamp };
   const metadata = { feePayer: tx.accounts[0]?.address ?? null, feeLamports: tx.feeLamports };
 
-  let ctx: ReturnType<typeof buildContext>;
+  let ctx: TransactionContext;
   try {
     ctx = buildContext(tx, options);
   } catch (error) {
@@ -229,6 +294,7 @@ export function interpretTransaction(
         evidence: [{ kind: "TRANSACTION_STATUS", success: tx.success }],
         interpreter: FALLBACK,
         warnings: [`Couldn't read the transaction: ${message(error)}`],
+        nft: null,
         metadata,
       },
     ];
@@ -253,7 +319,7 @@ export function interpretTransaction(
   }
   const { reading } = chosen;
   warnings.push(...(reading.warnings ?? []));
-  for (const assetId of ctx.ambiguousAssets) warnings.push(`Balances can't pair the senders and receivers of ${assetId}.`);
+  if (!reading.flows) for (const assetId of ctx.ambiguousAssets) warnings.push(`Balances can't pair the senders and receivers of ${assetId}.`);
 
   const evidence: EvidenceRef[] = [{ kind: "TRANSACTION_STATUS", success: tx.success }];
   for (const d of ctx.deltas) evidence.push(d.assetId === NATIVE_SOL ? { kind: "BALANCE_DELTA", account: d.account } : { kind: "TOKEN_DELTA", account: d.account, mint: d.assetId });
@@ -261,16 +327,19 @@ export function interpretTransaction(
   for (const m of ctx.resolution.matches) evidence.push({ kind: "KNOWN_ADDRESS", address: m.address, protocolId: m.protocolId, registryVersion: ctx.resolution.registryVersion });
   evidence.push(...(reading.evidence ?? []));
   const seen = new Set<string>();
+  const flows = reading.flows ?? ctx.flows;
+  const infrastructure = [...ctx.resolution.infrastructure];
+  for (const extra of reading.infrastructure ?? []) if (!infrastructure.some((i) => i.address === extra.address)) infrastructure.push(extra);
 
   return [
     {
       ...base,
       category: reading.category,
       action: reading.action,
-      participants: participantsOf(ctx, reading.category, reading.action),
-      infrastructure: ctx.resolution.infrastructure,
-      assets: [...new Set(ctx.flows.map((f) => f.assetId))],
-      flows: ctx.flows,
+      participants: participantsOf(ctx, reading.category, reading.action, flows, new Set(infrastructure.map((i) => i.address)), reading.nft),
+      infrastructure,
+      assets: [...new Set(flows.map((f) => f.assetId))],
+      flows,
       protocol: reading.protocol ?? null,
       service: ctx.resolution.protocols.find((p) => p.category === "exchange") ?? null,
       confidence: reading.confidence,
@@ -280,6 +349,7 @@ export function interpretTransaction(
       }),
       interpreter: chosen.interpreter,
       warnings,
+      nft: reading.nft ?? null,
       metadata,
     },
   ];

@@ -11,6 +11,7 @@ import {
 import type { EffectKind } from "@/lib/state/summarize";
 import type { EvidenceRef, ProtocolRef } from "./events";
 import type { Interpreter, TransactionContext } from "./interpret";
+import { readNft } from "./nft";
 
 /** transferChecked → TRANSFER_CHECKED. */
 const actionName = (instruction: string | null | undefined) =>
@@ -43,29 +44,6 @@ function knownProgram(ctx: TransactionContext, categories: ProtocolCategory[]): 
   return null;
 }
 
-function nftEvidence(ctx: TransactionContext): EvidenceRef[] {
-  const nft = ctx.summary.nft;
-  const ids = nft ? [...nft.received, ...nft.sent] : [];
-  return [{ kind: "NFT_TRADE_PARSER" }, ...ids.filter((id) => ctx.nfts.isNft(id)).map((assetId) => ({ kind: "ASSET_METADATA", assetId }) as const)];
-}
-
-function nftReading(ctx: TransactionContext) {
-  switch (ctx.summary.kind) {
-    case "NFT_BUY":
-      return { category: "NFT_TRADE", action: "BUY" } as const;
-    case "NFT_SELL":
-      return { category: "NFT_TRADE", action: "SELL" } as const;
-    case "NFT_SWAP":
-      return { category: "NFT_TRADE", action: "SWAP" } as const;
-    case "NFT_MINT":
-      return { category: "NFT_MINT", action: "MINT" } as const;
-    case "NFT_TRANSFER":
-      return { category: "NFT_TRANSFER", action: ctx.summary.nft?.received.length ? "RECEIVE" : "SEND" } as const;
-    default:
-      return null;
-  }
-}
-
 const failed: Interpreter = {
   id: "failed",
   version: 1,
@@ -77,15 +55,16 @@ const marketplaceNftTrade: Interpreter = {
   id: "marketplace-nft-trade",
   version: 1,
   interpret: (ctx) => {
-    const reading = nftReading(ctx);
-    const market = reading?.category === "NFT_TRADE" ? knownProgram(ctx, ["nft_marketplace"]) : null;
-    if (!reading || !market) return null;
+    const kind = ctx.nft?.summary.kind;
+    const market = kind === "NFT_BUY" || kind === "NFT_SELL" || kind === "NFT_SWAP" ? knownProgram(ctx, ["nft_marketplace"]) : null;
+    const reading = market && readNft(ctx);
+    if (!market || !reading) return null;
     // The marketplace's instructions aren't decoded yet: a balance pattern alongside a known program.
     return {
       ...reading,
       confidence: "MEDIUM",
       protocol: market.protocol,
-      evidence: [...refsWhere(ctx, (ix) => ix.programId === market.programId), ...nftEvidence(ctx)],
+      evidence: [...refsWhere(ctx, (ix) => ix.programId === market.programId), ...(reading.evidence ?? [])],
     };
   },
 };
@@ -142,9 +121,9 @@ const genericNft: Interpreter = {
   id: "generic-nft",
   version: 1,
   interpret: (ctx) => {
-    const reading = nftReading(ctx);
+    const reading = readNft(ctx);
     if (!reading) return null;
-    return { ...reading, confidence: reading.category === "NFT_TRADE" ? "LOW" : "MEDIUM", evidence: nftEvidence(ctx) };
+    return { ...reading, confidence: reading.category === "NFT_TRADE" ? "LOW" : "MEDIUM" };
   },
 };
 

@@ -4,7 +4,7 @@
  * transactions and never stored, so nothing stale can be reused yet; a store
  * for them must check both (see `DERIVED_CACHES`).
  */
-export const SEMANTIC_VERSION = 2;
+export const SEMANTIC_VERSION = 3;
 
 /**
  * Broad kinds of meaningful action. `action` carries the finer meaning (BUY,
@@ -44,7 +44,7 @@ export type ParticipantRole =
   | "ROYALTY_RECIPIENT";
 
 /** Addresses the event went through rather than parties to it. Never shown as wallet counterparties. */
-export type InfrastructureRole = "PROGRAM" | "MARKETPLACE" | "ROUTER" | "POOL" | "VAULT" | "ESCROW" | "BRIDGE" | "TOKEN_ACCOUNT" | "PDA";
+export type InfrastructureRole = "PROGRAM" | "MARKETPLACE" | "ROUTER" | "POOL" | "VAULT" | "ESCROW" | "BRIDGE" | "FEE_ACCOUNT" | "TOKEN_ACCOUNT" | "PDA";
 
 export type Participant = { address: string; role: ParticipantRole };
 export type Infrastructure = { address: string; role: InfrastructureRole; label: string | null };
@@ -63,6 +63,39 @@ export type SemanticFlow = {
   to: string | null;
   /** balance: paired from pre/post balances. compressed_nft: a Bubblegum leaf event. */
   source: "balance" | "compressed_nft";
+  /** What the movement is for, when an interpreter knows; see `FlowRole`. */
+  role?: FlowRole;
+};
+
+/**
+ * payment: the main consideration (buyer to seller). royalty, marketplace_fee,
+ * rent, unidentified: the payer's other recipients, as the NFT parser names
+ * them. nft: the traded asset itself. settlement: whatever else moved
+ * balances (escrow and account closures refunding rent), so the flows still
+ * add up to the observed changes. Supporting roles never make a participant.
+ */
+export type FlowRole = "payment" | "royalty" | "marketplace_fee" | "rent" | "unidentified" | "nft" | "settlement";
+
+/**
+ * An NFT trade, mint or transfer in one place. Buyer and seller are the
+ * wallets on either side, whoever sent the transaction; null when the side
+ * isn't a sale (a swap, a transfer, a mint's issuer).
+ */
+export type NftDetail = {
+  /** NFTs that changed hands (both directions in a swap). */
+  assets: string[];
+  buyer: string | null;
+  seller: string | null;
+  /**
+   * The buyer's net outlay in the payment asset, network fee excluded, as the
+   * NFT parser reports it: it includes rent for accounts the purchase opened.
+   * For an accepted bid it's what the bid's escrow paid out.
+   */
+  price: { assetId: string; amount: string } | null;
+  /** More than one NFT on one side. */
+  bundle: boolean;
+  /** Some of the NFTs are compressed: moved in Bubblegum leaf events, never held as SPL tokens. */
+  compressed: boolean;
 };
 
 /**
@@ -115,6 +148,8 @@ export type SemanticEvent = {
   interpreter: { id: string; version: number };
   /** Interpreters that failed, flows balances couldn't pair, and similar caveats. */
   warnings: string[];
+  /** Set for NFT_TRADE, NFT_TRANSFER and NFT_MINT events read by the NFT parser. */
+  nft: NftDetail | null;
   /** The interpretation is read from the fee payer's side; their fee is not a flow. */
   metadata: { feePayer: string | null; feeLamports: string };
 };
