@@ -11,14 +11,47 @@ import type { EffectKind, EffectSummary, RecipientRole } from "@/lib/state/summa
  * Program calls are a separate connection kind and never join two wallets.
  */
 
-/** `burn`: where burned tokens go; they leave supply instead of reaching an address. */
-export type GraphNodeKind = "wallet" | "counterparty" | "program" | "aggregate" | "burn";
+/**
+ * `burn`: where burned tokens go; they leave supply instead of reaching an address. `entity`: one protocol or
+ * service standing in for every registry address of it the case touched (program, authority, fee account, pool…).
+ */
+export type GraphNodeKind = "wallet" | "counterparty" | "program" | "aggregate" | "burn" | "entity";
 
-/** `wallet`: a mapped wallet. `txCount`: transactions on the node's connections. */
-export type GraphNode = { id: string; kind: GraphNodeKind; txCount: number };
+/**
+ * Where an address that isn't ranked onto the map is collapsed. Fixed, meaningful groups, not graph communities;
+ * `null` from `clusterOf` keeps an address out of every cluster (a look-alike, an address the investigator labelled).
+ */
+export type ClusterKind = "known" | "infrastructure" | "decoy" | "unknown" | "one_off";
+export const CLUSTER_KINDS: readonly ClusterKind[] = ["known", "infrastructure", "decoy", "unknown", "one_off"];
+export const CLUSTER_LABELS: Record<ClusterKind, string> = {
+  known: "Known services",
+  infrastructure: "Programs & infrastructure",
+  decoy: "Likely decoys",
+  unknown: "Unknown wallets",
+  one_off: "One-off wallets",
+};
+export const clusterNodeId = (kind: ClusterKind) => `__cluster_${kind}__`;
 
-/** Value that moved between the pair in one transaction. */
-export type Movement = { from: string; to: string; assetId: string; amount: string };
+/**
+ * `wallet`: a mapped wallet. `txCount`: transactions on the node's connections. An `aggregate` is a cluster of
+ * collapsed addresses: how many, and which mapped wallets they dealt with.
+ */
+export type GraphNode = {
+  id: string;
+  kind: GraphNodeKind;
+  txCount: number;
+  cluster?: { kind: ClusterKind; addresses: number; wallets: string[] };
+  /** The real addresses an entity node stands for, sorted. */
+  entity?: { protocolId: string; addresses: string[] };
+};
+
+const ENTITY_PREFIX = "entity:";
+export const entityNodeId = (protocolId: string) => `${ENTITY_PREFIX}${protocolId}`;
+/** The registry protocol id behind an entity node id, or undefined for a real address. */
+export const entityProtocol = (id: string) => (id.startsWith(ENTITY_PREFIX) ? id.slice(ENTITY_PREFIX.length) : undefined);
+
+/** Value that moved between the pair in one transaction. `via`: the real address when one end is an entity node. */
+export type Movement = { from: string; to: string; assetId: string; amount: string; via?: string };
 
 /** Exact on-chain legs kept inside their NFT trade instead of drawn as separate relationships. */
 export type NftRelatedMovement = Movement & { role: RecipientRole | "escrow" };
@@ -160,15 +193,17 @@ export type WalletSide = { wallet: string; effects: WalletTransactionEffect[]; s
 export type GraphRanking = "significant" | "interactions" | "incoming" | "outgoing" | "recent";
 
 export const MAX_GRAPH_NODES = 25;
-export const OMITTED_NODE_ID = "__other_addresses__";
 export const BURNED_NODE_ID = "__burned__";
 
-/** `names`, also naming the burn node, for everything that labels graph nodes. */
-export const withGraphNames = (names: Names): Names => ({
-  ...names,
-  of: (address, chars) => (address === BURNED_NODE_ID ? "Burned" : names.of(address, chars)),
-  known: (address) => (address === BURNED_NODE_ID ? "Burned" : names.known(address)),
-});
+/** `names`, also naming the burn node and entity nodes, for everything that labels graph nodes. */
+export const withGraphNames = (names: Names): Names => {
+  const special = (id: string) => (id === BURNED_NODE_ID ? "Burned" : registry.protocols.get(entityProtocol(id) ?? "")?.name);
+  return {
+    ...names,
+    of: (address, chars) => special(address) ?? names.of(address, chars),
+    known: (address) => special(address) ?? names.known(address),
+  };
+};
 
 export const pairId = (x: string, y: string) => (x < y ? `${x}|${y}` : `${y}|${x}`);
 
@@ -186,6 +221,12 @@ export function buildInteractionGraph(
     showPrograms?: boolean;
     maxNodes?: number;
     ranking?: GraphRanking;
+    /** Which cluster an address collapses into; every address is "unknown" without it. */
+    clusterOf?: (address: string) => ClusterKind | null;
+    /** Clusters shown as their addresses instead. */
+    expandedClusters?: ReadonlySet<ClusterKind>;
+    /** Registry protocols drawn as their separate addresses instead of one entity node. */
+    expandedEntities?: ReadonlySet<string>;
   } = {},
 ): WalletGraph {
   const hidden = options.hiddenAssets ?? new Set<string>();
@@ -195,6 +236,16 @@ export function buildInteractionGraph(
   // The same movement seen from both mapped wallets' sides is recorded once.
   const seen = new Set<string>();
   const seenNftRelated = new Set<string>();
+  // Known protocol and service addresses collapse into one node per protocol; mapped wallets never do.
+  const expandedEntities = options.expandedEntities ?? new Set<string>();
+  const members = new Map<string, Set<string>>();
+  const sideOf = (address: string) => {
+    const entry = mapped.has(address) ? undefined : registry.lookup(address);
+    if (!entry || entry.category === "core" || expandedEntities.has(entry.protocolId)) return address;
+    const id = entityNodeId(entry.protocolId);
+    members.set(id, (members.get(id) ?? new Set()).add(address));
+    return id;
+  };
 
   const edgeFor = (x: string, y: string, kind: GraphEdge["kind"]) => {
     const id = kind === "program" ? `program:${pairId(x, y)}` : pairId(x, y);
@@ -210,7 +261,7 @@ export function buildInteractionGraph(
     let it = edge.bySignature.get(e.signature);
     if (!it) {
       // The summary names the fee payer only when it isn't the wallet; otherwise the wallet approved it itself.
-      it = { signature: e.signature, time: e.timestamp ? Date.parse(e.timestamp) : null, wallet: e.wallet, kind: s.kind, movements: [], initiator: s.actor ?? e.wallet };
+      it = { signature: e.signature, time: e.timestamp ? Date.parse(e.timestamp) : null, wallet: e.wallet, kind: s.kind, movements: [], initiator: s.actor ? sideOf(s.actor) : e.wallet };
       edge.bySignature.set(e.signature, it);
       edge.interactions.push(it);
     }
@@ -221,14 +272,18 @@ export function buildInteractionGraph(
     const key = `${e.signature}|${m.from}|${m.to}|${m.assetId}`;
     if (seen.has(key)) return;
     seen.add(key);
-    interactionOn(edgeFor(m.from, m.to, "interaction"), e, s).movements.push(m);
+    const from = sideOf(m.from);
+    const to = sideOf(m.to);
+    if (from === to) return;
+    const via = from !== m.from ? m.from : to !== m.to ? m.to : undefined;
+    interactionOn(edgeFor(from, to, "interaction"), e, s).movements.push(via ? { ...m, from, to, via } : m);
   };
   const groupNftMovement = (e: WalletTransactionEffect, s: EffectSummary, party: string, m: NftRelatedMovement) => {
     if (m.from === m.to || hidden.has(m.assetId)) return;
     const key = `${e.signature}|${m.from}|${m.to}|${m.assetId}|${m.role}`;
     if (seenNftRelated.has(key)) return;
     seenNftRelated.add(key);
-    const interaction = interactionOn(edgeFor(e.wallet, party, "interaction"), e, s);
+    const interaction = interactionOn(edgeFor(e.wallet, sideOf(party), "interaction"), e, s);
     (interaction.nftRelated ??= []).push(m);
   };
 
@@ -261,6 +316,7 @@ export function buildInteractionGraph(
         for (const mint of s.nft.sent) move(e, s, { from: wallet, to: s.nft.party, assetId: mint, amount: "1" });
       }
       // Program calls connect the wallet to the program only, never to other wallets.
+      // ponytail: program links stay on raw program ids, not entities; fold them in if both on one line ever reads badly.
       const program = s.action?.programId;
       if (program && s.kind !== "ACCOUNT" && registry.lookup(program)?.category !== "core") {
         interactionOn(edgeFor(wallet, program, "program"), e, s);
@@ -287,9 +343,12 @@ export function buildInteractionGraph(
   const incoming = new Map<string, Set<string>>();
   const outgoing = new Map<string, Set<string>>();
   const lastSeen = new Map<string, number>();
+  /** The mapped wallets each address dealt with. */
+  const walletsOf = new Map<string, Set<string>>();
   const programs = new Set(programEdges.flatMap((e) => (mapped.has(e.a) ? [e.b] : [e.a])));
   for (const e of drawn) {
-    for (const id of [e.a, e.b]) {
+    for (const [id, other] of [[e.a, e.b], [e.b, e.a]]) {
+      if (mapped.has(other)) walletsOf.set(id, (walletsOf.get(id) ?? new Set()).add(other));
       if (!txs.has(id)) txs.set(id, new Set());
       for (const it of e.interactions) {
         txs.get(id)!.add(it.signature);
@@ -321,7 +380,9 @@ export function buildInteractionGraph(
   const capacity = Math.max(0, maxNodes - mapped.size - burned.length);
   if ((options.ranking ?? "significant") === "significant") {
     const groups = [rankings.interactions.slice(0, 10), rankings.incoming.slice(0, 5), rankings.outgoing.slice(0, 5), rankings.recent.slice(0, 5)];
-    const picked = new Set<string>();
+    // Counterparties shared by mapped wallets come first: they tie the case together.
+    const shared = byInteractions.filter((id) => (walletsOf.get(id)?.size ?? 0) >= 2);
+    const picked = new Set<string>(shared.slice(0, capacity));
     for (let i = 0; i < 10 && picked.size < capacity; i++) {
       for (const group of groups) {
         if (group[i]) picked.add(group[i]);
@@ -334,14 +395,37 @@ export function buildInteractionGraph(
     }
     rankings.significant = [...picked];
   }
+  const clusterOf = options.clusterOf ?? (() => "unknown");
+  const expanded = options.expandedClusters ?? new Set();
   const kept = new Set([...mapped, ...burned, ...rankings[options.ranking ?? "significant"].slice(0, capacity)]);
+  const clusters = new Map<ClusterKind, { addresses: number; txs: Set<string>; wallets: Set<string> }>();
+  for (const id of others) {
+    if (kept.has(id)) continue;
+    // An entity is a known service by definition.
+    const assigned = entityProtocol(id) ? "known" : clusterOf(id);
+    // Unknown addresses seen in a single transaction are split off: usually the bulk, and the least telling.
+    const kind = assigned === "unknown" && txs.get(id)!.size === 1 ? "one_off" : assigned;
+    if (kind === null || expanded.has(kind)) {
+      kept.add(id);
+      continue;
+    }
+    let cluster = clusters.get(kind);
+    if (!cluster) clusters.set(kind, (cluster = { addresses: 0, txs: new Set(), wallets: new Set() }));
+    cluster.addresses++;
+    for (const signature of txs.get(id)!) cluster.txs.add(signature);
+    for (const wallet of walletsOf.get(id) ?? []) cluster.wallets.add(wallet);
+  }
   const omittedNodes = new Set([...txs.keys(), ...mapped]).size - kept.size;
   const nodes: GraphNode[] = [...kept].map((id) => ({
     id,
-    kind: mapped.has(id) ? "wallet" : id === BURNED_NODE_ID ? "burn" : programs.has(id) ? "program" : "counterparty",
+    kind: mapped.has(id) ? "wallet" : id === BURNED_NODE_ID ? "burn" : entityProtocol(id) ? "entity" : programs.has(id) ? "program" : "counterparty",
     txCount: txs.get(id)?.size ?? 0,
+    ...(entityProtocol(id) ? { entity: { protocolId: entityProtocol(id)!, addresses: [...(members.get(id) ?? [])].sort() } } : {}),
   }));
-  if (omittedNodes > 0) nodes.push({ id: OMITTED_NODE_ID, kind: "aggregate", txCount: omittedNodes });
+  for (const kind of CLUSTER_KINDS) {
+    const cluster = clusters.get(kind);
+    if (cluster) nodes.push({ id: clusterNodeId(kind), kind: "aggregate", txCount: cluster.txs.size, cluster: { kind, addresses: cluster.addresses, wallets: [...cluster.wallets].sort() } });
+  }
   const shown = drawn.filter((e) => kept.has(e.a) && kept.has(e.b));
   const interactions = shown.filter((e) => e.kind === "interaction");
   return {

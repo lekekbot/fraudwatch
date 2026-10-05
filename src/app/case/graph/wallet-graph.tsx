@@ -3,12 +3,12 @@
 import { select } from "d3-selection";
 import { type ZoomBehavior, type ZoomTransform, zoom, zoomIdentity } from "d3-zoom";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownLeftIcon, ArrowUpRightIcon, ChevronDownIcon, ChevronUpIcon, MaximizeIcon, MinusIcon, PlusIcon, RotateCcwIcon, WorkflowIcon, XIcon } from "lucide-react";
+import { ArrowDownLeftIcon, ArrowUpRightIcon, ChevronDownIcon, ChevronUpIcon, FocusIcon, MaximizeIcon, MinusIcon, PlusIcon, RotateCcwIcon, WorkflowIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { AddressState } from "@/lib/case/address-state";
 import { graphWheelAction } from "@/lib/gestures";
-import { BURNED_NODE_ID, edgeFlow, OMITTED_NODE_ID, startedBy, summarizeRelationship, type GraphEdge, type GraphNode, type GraphRanking, type WalletGraph as Graph } from "@/lib/graph/build";
-import { classifyLayout, layoutGraph, nodeRadius, type Point, type Spacing, SPACINGS } from "@/lib/graph/layout";
+import { BURNED_NODE_ID, CLUSTER_LABELS, type ClusterKind, edgeFlow, entityNodeId, startedBy, summarizeRelationship, type GraphEdge, type GraphNode, type GraphRanking, type WalletGraph as Graph } from "@/lib/graph/build";
+import { classifyLayout, layoutGraph, majorEdges, nodeRadius, type Point, type Spacing, SPACINGS, type ZoomTier, zoomTier } from "@/lib/graph/layout";
 import type { Names } from "@/lib/labels/labels";
 import { AssetIcon } from "../asset-icon";
 
@@ -63,11 +63,31 @@ function edgePerspective(edge: GraphEdge, wallet: string, nodes: ReadonlyMap<str
   };
 }
 
-function nodeLabel(node: { id: string; kind: string; txCount: number }, names: Names) {
-  return node.kind === "aggregate" ? `Other addresses (${node.txCount})` : (names.known(node.id) ?? names.of(node.id, 4));
+function nodeLabel(node: GraphNode, names: Names) {
+  return node.cluster ? `${CLUSTER_LABELS[node.cluster.kind]} (${node.cluster.addresses})` : (names.known(node.id) ?? names.of(node.id, 4));
 }
 
 const kindLabel = (kind: string) => kind.replaceAll("_", " ").toLowerCase();
+
+const shortDate = (time: number) => new Date(time).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+
+/** A node's activity over its drawn lines, for its hover card: assets, first and last seen, the mapped wallets it dealt with. */
+function nodeFacts(id: string, graph: Graph) {
+  const wallets = new Set(graph.nodes.filter((node) => node.kind === "wallet").map((node) => node.id));
+  const assets = new Set<string>();
+  const connected = new Set<string>();
+  let first = Infinity;
+  let last = -Infinity;
+  for (const edge of graph.edges) {
+    if (edge.kind !== "interaction" || (edge.a !== id && edge.b !== id)) continue;
+    const other = edge.a === id ? edge.b : edge.a;
+    if (wallets.has(other)) connected.add(other);
+    for (const asset of edge.summary?.assets ?? []) assets.add(asset.assetId);
+    if (edge.summary?.firstInteraction != null) first = Math.min(first, edge.summary.firstInteraction);
+    if (edge.summary?.lastInteraction != null) last = Math.max(last, edge.summary.lastInteraction);
+  }
+  return { assets: assets.size, connected: [...connected], first: Number.isFinite(first) ? first : null, last: Number.isFinite(last) ? last : null };
+}
 
 /** Distance from `p` to the segment `a`–`b`. */
 function distanceToSegment(p: Point, a: Point, b: Point): number {
@@ -167,6 +187,10 @@ export function WalletGraph({
   onNodeLimitChange,
   timeRange,
   onClearTimeRange,
+  expandedClusters,
+  onToggleCluster,
+  expandedEntities,
+  onToggleEntity,
 }: {
   graph: Graph;
   /** Case primary. `wallet` may change as investigator focuses another mapped wallet. */
@@ -187,6 +211,12 @@ export function WalletGraph({
   onNodeLimitChange: (limit: 10 | 25 | 50 | 100 | null) => void;
   timeRange: { start: number; end: number } | null;
   onClearTimeRange: () => void;
+  /** Clusters drawn as their addresses; clicking a cluster expands it. */
+  expandedClusters: ReadonlySet<ClusterKind>;
+  onToggleCluster: (kind: ClusterKind) => void;
+  /** Registry protocols drawn as their separate addresses. */
+  expandedEntities: ReadonlySet<string>;
+  onToggleEntity: (protocolId: string) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const zoomRef = useRef<ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
@@ -213,6 +243,9 @@ export function WalletGraph({
   const positions = useRef(new Map<string, Point>());
   const nodesById = useMemo(() => new Map(graph.nodes.map((n) => [n.id, n])), [graph]);
   const layoutRoles = useMemo(() => classifyLayout(graph.nodes, graph.edges), [graph]);
+  const major = useMemo(() => majorEdges(graph.nodes, graph.edges), [graph]);
+  // Semantic zoom: how much detail is drawn, with hysteresis (see zoomTier).
+  const tierRef = useRef<ZoomTier>("medium");
   const relationshipsByNode = useMemo(
     () =>
       new Map(
@@ -224,16 +257,27 @@ export function WalletGraph({
     [graph, wallet],
   );
 
-  const latest = useRef({ graph, wallet, primaryWallet, names, stateOf, selectedNode, selectedEdge, nodesById, layoutRoles, relationshipsByNode });
+  // Isolate: only this node, its direct neighbours and the lines among them are drawn. Positions don't change.
+  const [isolatedId, setIsolated] = useState<string | null>(null);
+  const isolated = isolatedId && nodesById.has(isolatedId) ? isolatedId : null;
+  const visible = useMemo(() => {
+    if (!isolated) return null;
+    const shown = new Set([isolated]);
+    for (const edge of graph.edges) if (edge.a === isolated || edge.b === isolated) shown.add(edge.a).add(edge.b);
+    return shown;
+  }, [graph, isolated]);
+
+  const latest = useRef({ graph, wallet, primaryWallet, names, stateOf, selectedNode, selectedEdge, nodesById, layoutRoles, relationshipsByNode, visible, major });
   // Drawing reads props through this ref; refresh it before any effect or frame uses it.
   useLayoutEffect(() => {
-    latest.current = { graph, wallet, primaryWallet, names, stateOf, selectedNode, selectedEdge, nodesById, layoutRoles, relationshipsByNode };
+    latest.current = { graph, wallet, primaryWallet, names, stateOf, selectedNode, selectedEdge, nodesById, layoutRoles, relationshipsByNode, visible, major };
   });
 
   const segments = useCallback((): Segment[] => {
     const out: Segment[] = [];
-    const { graph } = latest.current;
+    const { graph, visible } = latest.current;
     for (const edge of graph.edges) {
+      if (visible && !(visible.has(edge.a) && visible.has(edge.b))) continue;
       const from = positions.current.get(edge.a);
       const to = positions.current.get(edge.b);
       if (from && to) out.push({ edge, from, to, control: routeControl(edge, from, to, graph.nodes, positions.current) });
@@ -246,7 +290,7 @@ export function WalletGraph({
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
-    const { names, stateOf, selectedNode, selectedEdge, graph, wallet, primaryWallet, nodesById, layoutRoles } = latest.current;
+    const { names, stateOf, selectedNode, selectedEdge, graph, wallet, primaryWallet, nodesById, layoutRoles, visible, major } = latest.current;
     const { width, height } = sizeRef.current;
     const dpr = window.devicePixelRatio || 1;
     const t = transformRef.current;
@@ -255,53 +299,55 @@ export function WalletGraph({
     ctx.clearRect(0, 0, width, height);
     ctx.setTransform(dpr * t.k, 0, 0, dpr * t.k, dpr * t.x, dpr * t.y);
 
-    const hover = hoverRef.current;
+    // A hovered node or line can vanish under the cursor (an expanded cluster, a filter change): ignore it then.
+    const hover = { node: hoverRef.current.node && nodesById.has(hoverRef.current.node) ? hoverRef.current.node : undefined, edge: graph.edges.some((e) => e.id === hoverRef.current.edge) ? hoverRef.current.edge : undefined };
     // A selection beats hover. A selected node lights all its connections and the addresses they reach, even though
     // clicking it also selects its line to the focus wallet (for the panel); a selected line alone lights just that line.
     const focusNode = selectedNode ?? (selectedEdge ? undefined : (hover.node ?? undefined));
     const focusEdge = focusNode ? undefined : (selectedEdge ?? hover.edge ?? undefined);
     const lit = (e: GraphEdge) => (focusEdge ? e.id === focusEdge : focusNode ? e.a === focusNode || e.b === focusNode : true);
+    const focusing = Boolean(focusEdge || focusNode);
+    const tier = (tierRef.current = zoomTier(tierRef.current, t.k));
 
-    // Relationship significance changes opacity and bounded particle density, never stroke width.
     const line = 1.25 / t.k;
-    const now = performance.now();
-    const aggregate = positions.current.get(OMITTED_NODE_ID);
-    const primary = positions.current.get(primaryWallet);
-    if (aggregate && primary) {
-      ctx.globalAlpha = 0.65;
-      ctx.strokeStyle = p.muted;
-      ctx.lineWidth = line;
-      ctx.setLineDash([3 / t.k, 4 / t.k]);
-      ctx.beginPath();
-      ctx.moveTo(primary.x, primary.y);
-      ctx.lineTo(aggregate.x, aggregate.y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.globalAlpha = 1;
+    // Hovering a cluster or a mapped wallet ties the cluster by a dashed line to each wallet its addresses dealt with.
+    ctx.globalAlpha = 0.6;
+    ctx.strokeStyle = p.muted;
+    ctx.lineWidth = line;
+    ctx.setLineDash([3 / t.k, 4 / t.k]);
+    for (const n of graph.nodes) {
+      const at = positions.current.get(n.id);
+      if (!n.cluster || !at || (visible && !visible.has(n.id))) continue;
+      for (const id of n.cluster.wallets) {
+        if (hover.node !== n.id && hover.node !== id) continue;
+        const owner = positions.current.get(id);
+        if (!owner) continue;
+        ctx.beginPath();
+        ctx.moveTo(owner.x, owner.y);
+        ctx.lineTo(at.x, at.y);
+        ctx.stroke();
+      }
     }
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
     for (const segment of segments()) {
       const { edge, from, to, control } = segment;
       const on = lit(edge);
       const selected = edge.id === selectedEdge;
+      // Far out, only the case's major relationships are drawn, plus whatever the focus lights.
+      const inFocus = on && focusing;
+      if (tier === "far" && !major.has(edge.id) && !inFocus) continue;
       const coreEdge = layoutRoles.get(edge.a) === "core" && layoutRoles.get(edge.b) === "core";
       const bridgeEdge = layoutRoles.get(edge.a) === "bridge" || layoutRoles.get(edge.b) === "bridge";
       const perspective = edgePerspective(edge, wallet, nodesById);
       const { sent, received } = perspective;
-      const sentOnly = sent > 0 && received === 0;
-      const receivedOnly = received > 0 && sent === 0;
       const intensity = coreEdge ? Math.min(0.85, 0.72 + Math.log1p(edge.interactions.length) / 40) : bridgeEdge ? 0.52 : Math.min(0.48, 0.3 + Math.log1p(edge.interactions.length) / 24);
-      ctx.globalAlpha = on ? (selected ? 1 : intensity) : 0.12;
-      ctx.strokeStyle =
-        edge.kind === "program"
-          ? p.program
-          : sentOnly
-            ? p.send
-            : receivedOnly
-              ? p.receive
-              : selected || (on && (focusEdge || focusNode))
-                ? p.fg
-                : p.muted;
-      ctx.lineWidth = selected ? 2 / t.k : coreEdge ? 1.5 / t.k : line;
+      ctx.globalAlpha = on ? (selected ? 1 : intensity) : 0.05;
+      // One neutral line per relationship; direction is carried by the coloured arrowheads, not the line.
+      ctx.strokeStyle = edge.kind === "program" ? p.program : selected || (on && focusing) ? p.fg : p.muted;
+      // Thickness: transactions on a log scale (1 → 1px, 10 → 1.9, 100 → 2.8, 1,000+ → 3.7), so one busy pair can't dominate.
+      const weight = edge.kind === "program" ? 1 : Math.min(3.7, 1 + 0.9 * Math.log10(edge.interactions.length));
+      ctx.lineWidth = (weight + (selected ? 0.75 : 0)) / t.k;
       const dotted = edge.kind === "program";
       ctx.setLineDash(dotted ? [2 / t.k, 4 / t.k] : []);
       ctx.lineCap = dotted ? "round" : "butt";
@@ -310,7 +356,8 @@ export function WalletGraph({
       if (control) ctx.quadraticCurveTo(control.x, control.y, to.x, to.y);
       else ctx.lineTo(to.x, to.y);
       ctx.stroke();
-      if (edge.kind === "interaction") {
+      // Direction markers are close-up detail.
+      if (edge.kind === "interaction" && (tier !== "far" || inFocus)) {
         // Who made the first move: a solid diamond just outside each end that approved (signed) transactions on this line;
         // a hollow one at the middle when someone else entirely signed them (a delegate, drainer or bot).
         const started = edge.summary ?? summarizeRelationship(edge);
@@ -335,7 +382,7 @@ export function WalletGraph({
           const anchor = end === "a" ? from : to;
           return { x: anchor.x + (tangent.x / length) * gap * sign, y: anchor.y + (tangent.y / length) * gap * sign };
         };
-        ctx.globalAlpha = on ? (selected || focusEdge === edge.id || focusNode ? 0.95 : 0.6) : 0.12;
+        ctx.globalAlpha = on ? (selected || focusEdge === edge.id || focusNode ? 0.95 : 0.6) : 0.05;
         ctx.fillStyle = p.fg;
         ctx.strokeStyle = p.fg;
         ctx.lineWidth = 1.2 / t.k;
@@ -361,7 +408,7 @@ export function WalletGraph({
           const tipX = target.x - ux * inset;
           const tipY = target.y - uy * inset;
           const arrow = (selected ? 7 : 5.5) / t.k;
-          ctx.globalAlpha = on ? (selected || focusEdge === edge.id || focusNode ? 0.95 : 0.48) : 0.1;
+          ctx.globalAlpha = on ? (selected || focusEdge === edge.id || focusNode ? 0.95 : 0.48) : 0.05;
           ctx.fillStyle = flow.color;
           ctx.beginPath();
           ctx.moveTo(tipX, tipY);
@@ -369,20 +416,10 @@ export function WalletGraph({
           ctx.lineTo(tipX - ux * arrow + uy * arrow * 0.55, tipY - uy * arrow - ux * arrow * 0.55);
           ctx.closePath();
           ctx.fill();
-
-          const particles = Math.min(5, Math.max(1, Math.round(Math.log1p(flow.count))));
-          const phase = (edge.id.length % 17) / 17;
-          for (let i = 0; i < particles; i++) {
-            const progress = (now / 5000 + phase + i / particles) % 1;
-            const point = pointOnPath(flowSegment, progress);
-            ctx.beginPath();
-            ctx.arc(point.x, point.y, (selected ? 2.3 : 1.7) / t.k, 0, Math.PI * 2);
-            ctx.fill();
-          }
         }
       }
-      // The count shows only for the line under the cursor or selected, so badges don't clutter the map.
-      if (edge.kind === "interaction" && (selected || focusEdge === edge.id)) {
+      // The count shows for the line under the cursor or selected, and on lines between mapped wallets when nothing is focused.
+      if (edge.kind === "interaction" && (selected || focusEdge === edge.id || (coreEdge && tier !== "far" && !focusing))) {
         const point = pointOnPath(segment, 0.72);
         const tangent = pathTangent(segment, 0.72);
         const length = Math.hypot(tangent.x, tangent.y) || 1;
@@ -425,9 +462,7 @@ export function WalletGraph({
     const selectedRelationship = selectedEdge ? graph.edges.find((edge) => edge.id === selectedEdge) : undefined;
     const selectedCounterparty = selectedRelationship ? edgePerspective(selectedRelationship, wallet, nodesById).counterparty : undefined;
     const nodeFocus = hover.node ?? selectedNode ?? selectedCounterparty;
-    const far = t.k < 0.55;
-    const close = t.k > 1.25;
-    const drawNodes = [...graph.nodes].sort((a, b) => Number(a.id === nodeFocus) - Number(b.id === nodeFocus));
+    const drawNodes = graph.nodes.filter((node) => !visible || visible.has(node.id)).sort((a, b) => Number(a.id === nodeFocus) - Number(b.id === nodeFocus));
     // A hovered or selected look-alike is tied to its twins on the map by a dashed line, so the pair reads as one
     // without lines criss-crossing the whole map the rest of the time.
     ctx.strokeStyle = p.lookalike;
@@ -456,10 +491,10 @@ export function WalletGraph({
       const r = nodeRadius(n) + (role === "bridge" ? 3 : 0);
       const known = n.kind === "aggregate" ? undefined : names.known(n.id);
       const label = nodeLabel(n, names);
-      const infrastructure = n.kind === "program" || (n.kind === "counterparty" && stateOf(n.id) === "INFRASTRUCTURE");
+      const infrastructure = n.kind === "program" || n.kind === "entity" || (n.kind === "counterparty" && stateOf(n.id) === "INFRASTRUCTURE");
       const primaryNode = n.id === primaryWallet;
       const restingAlpha = role === "core" ? 1 : role === "bridge" ? 0.88 : role === "aggregate" ? 0.58 : 0.66;
-      const nodeAlpha = litNodes.size > 0 && !litNodes.has(n.id) ? 0.18 : restingAlpha;
+      const nodeAlpha = litNodes.size > 0 && !litNodes.has(n.id) ? (role === "core" ? 0.55 : 0.15) : restingAlpha;
       // An opaque backing in the page colour (the trick the edge badges use) keeps connections
       // from showing through a translucent node body — they read as a line across the node
       // once you zoom in.
@@ -475,16 +510,20 @@ export function WalletGraph({
         ctx.fillStyle = p.card;
         ctx.fill();
         ctx.lineWidth = n.id === nodeFocus ? 2.5 : 1.5;
-        ctx.strokeStyle = n.id === nodeFocus ? p.fg : p.muted;
+        // Likely decoys keep their warning colour even collapsed.
+        const decoys = n.cluster?.kind === "decoy";
+        ctx.strokeStyle = n.id === nodeFocus ? p.fg : decoys ? p.send : p.muted;
+        ctx.setLineDash([4, 3]);
         ctx.stroke();
+        ctx.setLineDash([]);
         ctx.font = "600 10px ui-sans-serif, system-ui, sans-serif";
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        ctx.fillStyle = p.fg;
-        ctx.fillText("Other addresses", pos.x - 47, pos.y - 6);
+        ctx.fillStyle = decoys ? p.send : p.fg;
+        ctx.fillText(n.cluster ? CLUSTER_LABELS[n.cluster.kind] : "", pos.x - 50, pos.y - 6, 100);
         ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
         ctx.fillStyle = p.muted;
-        ctx.fillText(`${n.txCount.toLocaleString()} wallets`, pos.x - 47, pos.y + 8);
+        ctx.fillText(`${n.cluster?.addresses.toLocaleString()} addresses · ${n.txCount.toLocaleString()} tx`, pos.x - 50, pos.y + 8, 100);
         continue;
       }
       ctx.globalAlpha = nodeAlpha;
@@ -502,7 +541,7 @@ export function WalletGraph({
       ctx.fillStyle = primaryNode ? p.fg : p.card;
       ctx.fill();
       ctx.lineWidth = n.id === nodeFocus ? 2.5 : role === "core" || role === "bridge" ? 2 : 1.5;
-      ctx.strokeStyle = n.id === nodeFocus ? p.fg : n.kind === "program" ? p.program : n.kind === "burn" ? p.burn : role === "core" || role === "bridge" ? p.fg : p.muted;
+      ctx.strokeStyle = n.id === nodeFocus ? p.fg : n.kind === "program" || n.kind === "entity" ? p.program : n.kind === "burn" ? p.burn : role === "core" || role === "bridge" ? p.fg : p.muted;
       ctx.stroke();
       // Other mapped wallets get a centre dot, so they stay distinct from counterparties of any size.
       if (n.kind === "wallet" && !primaryNode) {
@@ -522,14 +561,23 @@ export function WalletGraph({
         ctx.stroke();
         ctx.setLineDash([]);
       }
-      if (!far && primaryNode) {
+      if (tier !== "far" && primaryNode) {
         ctx.font = "700 8px ui-sans-serif, system-ui, sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "bottom";
         ctx.fillStyle = p.muted;
         ctx.fillText("PRIMARY", pos.x, pos.y - r - 8);
       }
-      const showLabel = !far && (close || role === "core" || role === "bridge" || n.kind === "burn" || names.label(n.id) || topLabels.has(n.id));
+      // Label tiers: wallets, services, flagged addresses and the focus always; shared, named and busiest
+      // counterparties from medium zoom; everything else close up.
+      const showLabel =
+        tier === "close" ||
+        n.id === nodeFocus ||
+        role === "core" ||
+        n.kind === "entity" ||
+        n.kind === "burn" ||
+        lookalike ||
+        (tier === "medium" && (role === "bridge" || known || topLabels.has(n.id)));
       if (!showLabel) continue;
       ctx.font = primaryNode ? "600 12px ui-sans-serif, system-ui, sans-serif" : known || n.kind === "wallet" ? "500 11px ui-sans-serif, system-ui, sans-serif" : "11px ui-monospace, monospace";
       const labelPosition = primaryNode ? { x: pos.x, y: pos.y + r + 7, align: "center" as const, baseline: "top" as const } : outwardText(pos, r);
@@ -553,8 +601,9 @@ export function WalletGraph({
   const fit = useCallback((source: ReadonlyMap<string, Point> = positions.current) => {
     const canvas = canvasRef.current;
     if (!canvas || !zoomRef.current || source.size === 0) return;
-    const { graph, primaryWallet, selectedNode, selectedEdge } = latest.current;
-    const important = new Set<string>([primaryWallet, ...graph.nodes.filter((node) => node.kind === "wallet" || node.kind === "burn").map((node) => node.id)]);
+    const { graph, primaryWallet, selectedNode, selectedEdge, visible } = latest.current;
+    // Everything drawn, clusters included, so nothing sits off-screen or under the toolbar.
+    const important = new Set<string>(visible ?? [primaryWallet, ...graph.nodes.map((node) => node.id)]);
     if (selectedNode) important.add(selectedNode);
     const selected = selectedEdge ? graph.edges.find((edge) => edge.id === selectedEdge) : undefined;
     if (selected) important.add(selected.a).add(selected.b);
@@ -572,15 +621,9 @@ export function WalletGraph({
     select(canvas).call(zoomRef.current.transform, t);
   }, []);
 
-  useEffect(schedule, [selectedNode, selectedEdge, names, schedule]);
-
-  useEffect(() => {
-    let animation = requestAnimationFrame(function tick() {
-      draw();
-      animation = requestAnimationFrame(tick);
-    });
-    return () => cancelAnimationFrame(animation);
-  }, [draw]);
+  useEffect(schedule, [selectedNode, selectedEdge, names, visible, schedule]);
+  // Entering or leaving isolation frames what's shown.
+  useEffect(() => fit(), [isolated, fit]);
 
   // Size to the container, crisp on HiDPI, and redraw on theme change.
   useEffect(() => {
@@ -618,10 +661,10 @@ export function WalletGraph({
   const hitAt = useCallback(
     (event: { clientX: number; clientY: number }): { node?: string; edge?: string } => {
       const w = toWorld(event);
-      const { graph, selectedNode, selectedEdge, wallet, nodesById, layoutRoles } = latest.current;
+      const { graph, selectedNode, selectedEdge, wallet, nodesById, layoutRoles, visible } = latest.current;
       const selectedRelationship = selectedEdge ? graph.edges.find((edge) => edge.id === selectedEdge) : undefined;
       const focused = hoverRef.current.node ?? selectedNode ?? (selectedRelationship ? edgePerspective(selectedRelationship, wallet, nodesById).counterparty : undefined);
-      const hitNodes = [...graph.nodes].sort((a, b) => Number(a.id === focused) - Number(b.id === focused));
+      const hitNodes = graph.nodes.filter((node) => !visible || visible.has(node.id)).sort((a, b) => Number(a.id === focused) - Number(b.id === focused));
       for (let i = hitNodes.length - 1; i >= 0; i--) {
         const n = hitNodes[i];
         const pos = positions.current.get(n.id);
@@ -631,6 +674,7 @@ export function WalletGraph({
       }
       let best: { id: string; d: number } | null = null;
       for (const sgm of segments()) {
+        if (tierRef.current === "far" && !latest.current.major.has(sgm.edge.id)) continue;
         const coreEdge = layoutRoles.get(sgm.edge.a) === "core" && layoutRoles.get(sgm.edge.b) === "core";
         const tolerance = (coreEdge ? 9 : 6) / transformRef.current.k;
         const d = distanceToPath(w, sgm);
@@ -731,7 +775,7 @@ export function WalletGraph({
         onPointerDown={(event) => {
           setHoverCard(null);
           const hit = hitAt(event);
-          if (!hit.node || hit.node === OMITTED_NODE_ID) return;
+          if (!hit.node || latest.current.nodesById.get(hit.node)?.kind === "aggregate") return;
           dragRef.current = { id: hit.node, x: event.clientX, y: event.clientY, moved: false };
           event.currentTarget.setPointerCapture(event.pointerId);
         }}
@@ -765,13 +809,47 @@ export function WalletGraph({
               ? (latest.current.relationshipsByNode.get(node.id) ?? latest.current.graph.edges.find((item) => item.a === node.id || item.b === node.id))
               : undefined;
           event.currentTarget.style.cursor = node?.kind === "aggregate" ? "pointer" : hit.node ? "grab" : hit.edge ? "pointer" : "";
-          if (node?.kind === "aggregate") {
-            place({ title: `Other addresses (${node.txCount.toLocaleString()})`, lines: ["Lower-ranked counterparties are collapsed here."], hint: "Click to reveal all addresses" });
+          if (node?.cluster) {
+            const { kind, addresses, wallets } = node.cluster;
+            place({
+              title: CLUSTER_LABELS[kind],
+              kicker: "Collapsed addresses",
+              lines: [
+                `${addresses.toLocaleString()} addresses · ${node.txCount.toLocaleString()} transactions`,
+                `With ${wallets.map((id) => latest.current.names.of(id)).join(", ")}`,
+                ...(kind === "decoy" ? ["Look-alikes that only moved dust: likely address poisoning."] : []),
+              ],
+              hint: "Click to show these addresses",
+            });
           } else if (node) {
+            const facts = nodeFacts(node.id, latest.current.graph);
+            const shared = node.kind !== "wallet" && facts.connected.length >= 2;
             place({
               title: latest.current.names.of(node.id),
-              kicker: node.id === latest.current.primaryWallet ? "Primary wallet" : node.kind === "wallet" ? "Mapped wallet" : node.kind === "program" ? "Program" : node.kind === "burn" ? "Burned tokens" : "Address",
-              lines: node.kind === "burn" ? ["Burned tokens leave supply; they don't reach any address. Bridges burn tokens to move them to another chain."] : [],
+              kicker:
+                node.id === latest.current.primaryWallet
+                  ? "Primary wallet"
+                  : node.kind === "wallet"
+                    ? "Mapped wallet"
+                    : node.kind === "program"
+                      ? "Program"
+                      : node.kind === "burn"
+                        ? "Burned tokens"
+                        : node.kind === "entity"
+                          ? `Service · ${node.entity!.addresses.length.toLocaleString()} address${node.entity!.addresses.length === 1 ? "" : "es"}`
+                          : shared
+                            ? "Shared counterparty"
+                            : latest.current.names.known(node.id)
+                              ? "Known address"
+                              : "Unknown address",
+              lines:
+                node.kind === "burn"
+                  ? ["Burned tokens leave supply; they don't reach any address. Bridges burn tokens to move them to another chain."]
+                  : [
+                      `${node.txCount.toLocaleString()} transactions${facts.assets ? ` · ${facts.assets.toLocaleString()} asset${facts.assets === 1 ? "" : "s"}` : ""}`,
+                      ...(facts.first !== null && facts.last !== null ? [`${shortDate(facts.first)} → ${shortDate(facts.last)}`] : []),
+                      ...(shared ? [`Connected to ${facts.connected.map((id) => latest.current.names.of(id)).join(", ")}`] : []),
+                    ],
               hint: node.id === latest.current.wallet ? "Drag to reposition" : "Click for transaction details · drag to reposition",
             });
           } else if (edge) {
@@ -834,7 +912,11 @@ export function WalletGraph({
           }
           const hit = hitAt(event);
           if (hit.node) {
-            if (hit.node === OMITTED_NODE_ID) return onNodeLimitChange(null);
+            const cluster = nodesById.get(hit.node)?.cluster;
+            if (cluster) {
+              setHoverCard(null);
+              return onToggleCluster(cluster.kind);
+            }
             const relationship = relationshipsByNode.get(hit.node);
             // The burn node isn't an address: it opens its burns, not an address panel.
             onSelectNode(hit.node === wallet || hit.node === BURNED_NODE_ID ? null : hit.node);
@@ -991,6 +1073,42 @@ export function WalletGraph({
             <WorkflowIcon />
             Program calls
           </Button>
+          {[...expandedEntities].map((protocolId) => (
+            <Button key={protocolId} variant="secondary" size="sm" title="Collapse these addresses back into one service" onClick={() => onToggleEntity(protocolId)}>
+              {names.of(entityNodeId(protocolId))} addresses
+              <XIcon />
+            </Button>
+          ))}
+          {selectedNode && (nodesById.get(selectedNode)?.entity?.addresses.length ?? 0) > 1 && (
+            <Button variant="ghost" size="sm" title="Draw this service's addresses separately" onClick={() => onToggleEntity(nodesById.get(selectedNode)!.entity!.protocolId)}>
+              Show {nodesById.get(selectedNode)!.entity!.addresses.length.toLocaleString()} addresses
+            </Button>
+          )}
+          {[...expandedClusters].map((kind) => (
+            <Button key={kind} variant="secondary" size="sm" title={`Collapse ${CLUSTER_LABELS[kind].toLowerCase()} back into one box`} onClick={() => onToggleCluster(kind)}>
+              {CLUSTER_LABELS[kind]}
+              <XIcon />
+            </Button>
+          ))}
+          {isolated ? (
+            <>
+              <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
+              <span className="max-w-48 truncate pl-1 text-xs" title={isolated}>
+                Isolated: {nodeLabel(nodesById.get(isolated)!, names)}
+              </span>
+              <Button variant="ghost" size="icon-sm" aria-label="Show the whole case" title="Show the whole case" onClick={() => setIsolated(null)}>
+                <XIcon />
+              </Button>
+            </>
+          ) : (
+            selectedNode &&
+            nodesById.has(selectedNode) && (
+              <Button variant="ghost" size="sm" title="Show only this address, its direct counterparties and the connections among them" onClick={() => setIsolated(selectedNode)}>
+                <FocusIcon />
+                Isolate
+              </Button>
+            )
+          )}
           {timeRange && (
             <>
               <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
@@ -1026,12 +1144,12 @@ export function WalletGraph({
         {legendOpen && (
           <>
             <Legend color="bg-destructive">
-              Sent from focus <span className="font-semibold text-destructive">→</span>
+              Red arrowhead · sent from focus <span className="font-semibold text-destructive">→</span>
             </Legend>
             <Legend color="bg-emerald-500">
-              <span className="font-semibold text-emerald-500">←</span> Received by focus
+              <span className="font-semibold text-emerald-500">←</span> Green arrowhead · received by focus
             </Legend>
-            <Legend color="bg-muted-foreground">Both ways · red and green arrows</Legend>
+            <Legend color="bg-muted-foreground">Both ways · red and green arrows · thicker line: more transactions</Legend>
             {showPrograms ? (
               <Legend color="border-t-2 border-dotted border-[oklch(0.7_0.14_250)] bg-transparent">Program called ({graph.counts.programConnections})</Legend>
             ) : (
@@ -1068,7 +1186,7 @@ export function WalletGraph({
               <span className="flex w-5 justify-center" aria-hidden>
                 <span className="size-2.5 rounded-[2px] border border-muted-foreground" />
               </span>
-              Square: program or infrastructure
+              Square: program or infrastructure · blue: a service standing for several of its addresses, select it to show them
             </span>
             <span className="flex items-center gap-2">
               <span className="flex w-5 justify-center" aria-hidden>
@@ -1088,9 +1206,9 @@ export function WalletGraph({
               </span>
               Diamond at a line&apos;s end: that side approved (signed) the transactions · hollow in the middle: someone else did
             </span>
-            <span className="pt-0.5">Dots flow in the direction of transfers · more dots and a stronger line mean more activity</span>
-            <span>Hover a line for its transaction count · click a node or line to inspect</span>
-            {graph.omittedNodes > 0 && <span>Click the dashed Other addresses box to reveal {graph.omittedNodes.toLocaleString()} more</span>}
+            <span>Hover a line for its transaction count · click a node or line to inspect · select a node, then Isolate</span>
+            <span>Zoomed out, only wallets, services, flagged addresses and the busiest lines are drawn; zoom in for the rest</span>
+            {graph.omittedNodes > 0 && <span>Dashed boxes collapse {graph.omittedNodes.toLocaleString()} lower-ranked addresses by kind · click one to show its addresses</span>}
           </>
         )}
       </div>

@@ -159,6 +159,17 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
         </div>
       )}
 
+      {filter.relationship && (
+        <div className="flex items-center gap-2 rounded-md bg-muted px-2 py-1 text-xs">
+          <span className="min-w-0 flex-1 truncate" title={filter.relationship.label}>
+            Only {filter.relationship.label}
+          </span>
+          <Button variant="ghost" size="icon-xs" aria-label="Clear relationship filter" onClick={() => onChange({ ...filter, relationship: null })}>
+            <XIcon />
+          </Button>
+        </div>
+      )}
+
       <FilterGroup title="Type" active={filter.hiddenKinds.size} open>
         <div className="-mx-1 flex flex-col" role="group" aria-label="Transaction type">
           {KINDS.filter(({ kind }) => kindCounts.has(kind)).map(({ kind, label, dot }) => (

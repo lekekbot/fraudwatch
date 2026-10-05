@@ -18,7 +18,7 @@ import { isBookmarked, removeBookmark, toggleBookmark } from "@/lib/case/bookmar
 import { laneOrder, moveLane, toggleLaneHidden, visibleLanes } from "@/lib/case/lanes";
 import { firstInteraction, mapWallet, newWalletProblem, toggleWalletPaused, unmapWallet, walletRange, walletRanges } from "@/lib/case/wallet-range";
 import { mappingSummary, sharedTransactions } from "@/lib/ingest/intersections";
-import { buildInteractionGraph, type GraphRanking, withGraphNames } from "@/lib/graph/build";
+import { buildInteractionGraph, type ClusterKind, entityNodeId, entityProtocol, type GraphEdge, type GraphRanking, withGraphNames } from "@/lib/graph/build";
 import type { FraudWatchCase } from "@/lib/case/model";
 import { datesFromRange, extendedToToday, formatRange } from "@/lib/case/range";
 import { getAddressLabels } from "@/lib/db/address-labels";
@@ -50,6 +50,7 @@ import { FilterPanel } from "./filter-panel";
 import { HidingSection, type RulesDialogState } from "./hide-rules";
 import { type MapWalletChoice, MapWalletDialog } from "./map-wallet-dialog";
 import { EdgePanel } from "./graph/edge-panel";
+import { EntityPanel } from "./graph/entity-panel";
 import { WalletGraph } from "./graph/wallet-graph";
 import { IngestionPanel } from "./ingestion-panel";
 import { PanelSection, ShowMoreList, SidePanel } from "./panel";
@@ -148,6 +149,8 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   const [graphRanking, setGraphRanking] = useState<GraphRanking>("significant");
   const [graphNodeLimit, setGraphNodeLimit] = useState<10 | 25 | 50 | 100 | null>(25);
   const [graphRange, setGraphRange] = useState<{ start: number; end: number } | null>(null);
+  const [graphClusters, setGraphClusters] = useState<ReadonlySet<ClusterKind>>(new Set());
+  const [graphEntities, setGraphEntities] = useState<ReadonlySet<string>>(new Set());
   /** Observed address the Map wallet dialog is open for. */
   const [mapTarget, setMapTarget] = useState<string | null>(null);
   /** The "Add wallet" dialog, for an address the map hasn't met. */
@@ -692,7 +695,6 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     );
   };
   // The inspector shows the last thing selected; an address stays until something else is picked.
-  const addressPanel = selectedAddress && panelFor(selectedAddress);
 
   const walletInspector = panelFor(
     selectedWallet,
@@ -721,9 +723,55 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
       showPrograms,
       maxNodes: graphNodeLimit ?? Infinity,
       ranking: graphRanking,
+      // Look-alikes and labelled addresses are investigation signals: they always keep their own node.
+      clusterOf: (address) => {
+        if (names.verdict(address) === "decoy") return "decoy";
+        if (names.lookalikes(address).length > 0 || names.label(address)) return null;
+        if (addressState(address, c, registry, programs) === "INFRASTRUCTURE") return "infrastructure";
+        return names.known(address) ? "known" : "unknown";
+      },
+      expandedClusters: graphClusters,
+      expandedEntities: graphEntities,
     });
-  }, [view, shownLanes, perWallet, filter.hiddenAssets, showPrograms, graphRange, c.range.start, graphNodeLimit, graphRanking]);
+  }, [view, shownLanes, perWallet, filter.hiddenAssets, showPrograms, graphRange, c, graphNodeLimit, graphRanking, names, programs, graphClusters, graphEntities]);
   const edge = graph?.edges.find((e) => e.id === selectedEdge);
+  // The Timeline narrowed to exactly the transactions behind some graph lines.
+  const openInTimeline = (label: string, lines: readonly GraphEdge[]) => {
+    setSelectedEdge(null);
+    if (selectedAddress && entityProtocol(selectedAddress)) setSelectedAddress(null);
+    setFilter((current) => ({ ...current, relationship: { label, signatures: new Set(lines.flatMap((line) => line.interactions.map((it) => it.signature))) } }));
+    routeTo("timeline");
+  };
+  const toggleEntity = (protocolId: string) => {
+    // An expanded service's node is gone from the map, so its selection goes too.
+    if (selectedAddress === entityNodeId(protocolId)) {
+      setSelectedAddress(null);
+      setSelectedEdge(null);
+    }
+    setGraphEntities((current) => toggled(current, protocolId));
+  };
+  const selectedEntity = selectedAddress ? entityProtocol(selectedAddress) : undefined;
+  const addressPanel =
+    selectedAddress &&
+    (selectedEntity ? (
+      <EntityPanel
+        key={selectedEntity}
+        protocolId={selectedEntity}
+        addresses={graph?.nodes.find((node) => node.id === selectedAddress)?.entity?.addresses ?? []}
+        names={names}
+        onSelectAddress={setSelectedAddress}
+        onExpand={() => toggleEntity(selectedEntity)}
+        onOpenInTimeline={() =>
+          openInTimeline(
+            graphNames.of(selectedAddress),
+            (graph?.edges ?? []).filter((line) => line.kind === "interaction" && (line.a === selectedAddress || line.b === selectedAddress)),
+          )
+        }
+        onClose={() => setSelectedAddress(null)}
+      />
+    ) : (
+      panelFor(selectedAddress)
+    ));
   const graphWallet = shownLanes.includes(selectedWallet) ? selectedWallet : (shownLanes[0] ?? selectedWallet);
 
   // Hiding: one write per batch, with Undo. Undo reverses just that batch on the case as it is then.
@@ -831,6 +879,10 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
             onNodeLimitChange={setGraphNodeLimit}
             timeRange={graphRange}
             onClearTimeRange={() => setGraphRange(null)}
+            expandedClusters={graphClusters}
+            onToggleCluster={(kind) => setGraphClusters((current) => toggled(current, kind))}
+            expandedEntities={graphEntities}
+            onToggleEntity={toggleEntity}
           />
           {(rightOpen || addressPanel || edge) && (
             <SidePanel side="right" label="Inspector">
@@ -852,10 +904,11 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                       setSelectedEdge(null);
                       routeTo("table", counterparty);
                     }}
+                    onOpenInTimeline={() => openInTimeline(`${graphNames.of(edge.a)} ↔ ${graphNames.of(edge.b)}`, [edge])}
                     onClose={() => setSelectedEdge(null)}
                   />
                   {/* An endpoint's Assets would repeat the connection's Assets above it. */}
-                  {selectedAddress && panelFor(selectedAddress, undefined, selectedAddress !== edge.a && selectedAddress !== edge.b)}
+                  {selectedAddress && (selectedEntity ? addressPanel : panelFor(selectedAddress, undefined, selectedAddress !== edge.a && selectedAddress !== edge.b))}
                 </>
               ) : (
                 addressPanel || walletInspector

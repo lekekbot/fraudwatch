@@ -23,6 +23,8 @@ export type TxFilter = {
   dateRange: { start: number; end: number } | null;
   /** Leave out transactions involving a likely address-poisoning decoy (dust look-alike). */
   hideDecoys: boolean;
+  /** Only the transactions behind one graph relationship, named for the filter chip. */
+  relationship: { label: string; signatures: ReadonlySet<string> } | null;
 };
 
 export const EMPTY_FILTER: TxFilter = {
@@ -35,6 +37,7 @@ export const EMPTY_FILTER: TxFilter = {
   tags: new Set(),
   dateRange: null,
   hideDecoys: false,
+  relationship: null,
 };
 
 export const isFilterActive = (f: TxFilter) =>
@@ -43,6 +46,7 @@ export const isFilterActive = (f: TxFilter) =>
   f.minAmount !== null ||
   f.hideDecoys ||
   f.address !== null ||
+  f.relationship !== null ||
   f.dateRange !== null;
 
 /**
@@ -97,6 +101,7 @@ export function passesFilter(
   if (f.tags.size > 0 && !tx.addresses.some((a) => tagsOf(a).some((t) => f.tags.has(t)))) return false;
   if (f.dateRange && (tx.time < f.dateRange.start || tx.time >= f.dateRange.end)) return false;
   if (f.hideDecoys && tx.addresses.some(isDecoy)) return false;
+  if (f.relationship && !f.relationship.signatures.has(tx.signature)) return false;
   return true;
 }
 
