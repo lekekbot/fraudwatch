@@ -9,7 +9,7 @@ export type EventProjection = {
   signature: string;
   wallet: string;
   roles: ParticipantRole[];
-  /** BUY, SELL, SEND, RECEIVE, ROYALTY from this wallet's side, else the event's own action. */
+  /** For transfers and trades, BUY, SELL, SEND, RECEIVE or ROYALTY from this wallet's side; otherwise the event's own action. */
   action: string;
   outgoing: SemanticFlow[];
   incoming: SemanticFlow[];
@@ -32,13 +32,14 @@ export function projectEvent(event: SemanticEvent, wallet: string): EventProject
   if (roles.length === 0 && outgoing.length === 0 && incoming.length === 0) return null;
   // Roles specific to the event's meaning (buyer, seller) speak for the wallet; generic ones only fill in.
   const sided = roles.map((r) => ACTION_BY_ROLE[r]).find((a) => a !== undefined);
-  const keepsOwn = event.category === "SWAP" || event.category === "STAKE" || event.category === "UNSTAKE" || event.category === "NFT_MINT";
+  // Only transfers and trades read differently from each side; a swap, stake, loan or bridge keeps its own action.
+  const sidedCategory = event.category === "TRANSFER" || event.category === "NFT_TRANSFER" || event.category === "NFT_TRADE";
   return {
     eventId: event.id,
     signature: event.signature,
     wallet,
     roles,
-    action: (!keepsOwn && sided) || event.action,
+    action: (sidedCategory && sided) || event.action,
     outgoing,
     incoming,
   };

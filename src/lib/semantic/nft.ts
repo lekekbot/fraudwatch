@@ -1,6 +1,7 @@
 import type { EffectSummary } from "@/lib/state/summarize";
 import type { EvidenceRef, FlowRole, Infrastructure, NftDetail, SemanticFlow } from "./events";
-import { balanceFlows, type Delta, type Interpretation, type TransactionContext } from "./interpret";
+import { netByAddress, netOf, withSettlement } from "./flows";
+import type { Interpretation, TransactionContext } from "./interpret";
 
 const ZERO = BigInt(0);
 
@@ -36,9 +37,7 @@ export function readNft(ctx: TransactionContext): Omit<Interpretation, "confiden
   if (!reading || !n) return null;
   const kind = summary.kind;
 
-  const net = new Map<string, bigint>();
-  const keyOf = (assetId: string, address: string) => `${assetId}|${address}`;
-  for (const d of ctx.deltas) net.set(keyOf(d.assetId, d.address), (net.get(keyOf(d.assetId, d.address)) ?? ZERO) + d.delta);
+  const net = netByAddress(ctx.deltas);
   const balanceAssets = new Set(ctx.deltas.map((d) => d.assetId));
 
   const flows: SemanticFlow[] = [];
@@ -51,7 +50,7 @@ export function readNft(ctx: TransactionContext): Omit<Interpretation, "confiden
   const payer = payment ? (paid ? wallet : n.party) : null;
   const payee = payment ? (paid ? n.party : wallet) : null;
   if (payment && payee) {
-    const received = net.get(keyOf(payment.assetId, payee)) ?? ZERO;
+    const received = netOf(net, payment.assetId, payee);
     if (received > ZERO) flow(payment.assetId, received, payer, payee, "payment");
   }
   if (payment) for (const o of n.others) flow(payment.assetId, o.amount, payer, o.address, o.role);
@@ -66,21 +65,7 @@ export function readNft(ctx: TransactionContext): Omit<Interpretation, "confiden
   for (const id of n.received) flow(id, "1", kind === "NFT_MINT" ? null : n.party, wallet, "nft");
   for (const id of n.sent) flow(id, "1", wallet, counterparty, "nft");
 
-  // Whatever balances moved beyond the parser's reading (escrow and account closures, mostly).
-  const residual = new Map(net);
-  for (const f of flows) {
-    if (f.source !== "balance") continue;
-    if (f.from) residual.set(keyOf(f.assetId, f.from), (residual.get(keyOf(f.assetId, f.from)) ?? ZERO) + BigInt(f.amount));
-    if (f.to) residual.set(keyOf(f.assetId, f.to), (residual.get(keyOf(f.assetId, f.to)) ?? ZERO) - BigInt(f.amount));
-  }
-  const rest: Delta[] = [...residual]
-    .filter(([, delta]) => delta !== ZERO)
-    .map(([key, delta]) => {
-      const [assetId, address] = [key.slice(0, key.indexOf("|")), key.slice(key.indexOf("|") + 1)];
-      return { assetId, address, account: address, delta };
-    });
-  const settlement = balanceFlows(rest);
-  flows.push(...settlement.flows.map((f) => ({ ...f, role: "settlement" as const })));
+  const settled = withSettlement(ctx.deltas, flows);
 
   // A mint's buyer is whoever paid for it; a free mint (or an airdrop) has none.
   const buyer = kind === "NFT_BUY" || (kind === "NFT_MINT" && paid) ? wallet : kind === "NFT_SELL" ? counterparty : null;
@@ -95,7 +80,7 @@ export function readNft(ctx: TransactionContext): Omit<Interpretation, "confiden
 
   // The bidder's escrow paid on the bidder's behalf.
   const spender = bidEscrow ?? buyer;
-  const spent = spender && payment ? -(net.get(keyOf(payment.assetId, spender)) ?? ZERO) : ZERO;
+  const spent = spender && payment ? -netOf(net, payment.assetId, spender) : ZERO;
   const nft: NftDetail = {
     assets,
     buyer,
@@ -105,6 +90,5 @@ export function readNft(ctx: TransactionContext): Omit<Interpretation, "confiden
     compressed: assets.some((id) => !balanceAssets.has(id)),
   };
   const evidence: EvidenceRef[] = [{ kind: "NFT_TRADE_PARSER" }, ...assets.filter((id) => ctx.nfts.isNft(id)).map((assetId) => ({ kind: "ASSET_METADATA", assetId }) as const)];
-  const warnings = settlement.ambiguousAssets.map((assetId) => `Balances can't pair the remaining senders and receivers of ${assetId}.`);
-  return { ...reading, flows, infrastructure, nft, evidence, warnings };
+  return { ...reading, actor: wallet, flows: settled.flows, infrastructure, nft, evidence, warnings: settled.warnings };
 }

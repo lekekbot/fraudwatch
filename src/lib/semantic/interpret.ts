@@ -9,6 +9,7 @@ import {
   type EventCategory,
   type EventConfidence,
   eventId,
+  type BridgeEnvelope,
   type EvidenceRef,
   type FlowRole,
   type Infrastructure,
@@ -20,10 +21,10 @@ import {
   type SemanticEvent,
   type SemanticFlow,
 } from "./events";
+import { balanceFlows, type Delta, deltas } from "./flows";
 import { INTERPRETERS } from "./interpreters";
 import { type ProtocolResolution, resolveProtocols } from "./resolver";
 
-export type Delta = { address: string; account: string; assetId: string; delta: bigint };
 
 /** Facts about one transaction, worked out once and shared by every interpreter. */
 export type TransactionContext = {
@@ -38,6 +39,8 @@ export type TransactionContext = {
    * transfer someone else paid for).
    */
   nft: { wallet: string; summary: EffectSummary } | null;
+  /** The NFT-aware per-wallet reading of any wallet in the transaction, computed once per wallet. */
+  summaryOf: (wallet: string) => EffectSummary;
   /** Outer instructions, then inner ones, each with the evidence that points at it. */
   instructions: { ix: CanonicalInstruction; ref: EvidenceRef }[];
   flows: SemanticFlow[];
@@ -65,7 +68,10 @@ export type Interpretation = {
   flows?: SemanticFlow[];
   /** Addresses the interpreter found to be infrastructure, beyond what the resolver knows. */
   infrastructure?: Infrastructure[];
+  /** Whose action it is, when not the fee payer (a relayer can pay for someone's swap). */
+  actor?: string;
   nft?: NftDetail;
+  bridge?: BridgeEnvelope;
 };
 
 /**
@@ -80,66 +86,21 @@ export type Interpreter = {
 
 const ZERO = BigInt(0);
 
-/** Value deltas by owner (wallet for SOL), with the payer's fee added back. Token accounts' rent lamports are left out. */
-function deltas(tx: CanonicalTransaction, feePayer: string | null): Delta[] {
-  const tokenAccounts = new Set(tx.tokenChanges.map((t) => t.account));
-  const out: Delta[] = [];
-  for (const n of tx.nativeChanges) {
-    if (tokenAccounts.has(n.account)) continue;
-    const delta = BigInt(n.delta) + (n.account === feePayer ? BigInt(tx.feeLamports) : ZERO);
-    if (delta !== ZERO) out.push({ address: n.account, account: n.account, assetId: NATIVE_SOL, delta });
-  }
-  for (const t of tx.tokenChanges) {
-    const delta = BigInt(t.delta);
-    if (delta !== ZERO) out.push({ address: t.owner ?? t.account, account: t.account, assetId: t.mint, delta });
-  }
-  return out;
-}
-
-/**
- * Pair senders with receivers per asset. Exact with one sender (or one
- * receiver) whose amount covers the other side; otherwise each side is kept
- * with the other left unknown rather than guessed.
- */
-export function balanceFlows(all: Delta[]): { flows: SemanticFlow[]; ambiguousAssets: string[] } {
-  const byAddress = new Map<string, bigint>();
-  const assets: string[] = [];
-  for (const d of all) {
-    const key = `${d.assetId}|${d.address}`;
-    if (!assets.includes(d.assetId)) assets.push(d.assetId);
-    byAddress.set(key, (byAddress.get(key) ?? ZERO) + d.delta);
-  }
-  const flows: SemanticFlow[] = [];
-  const ambiguousAssets: string[] = [];
-  for (const assetId of assets) {
-    const net = [...byAddress].filter(([key, v]) => key.startsWith(`${assetId}|`) && v !== ZERO).map(([key, v]) => ({ address: key.slice(assetId.length + 1), v }));
-    const senders = net.filter((n) => n.v < ZERO).map((n) => ({ address: n.address, amount: -n.v }));
-    const receivers = net.filter((n) => n.v > ZERO).map((n) => ({ address: n.address, amount: n.v }));
-    const sum = (xs: { amount: bigint }[]) => xs.reduce((s, x) => s + x.amount, ZERO);
-    const flow = (amount: bigint, from: string | null, to: string | null): SemanticFlow => ({ assetId, amount: amount.toString(), from, to, source: "balance" });
-    if (senders.length === 1 && receivers.length > 0 && sum(receivers) <= senders[0].amount) {
-      flows.push(...receivers.map((r) => flow(r.amount, senders[0].address, r.address)));
-      const rest = senders[0].amount - sum(receivers);
-      if (rest > ZERO) flows.push(flow(rest, senders[0].address, null));
-    } else if (receivers.length === 1 && senders.length > 0 && sum(senders) <= receivers[0].amount) {
-      flows.push(...senders.map((s) => flow(s.amount, s.address, receivers[0].address)));
-      const rest = receivers[0].amount - sum(senders);
-      if (rest > ZERO) flows.push(flow(rest, null, receivers[0].address));
-    } else {
-      if (senders.length > 0 && receivers.length > 0) ambiguousAssets.push(assetId);
-      flows.push(...senders.map((s) => flow(s.amount, s.address, null)), ...receivers.map((r) => flow(r.amount, null, r.address)));
-    }
-  }
-  return { flows, ambiguousAssets };
-}
-
 export function buildContext(
   tx: CanonicalTransaction,
   options: { nfts?: NftCatalog; registry?: ProtocolRegistry; labels?: ReadonlyMap<string, AddressLabel> } = {},
 ): TransactionContext {
   const nfts = options.nfts ?? NO_NFTS;
   const feePayer = tx.accounts[0]?.address ?? null;
-  const summarize = (wallet: string) => summarizeEffect(reconstructWalletState(wallet, [tx], { historyComplete: true }).effects[0], tx, nfts);
+  const summaries = new Map<string, EffectSummary>();
+  const summarize = (wallet: string) => {
+    let summary = summaries.get(wallet);
+    if (!summary) {
+      summary = summarizeEffect(reconstructWalletState(wallet, [tx], { historyComplete: true }).effects[0], tx, nfts);
+      summaries.set(wallet, summary);
+    }
+    return summary;
+  };
   const summary: EffectSummary = feePayer
     ? summarize(feePayer)
     : { kind: tx.success ? "PROGRAM" : "FAILED", outflows: [], inflows: [], counterparties: [], action: null, actor: null };
@@ -171,6 +132,7 @@ export function buildContext(
     signers: tx.accounts.filter((a) => a.signer).map((a) => a.address),
     summary,
     nft,
+    summaryOf: summarize,
     instructions: [
       ...tx.instructions.map((ix, index) => ({ ix, ref: { kind: "OUTER_INSTRUCTION", index } as const })),
       ...tx.innerInstructions.map((ix, index) => ({ ix, ref: { kind: "INNER_INSTRUCTION", index } as const })),
@@ -190,6 +152,8 @@ function primaryRole(category: EventCategory, action: string, sent: boolean, rec
   if (category === "NFT_MINT") return "RECEIVER";
   if (category === "STAKE") return "DEPOSITOR";
   if (category === "UNSTAKE") return "WITHDRAWER";
+  if (category === "LENDING") return action === "BORROW" || action === "REPAY" ? "BORROWER" : action === "WITHDRAW" || action === "REMOVE_COLLATERAL" ? "WITHDRAWER" : "DEPOSITOR";
+  if (category === "BRIDGE") return action === "BRIDGE_IN" ? "RECEIVER" : "SENDER";
   if (sent) return "SENDER";
   if (received) return "RECEIVER";
   return "SIGNER";
@@ -204,11 +168,12 @@ function participantsOf(
   allFlows: SemanticFlow[],
   infrastructure: Set<string>,
   detail: NftDetail | undefined,
+  actor: string | undefined,
 ): Participant[] {
   const { feePayer } = ctx;
   const nftCategory = category === "NFT_TRADE" || category === "NFT_TRANSFER" || category === "NFT_MINT";
-  // The side the reading was taken from; the fee payer, unless the NFT parser read someone else's.
-  const primary = nftCategory && ctx.nft ? ctx.nft.wallet : feePayer;
+  // The side the reading was taken from; the fee payer unless the interpreter names someone else.
+  const primary = actor ?? feePayer;
   // Rent and settlement movements are evidence, not relationships.
   const flows = allFlows.filter((f) => !SUPPORTING.has(f.role));
   const out: Participant[] = [];
@@ -295,6 +260,7 @@ export function interpretTransaction(
         interpreter: FALLBACK,
         warnings: [`Couldn't read the transaction: ${message(error)}`],
         nft: null,
+        bridge: null,
         metadata,
       },
     ];
@@ -336,7 +302,7 @@ export function interpretTransaction(
       ...base,
       category: reading.category,
       action: reading.action,
-      participants: participantsOf(ctx, reading.category, reading.action, flows, new Set(infrastructure.map((i) => i.address)), reading.nft),
+      participants: participantsOf(ctx, reading.category, reading.action, flows, new Set(infrastructure.map((i) => i.address)), reading.nft, reading.actor),
       infrastructure,
       assets: [...new Set(flows.map((f) => f.assetId))],
       flows,
@@ -350,6 +316,7 @@ export function interpretTransaction(
       interpreter: chosen.interpreter,
       warnings,
       nft: reading.nft ?? null,
+      bridge: reading.bridge ?? null,
       metadata,
     },
   ];

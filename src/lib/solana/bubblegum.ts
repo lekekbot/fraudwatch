@@ -1,4 +1,5 @@
-import { getAddressDecoder, getBase58Encoder } from "@solana/kit";
+import { getAddressDecoder } from "@solana/kit";
+import { bytesOf } from "./anchor";
 import type { CanonicalInstruction, CanonicalTransaction } from "./canonical";
 
 /**
@@ -30,15 +31,6 @@ export type CnftMove = {
   kind: "mint" | "transfer";
   /** From the mint instruction's metadata, when this transaction minted it. */
   name?: string;
-};
-
-const bytesOf = (data: string | null): Uint8Array | null => {
-  if (!data) return null;
-  try {
-    return Uint8Array.from(getBase58Encoder().encode(data));
-  } catch {
-    return null;
-  }
 };
 
 /**

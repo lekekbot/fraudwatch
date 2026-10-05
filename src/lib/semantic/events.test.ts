@@ -137,9 +137,11 @@ describe("interpretTransaction", () => {
         { address: VAULT, role: "VAULT", label: "Test Vault" },
       ]),
     );
-    expect(e.flows.map((f) => [f.assetId, f.from, f.to])).toEqual([
-      [NATIVE_SOL, "A", VAULT],
-      [USDC, VAULT, "A"],
+    expect(e.flows.map((f) => [f.role, f.assetId, f.from, f.to])).toEqual([
+      ["spent", NATIVE_SOL, "A", null],
+      ["received", USDC, null, "A"],
+      ["settlement", NATIVE_SOL, null, VAULT],
+      ["settlement", USDC, VAULT, null],
     ]);
     expect(e.protocol).toEqual({ id: "agg", name: "Test Aggregator", category: "dex_aggregator" });
     expect(e.evidence).toContainEqual({ kind: "KNOWN_ADDRESS", address: VAULT, protocolId: "dex", registryVersion: 7 });

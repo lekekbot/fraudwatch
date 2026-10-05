@@ -4,7 +4,7 @@
  * transactions and never stored, so nothing stale can be reused yet; a store
  * for them must check both (see `DERIVED_CACHES`).
  */
-export const SEMANTIC_VERSION = 3;
+export const SEMANTIC_VERSION = 4;
 
 /**
  * Broad kinds of meaningful action. `action` carries the finer meaning (BUY,
@@ -68,13 +68,15 @@ export type SemanticFlow = {
 };
 
 /**
+ * spent, received: what the actor gave up and got back in a swap, stake,
+ * lending or bridge action; the other side is null, routing shows in settlement.
  * payment: the main consideration (buyer to seller). royalty, marketplace_fee,
  * rent, unidentified: the payer's other recipients, as the NFT parser names
  * them. nft: the traded asset itself. settlement: whatever else moved
  * balances (escrow and account closures refunding rent), so the flows still
  * add up to the observed changes. Supporting roles never make a participant.
  */
-export type FlowRole = "payment" | "royalty" | "marketplace_fee" | "rent" | "unidentified" | "nft" | "settlement";
+export type FlowRole = "spent" | "received" | "payment" | "royalty" | "marketplace_fee" | "rent" | "unidentified" | "nft" | "settlement";
 
 /**
  * An NFT trade, mint or transfer in one place. Buyer and seller are the
@@ -110,6 +112,8 @@ export type EvidenceRef =
   /** Index into `CanonicalTransaction.instructions` / `.innerInstructions`. */
   | { kind: "OUTER_INSTRUCTION"; index: number }
   | { kind: "INNER_INSTRUCTION"; index: number }
+  /** Data a program returned (CCTP's nonce, for one). */
+  | { kind: "RETURN_DATA"; programId: string }
   | { kind: "KNOWN_ADDRESS"; address: string; protocolId: string; registryVersion: number }
   | { kind: "NFT_TRADE_PARSER" }
   /** On-chain or DAS metadata that said this asset is an NFT. */
@@ -121,6 +125,22 @@ export type EvidenceRef =
  * LOW: a balance pattern or program call with nothing definitive behind it, or nothing recognisable.
  */
 export type EventConfidence = "HIGH" | "MEDIUM" | "LOW";
+
+/**
+ * The Solana side of a cross-chain transfer, with whatever identifiers could
+ * later find the other side. Nothing here is traced off-chain.
+ */
+export type BridgeEnvelope = {
+  direction: "OUT" | "IN";
+  /** Chain names; a domain or chain id the code doesn't know stays as `<protocol>-domain-<n>`. */
+  sourceChain: string;
+  destinationChain: string;
+  asset: { assetId: string; amount: string } | null;
+  /** Recipient on the destination chain (out) or sender on the source chain (in), as the protocol encodes it. */
+  remoteAddress: string | null;
+  /** Protocol identifiers for correlation: nonce, message account, domains, VAA sequence. */
+  identifiers: Record<string, string>;
+};
 
 export type ProtocolRef = { id: string; name: string; category: string };
 
@@ -150,6 +170,8 @@ export type SemanticEvent = {
   warnings: string[];
   /** Set for NFT_TRADE, NFT_TRANSFER and NFT_MINT events read by the NFT parser. */
   nft: NftDetail | null;
+  /** Set for BRIDGE events: the Solana side only. */
+  bridge: BridgeEnvelope | null;
   /** The interpretation is read from the fee payer's side; their fee is not a flow. */
   metadata: { feePayer: string | null; feeLamports: string };
 };

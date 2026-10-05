@@ -1,5 +1,3 @@
-import type { ProtocolCategory } from "@/lib/protocols/registry";
-import type { CanonicalInstruction } from "@/lib/solana/canonical";
 import {
   ASSOCIATED_TOKEN_PROGRAM,
   COMPUTE_BUDGET_PROGRAM,
@@ -8,41 +6,10 @@ import {
   SYSTEM_PROGRAM,
   TOKEN_PROGRAMS,
 } from "@/lib/solana/programs";
-import type { EffectKind } from "@/lib/state/summarize";
-import type { EvidenceRef, ProtocolRef } from "./events";
-import type { Interpreter, TransactionContext } from "./interpret";
+import { cctpBridge, jupiterSwap, kaminoLending, marinadeStake } from "./defi";
+import type { Interpreter } from "./interpret";
 import { readNft } from "./nft";
-
-/** transferChecked → TRANSFER_CHECKED. */
-const actionName = (instruction: string | null | undefined) =>
-  instruction ? instruction.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase() : "CALL";
-
-const kindIs = (ctx: TransactionContext, ...kinds: EffectKind[]) => kinds.includes(ctx.summary.kind);
-
-const refsWhere = (ctx: TransactionContext, pick: (ix: CanonicalInstruction) => boolean): EvidenceRef[] =>
-  ctx.instructions.filter((i) => pick(i.ix)).map((i) => i.ref);
-
-/** The instruction the summary was typed from. */
-const summaryRef = (ctx: TransactionContext): EvidenceRef[] => {
-  const action = ctx.summary.action;
-  const found = action && ctx.instructions.find((i) => i.ix.programId === action.programId && i.ix.type === action.instruction);
-  return found ? [found.ref] : [];
-};
-
-/** The verified protocol behind a program, unless it's core Solana. */
-function protocolOf(ctx: TransactionContext, programId: string): ProtocolRef | null {
-  const entry = ctx.resolution.verified(programId);
-  return entry && entry.role === "program" && entry.category !== "core" ? { id: entry.protocolId, name: entry.protocolName, category: entry.category } : null;
-}
-
-/** The first invoked program the registry verifies as one of `categories`. */
-function knownProgram(ctx: TransactionContext, categories: ProtocolCategory[]): { programId: string; protocol: ProtocolRef } | null {
-  for (const { ix } of ctx.instructions) {
-    const protocol = protocolOf(ctx, ix.programId);
-    if (protocol && categories.includes(protocol.category as ProtocolCategory)) return { programId: ix.programId, protocol };
-  }
-  return null;
-}
+import { actionName, actorFlows, kindIs, knownProgram, protocolOf, refsWhere, summaryRef } from "./reading";
 
 const failed: Interpreter = {
   id: "failed",
@@ -75,8 +42,9 @@ const knownDexSwap: Interpreter = {
   version: 1,
   interpret: (ctx) => {
     const dex = kindIs(ctx, "SWAP") ? knownProgram(ctx, ["dex_aggregator", "dex"]) : null;
-    if (!dex) return null;
-    return { category: "SWAP", action: "SWAP", confidence: "MEDIUM", protocol: dex.protocol, evidence: refsWhere(ctx, (ix) => ix.programId === dex.programId) };
+    if (!dex || !ctx.feePayer) return null;
+    const { flows, warnings } = actorFlows(ctx, ctx.feePayer);
+    return { category: "SWAP", action: "SWAP", confidence: "MEDIUM", protocol: dex.protocol, evidence: refsWhere(ctx, (ix) => ix.programId === dex.programId), flows, warnings };
   },
 };
 
@@ -130,7 +98,10 @@ const genericNft: Interpreter = {
 const genericSwap: Interpreter = {
   id: "generic-swap",
   version: 1,
-  interpret: (ctx) => (kindIs(ctx, "SWAP") ? { category: "SWAP", action: "SWAP", confidence: "LOW" } : null),
+  interpret: (ctx) => {
+    if (!kindIs(ctx, "SWAP") || !ctx.feePayer) return null;
+    return { category: "SWAP", action: "SWAP", confidence: "LOW", ...actorFlows(ctx, ctx.feePayer) };
+  },
 };
 
 /** Programs a plain transfer is made of; anything else at the top level may be doing more than a transfer. */
@@ -169,6 +140,10 @@ const unknown: Interpreter = {
 export const INTERPRETERS: readonly Interpreter[] = [
   failed,
   marketplaceNftTrade,
+  cctpBridge,
+  kaminoLending,
+  marinadeStake,
+  jupiterSwap,
   knownDexSwap,
   nativeStake,
   tokenInstruction,

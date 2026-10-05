@@ -1,35 +1,13 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { decodeMetaplexMetadata, NATIVE_SOL } from "@/lib/assets/assets";
 import type { RawParsedTransaction } from "@/lib/rpc/generic-adapter";
-import { type CanonicalTransaction, canonicalize } from "@/lib/solana/canonical";
+import { canonicalize } from "@/lib/solana/canonical";
 import { TOKEN_PROGRAM } from "@/lib/solana/programs";
 import { reconstructWalletState } from "@/lib/state/reconstruct";
 import { type NftCatalog, summarizeEffect } from "@/lib/state/summarize";
-import type { SemanticEvent } from "./events";
 import { interpretTransaction } from "./interpret";
 import { projectEvent } from "./projection";
-import { FEE, ix, makeTx, only, roles, SOL, TENTH, token } from "./testing";
-
-const read = <T>(path: string): T => JSON.parse(readFileSync(join(process.cwd(), "fixtures/solana", path), "utf8")) as T;
-
-/** Every balance flow, netted per address and asset, matches the observed balance changes (payer's fee added back). */
-function reconciles(e: SemanticEvent, tx: CanonicalTransaction) {
-  const net = new Map<string, bigint>();
-  const add = (key: string, v: bigint) => net.set(key, (net.get(key) ?? BigInt(0)) + v);
-  for (const f of e.flows.filter((f) => f.source === "balance")) {
-    if (f.from) add(`${f.assetId}|${f.from}`, -BigInt(f.amount));
-    if (f.to) add(`${f.assetId}|${f.to}`, BigInt(f.amount));
-  }
-  const tokenAccounts = new Set(tx.tokenChanges.map((t) => t.account));
-  const observed = new Map<string, bigint>();
-  const obs = (key: string, v: bigint) => observed.set(key, (observed.get(key) ?? BigInt(0)) + v);
-  for (const n of tx.nativeChanges) if (!tokenAccounts.has(n.account)) obs(`${NATIVE_SOL}|${n.account}`, BigInt(n.delta) + (n.account === tx.accounts[0].address ? BigInt(tx.feeLamports) : BigInt(0)));
-  for (const t of tx.tokenChanges) obs(`${t.mint}|${t.owner ?? t.account}`, BigInt(t.delta));
-  const nonzero = (m: Map<string, bigint>) => new Map([...m].filter(([, v]) => v !== BigInt(0)));
-  expect(nonzero(net)).toEqual(nonzero(observed));
-}
+import { FEE, ix, makeTx, only, read, reconciles, roles, SOL, TENTH, token } from "./testing";
 
 describe("a real Tensor purchase (escrowed listing)", () => {
   const fixture = read<{ signature: string; buyer: string; seller: string; mint: string; response: RawParsedTransaction }>("nft-sale/transaction.json");
