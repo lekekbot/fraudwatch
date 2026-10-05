@@ -144,6 +144,19 @@ Follows the MVP sprints. Each file in `docs/sprints/SPRINT_C*.md` opens with the
 | C7 | Relationship intelligence and graph integration |
 | C8 | Evidence, reliability and investigation polish |
 
+After C8, FraudWatch is meant to read as a local-first Solana investigation workbench: it reconstructs blockchain activity into human-readable events, relationships, chronological patterns and inspectable evidence. Each view answers one question:
+
+| View | Question |
+|---|---|
+| Timeline | What happened? |
+| Graph | Who was involved? |
+| Relationship inspector | How are they connected? |
+| Event inspector | What exactly occurred? |
+| Evidence | How do we know? |
+| Behaviour observations | What noteworthy pattern occurred across time? |
+
+The semantic model is documented in `ARCHITECTURE.md`; what remains open is in `CHRONOLOGY_OPEN_ISSUES.md`.
+
 ## MVP completion gate
 
 The MVP is complete after Sprint 11 when a user can:

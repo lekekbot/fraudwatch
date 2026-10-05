@@ -333,6 +333,7 @@ export function WalletTimeline({
           bookmarked={isBookmarked(current.signature)}
           onToggleBookmark={() => onToggleBookmark(current.signature, currentLane.wallet)}
           onShowInGraph={onShowInGraph && (() => onShowInGraph(current.signature))}
+          observations={observations.filter((o) => o.events.some((e) => e.signature === current.signature))}
         />
       ) : (
         inspector

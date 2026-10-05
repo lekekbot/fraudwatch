@@ -2,6 +2,7 @@ import { Fragment } from "react";
 import { Badge } from "@/components/ui/badge";
 import type { Names } from "@/lib/labels/labels";
 import type { EventConfidence, EvidenceRef, FlowRole, ParticipantRole, SemanticEvent, SemanticFlow } from "@/lib/semantic/events";
+import { type EvidenceCategory, explainEvent } from "@/lib/semantic/explain";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import type { WalletState } from "@/lib/state/reconstruct";
 import { type Assets, assetLabel, formatAssetAmount, nftLabel } from "../asset-format";
@@ -168,13 +169,7 @@ export function EventSummary(props: Props) {
           </ul>
         </>
       )}
-      {event.warnings.length > 0 && (
-        <ul className="list-disc pl-4 text-xs text-muted-foreground">
-          {event.warnings.map((w) => (
-            <li key={w}>{w}</li>
-          ))}
-        </ul>
-      )}
+      {event.warnings.length > 0 && <p className="text-xs text-muted-foreground">{event.warnings.length} warning{event.warnings.length === 1 ? "" : "s"}: see why below.</p>}
     </Section>
   );
 }
@@ -207,30 +202,75 @@ function evidenceText(ref: EvidenceRef, tx: CanonicalTransaction | undefined, as
 }
 
 /** Level 3: why FraudWatch reads it this way. */
-export function EventEvidence({ event, tx, assets, names, state, onSelectAddress }: Props & { tx: CanonicalTransaction | undefined }) {
+const CATEGORY_TITLE: Record<EvidenceCategory, string> = {
+  fact: "Facts from the chain",
+  verified: "Verified attribution",
+  derived: "Interpretation",
+  heuristic: "Heuristics and gaps",
+  user_label: "Your labels",
+  community_label: "Community labels",
+};
+const CATEGORY_ORDER: EvidenceCategory[] = ["derived", "fact", "verified", "heuristic", "user_label", "community_label"];
+
+export function EventEvidence({
+  event,
+  tx,
+  assets,
+  names,
+  state,
+  onSelectAddress,
+  observations = [],
+}: Props & { tx: CanonicalTransaction | undefined; /** Behaviour observations this event is part of, summarised. */ observations?: readonly string[] }) {
   const settlement = event.flows.filter((f) => f.role === "settlement");
+  const statements = explainEvent(event, {
+    name: (address) => names.of(address, 4),
+    amount: (amount, assetId) => `${formatAssetAmount(amount, assetId, state, assets)} ${assetLabel(assetId, assets)}`,
+    asset: (assetId) => assetLabel(assetId, assets),
+    labelOf: (address) => {
+      const source = names.source(address);
+      const text = names.known(address);
+      return text && source === "label" ? { source: "user", text } : text && source === "community" ? { source: "community", text } : undefined;
+    },
+    observations,
+  });
   return (
     <Section title="Why FraudWatch reads it this way">
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-        <dt className="text-muted-foreground">Reading</dt>
-        <dd className="font-mono text-xs">
-          {event.category} · {event.action}
-        </dd>
-        <dt className="text-muted-foreground">Interpreter</dt>
-        <dd className="font-mono text-xs">
-          {event.interpreter.id} v{event.interpreter.version}
-        </dd>
-        <dt className="text-muted-foreground">Confidence</dt>
-        <dd className="text-xs">
-          {event.confidence.toLowerCase()}: {CONFIDENCE_TEXT[event.confidence]}
-        </dd>
-        <dt className="text-muted-foreground">Event</dt>
-        <dd className="truncate font-mono text-xs" title={event.id}>
-          {event.id}
-        </dd>
-      </dl>
+      <p className="text-xs">
+        <Badge variant={event.confidence === "LOW" ? "outline" : "secondary"}>{event.confidence.toLowerCase()} confidence</Badge>{" "}
+        <span className="text-muted-foreground">{CONFIDENCE_TEXT[event.confidence]}</span>
+      </p>
+      {CATEGORY_ORDER.map((category) => {
+        const rows = statements.filter((st) => st.category === category);
+        return (
+          rows.length > 0 && (
+            <div key={category} className="flex flex-col gap-0.5">
+              <p className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">{CATEGORY_TITLE[category]}</p>
+              <ul className="flex flex-col gap-0.5 text-xs">
+                {rows.map((st, i) => (
+                  <li key={i} className="flex gap-1.5">
+                    <span aria-label={st.status === "met" ? "holds" : "missing"} className={st.status === "met" ? "text-emerald-500" : "text-amber-500"}>
+                      {st.status === "met" ? "✓" : "?"}
+                    </span>
+                    <span className={st.status === "met" ? "" : "text-muted-foreground"}>{st.text}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )
+        );
+      })}
+      {event.warnings.length > 0 && (
+        <div className="flex flex-col gap-0.5">
+          <p className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">Warnings</p>
+          <ul className="list-disc pl-4 text-xs text-muted-foreground">
+            {event.warnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       <details className="rounded-md border">
-        <summary className="cursor-pointer px-2 py-1.5 text-xs">Evidence ({event.evidence.length})</summary>
+        <summary className="cursor-pointer px-2 py-1.5 text-xs">Evidence references ({event.evidence.length})</summary>
         <ul className="flex flex-col gap-1 border-t p-2 text-xs">
           {event.evidence.map((ref, i) => (
             <li key={i}>{evidenceText(ref, tx, assets, names)}</li>

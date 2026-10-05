@@ -4,7 +4,7 @@
  * transactions and never stored, so nothing stale can be reused yet; a store
  * for them must check both (see `DERIVED_CACHES`).
  */
-export const SEMANTIC_VERSION = 4;
+export const SEMANTIC_VERSION = 5;
 
 /**
  * Broad kinds of meaningful action. `action` carries the finer meaning (BUY,
@@ -166,6 +166,8 @@ export type SemanticEvent = {
   evidence: EvidenceRef[];
   /** The interpreter whose reading this is. */
   interpreter: { id: string; version: number };
+  /** Every interpreter tried, in priority order, up to the one that matched: for debugging a reading. */
+  trace: { id: string; version: number; outcome: "matched" | "no_match" | "failed" }[];
   /** Interpreters that failed, flows balances couldn't pair, and similar caveats. */
   warnings: string[];
   /** Set for NFT_TRADE, NFT_TRANSFER and NFT_MINT events read by the NFT parser. */
