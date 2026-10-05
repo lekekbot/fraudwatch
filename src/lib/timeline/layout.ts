@@ -143,7 +143,7 @@ export function placeCards(groups: Group[], cardWidth: number, padding: number, 
 }
 
 /** Transaction counts per equal-width bin across [start, end). */
-export function histogram(times: number[], start: number, end: number, bins: number): number[] {
+export function histogram(times: readonly number[], start: number, end: number, bins: number): number[] {
   const counts = new Array<number>(Math.max(1, bins)).fill(0);
   const span = end - start;
   if (span <= 0) return counts;

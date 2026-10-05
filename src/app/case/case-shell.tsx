@@ -46,7 +46,7 @@ import { LookalikeMark } from "./lookalike";
 import { AssetFlows } from "./asset-flows";
 import { CounterpartyList } from "./counterparty-list";
 import { DeleteCaseButton } from "./delete-case-button";
-import { FilterPanel } from "./filter-panel";
+import { FilterPanel, kindLabel } from "./filter-panel";
 import { HidingSection, type RulesDialogState } from "./hide-rules";
 import { type MapWalletChoice, MapWalletDialog } from "./map-wallet-dialog";
 import { EdgePanel } from "./graph/edge-panel";
@@ -58,13 +58,12 @@ import { type WalletLane, WalletTimeline, type WalletTimelineHandle } from "./ti
 import { SearchDialog } from "./search-dialog";
 import { assetLabel, assetLogo, formatAssetAmount } from "./asset-format";
 import { TransactionDetails } from "./timeline/transaction-details";
-import { type TableNav, WalletStateSummary, WalletStateTable } from "./wallet-state-view";
+import { type TableNav, type TableSide, WalletStateSummary, WalletStateTable } from "./wallet-state-view";
 
 /** Most counterparties whose .sol names are looked up per case, busiest first. */
 const SNS_LOOKUP_LIMIT = 300;
 /** The hide rule that holds likely look-alike decoys. */
 const DECOY_RULE_ID = "lookalike-decoys";
-const NO_SUMMARIES: EffectSummary[] = [];
 const SHOWN_WALLETS = 50;
 
 async function copy(text: string, what: string) {
@@ -139,7 +138,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
   const [rulesDialog, setRulesDialog] = useState<RulesDialogState>(null);
   /** Transaction open from the table view. */
-  const [tableTx, setTableTx] = useState<string | null>(null);
+  const [tableTx, setTableTx] = useState<TableSide | null>(null);
   /** Transaction to open the timeline on, from the graph's "Show on timeline". */
   const [focusSignature, setFocusSignature] = useState<string | undefined>(undefined);
   /** Moment to open the timeline on, from a date bookmark. */
@@ -148,7 +147,6 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   const [filter, setFilter] = useState(() => ({ ...EMPTY_FILTER, address: route.wallet }));
   const [graphRanking, setGraphRanking] = useState<GraphRanking>("significant");
   const [graphNodeLimit, setGraphNodeLimit] = useState<10 | 25 | 50 | 100 | null>(25);
-  const [graphRange, setGraphRange] = useState<{ start: number; end: number } | null>(null);
   const [graphClusters, setGraphClusters] = useState<ReadonlySet<ClusterKind>>(new Set());
   const [graphEntities, setGraphEntities] = useState<ReadonlySet<string>>(new Set());
   /** Observed address the Map wallet dialog is open for. */
@@ -339,7 +337,6 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     }
     return out;
   }, [walletStates, filterables, summariesByWallet, filter, names, reasons, decoySet]);
-  const summaries = summariesByWallet.get(selectedWallet) ?? NO_SUMMARIES;
   const visible = perWallet.get(selectedWallet);
   const visibleState = visible?.state;
   // Program connections are separate from wallet interactions and hidden until asked for.
@@ -350,10 +347,6 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     for (const tx of transactions?.values() ?? []) for (const ix of [...tx.instructions, ...tx.innerInstructions]) ids.add(ix.programId);
     return ids;
   }, [transactions]);
-  const counterparties = useMemo(
-    () => collectCounterparties(selectedWallet, summaries).map((r) => ({ ...r, state: addressState(r.address, c, registry, programs) })),
-    [selectedWallet, summaries, c, programs],
-  );
   const shareSearch = buildMapSearch({ wallet: c.primaryWallet, range: c.range });
 
   // Lane order: saved order, else primary then first appearance. Focus narrows without changing it.
@@ -388,6 +381,17 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
         ];
       }),
     [shownLanes, perWallet, c, names],
+  );
+  // Who the shown lanes dealt with, through the same filters as every view.
+  const counterparties = useMemo(
+    () =>
+      collectCounterparties(
+        shownLanes.flatMap((wallet) => {
+          const data = perWallet.get(wallet);
+          return data ? [{ wallet, summaries: data.summaries, signatures: data.state.effects.map((e) => e.signature) }] : [];
+        }),
+      ).map((r) => ({ ...r, state: addressState(r.address, c, registry, programs) })),
+    [shownLanes, perWallet, c, programs],
   );
   // Every mapped wallet each signature belongs to.
   const owners = useMemo(() => {
@@ -432,7 +436,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
             kind: "transaction",
             id: row.signature,
             label: shortenAddress(row.signature, 6),
-            detail: `${new Date(row.time).toISOString().slice(0, 16).replace("T", " ")} UTC · ${row.summary.kind.replace("_", " ")} · ${names.of(wallet)}`,
+            detail: `${new Date(row.time).toISOString().slice(0, 16).replace("T", " ")} UTC · ${kindLabel(row.summary.kind)} · ${names.of(wallet)}`,
             keywords: [],
           });
         }
@@ -514,7 +518,9 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     // Counterparties of a wallet, from its reconstructed effects.
     const counterpartiesOf = (wallet: string) => {
       const s = walletStates.states.find((x) => x.wallet === wallet);
-      return s ? collectCounterparties(wallet, s.effects.map((e) => summarizeEffect(e, result.transactions.get(e.signature), nfts))).map((r) => r.address) : [];
+      if (!s) return [];
+      const summaries = s.effects.map((e) => summarizeEffect(e, result.transactions.get(e.signature), nfts));
+      return collectCounterparties([{ wallet, summaries, signatures: s.effects.map((e) => e.signature) }]).map((r) => r.address);
     };
     const mapped = c.mappedWallets.map((m) => m.address);
     const known = new Set([...mapped, ...mapped.filter((m) => m !== w.wallet).flatMap(counterpartiesOf)]);
@@ -710,13 +716,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     if (view !== "graph") return null;
     const sides = shownLanes.flatMap((wallet) => {
       const data = perWallet.get(wallet);
-      if (!data) return [];
-      if (!graphRange) return [{ wallet, effects: data.state.effects, summaries: data.summaries }];
-      const keep = data.state.effects.map((effect) => {
-        const time = effect.timestamp ? Date.parse(effect.timestamp) : Date.parse(c.range.start);
-        return time >= graphRange.start && time <= graphRange.end;
-      });
-      return [{ wallet, effects: data.state.effects.filter((_, i) => keep[i]), summaries: data.summaries.filter((_, i) => keep[i]) }];
+      return data ? [{ wallet, effects: data.state.effects, summaries: data.summaries }] : [];
     });
     return buildInteractionGraph(sides, {
       hiddenAssets: filter.hiddenAssets,
@@ -733,7 +733,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
       expandedClusters: graphClusters,
       expandedEntities: graphEntities,
     });
-  }, [view, shownLanes, perWallet, filter.hiddenAssets, showPrograms, graphRange, c, graphNodeLimit, graphRanking, names, programs, graphClusters, graphEntities]);
+  }, [view, shownLanes, perWallet, filter.hiddenAssets, showPrograms, c, graphNodeLimit, graphRanking, names, programs, graphClusters, graphEntities]);
   const edge = graph?.edges.find((e) => e.id === selectedEdge);
   // The Timeline narrowed to exactly the transactions behind some graph lines.
   const openInTimeline = (label: string, lines: readonly GraphEdge[]) => {
@@ -796,16 +796,28 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
       cancel: { label: "Undo", onClick: undoOf(c, next) },
     });
   };
-  // What the views show right now (the table: its wallet; otherwise every visible lane), once per transaction.
-  const viewLanes = view === "table" ? [selectedWallet] : shownLanes;
-  const shownNow = [...new Set(viewLanes.flatMap((w) => perWallet.get(w)?.state.effects.map((e) => e.signature) ?? []))];
+  // The timeline minimap's activity: every filter but the date range, which the minimap itself sets.
+  const overviewTimes = useMemo(() => {
+    if (!filter.dateRange) return undefined;
+    const tagsOf = (address: string) => names.label(address)?.tags ?? [];
+    const undated = { ...filter, dateRange: null };
+    const times = new Map<string, number>();
+    for (const wallet of shownLanes) {
+      for (const row of filterables.get(wallet) ?? []) {
+        if (!reasons.has(row.signature) && passesFilter(row, undated, tagsOf, (a) => decoySet.has(a))) times.set(row.signature, row.time);
+      }
+    }
+    return [...times.values()];
+  }, [filter, shownLanes, filterables, reasons, names, decoySet]);
+  // What the views show right now (every visible lane), once per transaction.
+  const shownNow = [...new Set(shownLanes.flatMap((w) => perWallet.get(w)?.state.effects.map((e) => e.signature) ?? []))];
   // What the filters take out of view (not already hidden, and not shown on another lane): the noise when types or assets are unticked.
   const filteredOut = (() => {
     if (!isFilterActive(filter)) return [];
     const tagsOf = (address: string) => names.label(address)?.tags ?? [];
     const shownSet = new Set(shownNow);
     const isDecoy = (a: string) => decoySet.has(a);
-    const out = viewLanes.flatMap((w) =>
+    const out = shownLanes.flatMap((w) =>
       (filterables.get(w) ?? []).filter(
         (row) => !shownSet.has(row.signature) && !(passesFilter(row, filter, tagsOf, isDecoy) && !(filter.hideDecoys && isDecoy(w))) && !reasons.has(row.signature),
       ),
@@ -823,9 +835,9 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
 
   // The table's open transaction, in the same panel the timeline uses; the table supplies its own order for stepping.
   const tableDetails = (nav: TableNav | null) => {
-    // From the table's rows, which include hidden transactions when "Show hidden" is on.
-    const table = visible?.table;
-    const index = table && tableTx ? table.state.effects.findIndex((e) => e.signature === tableTx) : -1;
+    // From the table's rows, which include hidden transactions when "Show hidden" is on: the open side's wallet.
+    const table = tableTx ? perWallet.get(tableTx.wallet)?.table : undefined;
+    const index = table && tableTx ? table.state.effects.findIndex((e) => e.signature === tableTx.signature) : -1;
     if (!nav || !table || !walletStates || state.status !== "done" || index === -1) return null;
     const effect = table.state.effects[index];
     return (
@@ -847,10 +859,10 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
         }}
         names={names}
         onSelectAddress={setSelectedAddress}
-        sharedWith={(owners.get(effect.signature) ?? []).filter((w) => w !== selectedWallet)}
-        walletName={c.mappedWallets.length > 1 ? names.of(selectedWallet) : undefined}
+        sharedWith={(owners.get(effect.signature) ?? []).filter((w) => w !== tableTx!.wallet)}
+        walletName={c.mappedWallets.length > 1 ? names.of(tableTx!.wallet) : undefined}
         bookmarked={isBookmarked(c, "transaction", effect.signature)}
-        onToggleBookmark={() => void updateCase(toggleBookmark(c, { kind: "transaction", target: effect.signature, wallet: selectedWallet }))}
+        onToggleBookmark={() => void updateCase(toggleBookmark(c, { kind: "transaction", target: effect.signature, wallet: tableTx!.wallet }))}
       />
     );
   };
@@ -877,8 +889,8 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
             onRankingChange={setGraphRanking}
             nodeLimit={graphNodeLimit}
             onNodeLimitChange={setGraphNodeLimit}
-            timeRange={graphRange}
-            onClearTimeRange={() => setGraphRange(null)}
+            timeRange={filter.dateRange}
+            onClearTimeRange={() => updateFilter({ ...filter, dateRange: null })}
             expandedClusters={graphClusters}
             onToggleCluster={(kind) => setGraphClusters((current) => toggled(current, kind))}
             expandedEntities={graphEntities}
@@ -950,24 +962,27 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
             setSelectedAddress(null);
             setSelectedEdge(null);
           }}
-          onGraphRangeChange={setGraphRange}
+          onDateRangeChange={(dateRange) => updateFilter({ ...filter, dateRange })}
+          overviewTimes={overviewTimes}
         />
       ) : (
         <>
-          {/* Keyed by wallet so the table's filters and sort reset when the wallet changes. */}
+          {/* Every shown lane, like the timeline and graph, through the same filters. */}
           <WalletStateTable
-            key={selectedWallet}
-            state={visible.table.state}
+            lanes={shownLanes.flatMap((wallet) => {
+              const data = perWallet.get(wallet);
+              return data ? [{ wallet, ...data.table }] : [];
+            })}
             assets={walletStates.assets}
-            summaries={visible.table.summaries}
-            hidden={visible.table.hidden}
+            hiddenAssets={filter.hiddenAssets}
+            walletName={(wallet) => names.of(wallet)}
             onHide={hideBatch}
             onUnhide={unhideBatch}
             selected={tableTx}
-            onSelect={(signature) => {
+            onSelect={(side) => {
               // The inspector shows the last thing picked: this transaction now.
               setSelectedAddress(null);
-              setTableTx(signature);
+              setTableTx(side);
             }}
             renderPanel={(nav) => {
               const details = tableDetails(nav);
@@ -1256,8 +1271,8 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
             </PanelSection>
             {walletState && walletStates && visibleState && (
               <FilterPanel
-                // The timeline and graph cover every visible lane; the table shows the selected wallet.
-                rows={view !== "table" ? shownLanes.flatMap((w) => filterables.get(w) ?? []) : (filterables.get(selectedWallet) ?? [])}
+                // Every view covers the same visible lanes.
+                rows={shownLanes.flatMap((w) => filterables.get(w) ?? [])}
                 assets={walletStates.assets}
                 names={names}
                 decimalsOf={(assetId) =>
@@ -1265,7 +1280,8 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                 }
                 caseRange={c.range}
                 filter={filter}
-                shown={view !== "table" ? lanes.reduce((n, l) => n + l.state.effects.length, 0) : visibleState.effects.length}
+                // Distinct transactions: one two lanes share counts once, as in the table.
+                shown={shownNow.length}
                 onChange={updateFilter}
                 decoyCount={decoySet.size}
                 // Filtering to the noise, then hiding it, is the everyday way to bulk-hide.

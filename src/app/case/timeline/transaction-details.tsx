@@ -15,6 +15,7 @@ import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import type { WalletState, WalletTransactionEffect } from "@/lib/state/reconstruct";
 import { describeAction, type EffectSummary, type RecipientRole } from "@/lib/state/summarize";
 import { type Assets, assetLabel, formatAssetAmount, formatUtc } from "../asset-format";
+import { kindLabel } from "../filter-panel";
 
 const ROLE_TEXT: Record<RecipientRole, string> = {
   royalty: "Royalty",
@@ -125,7 +126,7 @@ export function TransactionDetails({
     <section className="flex min-w-0 flex-col gap-4 p-3" aria-label="Transaction details">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <Badge variant={summary.kind === "FAILED" ? "destructive" : "secondary"}>{summary.kind.replace("_", " ")}</Badge>
+          <Badge variant={summary.kind === "FAILED" ? "destructive" : "secondary"}>{kindLabel(summary.kind)}</Badge>
           <span className="text-xs text-muted-foreground tabular-nums">
             {position.index + 1} / {position.count}
           </span>

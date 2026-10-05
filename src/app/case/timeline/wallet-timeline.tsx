@@ -17,6 +17,7 @@ import { type TimelineHandle, type TimelineItem, type TimelineLane, type Timelin
 import { TimelineMinimap } from "./timeline-minimap";
 import { RelationshipChart, type RelationshipChartHandle } from "./relationship-chart";
 import { TransactionDetails } from "./transaction-details";
+import { kindLabel } from "../filter-panel";
 
 const cardDate = (ms: number) => {
   const d = new Date(ms);
@@ -56,8 +57,8 @@ function cardLines(s: EffectSummary, time: number, state: WalletState, assets: A
   return [
     cardDate(time),
     s.nft && s.nft.payment && !(s.nft.received.length > 0 && s.nft.sent.length > 0)
-      ? `${s.kind.replace("_", " ")} · ${nftLabel(s.nft.received.length > 0 ? s.nft.received : s.nft.sent, assets)}`
-      : s.kind.replace("_", " "),
+      ? `${kindLabel(s.kind).toUpperCase()} · ${nftLabel(s.nft.received.length > 0 ? s.nft.received : s.nft.sent, assets)}`
+      : kindLabel(s.kind).toUpperCase(),
     headline(s, state, assets, names),
     s.nft?.party
       ? // Buyers and receivers get the NFT from the other party; sellers and senders give it to them.
@@ -116,7 +117,8 @@ export function WalletTimeline({
   onBookmarkTime,
   initialTime,
   onSelectTransaction,
-  onGraphRangeChange,
+  onDateRangeChange,
+  overviewTimes,
   ref,
 }: {
   ref?: React.Ref<WalletTimelineHandle>;
@@ -150,8 +152,10 @@ export function WalletTimeline({
   initialTime?: number;
   /** A transaction was selected; the inspector should show it over any open address. */
   onSelectTransaction: () => void;
-  /** A minimap brush becomes the Graph view's investigation window. */
-  onGraphRangeChange?: (range: { start: number; end: number } | null) => void;
+  /** A minimap brush becomes the case's date filter, for every view; resetting the view clears it. */
+  onDateRangeChange?: (range: { start: number; end: number } | null) => void;
+  /** What the minimap draws: activity through every filter but the date range, so it still shows the whole case. */
+  overviewTimes?: readonly number[];
 }) {
   const timeline = useRef<TimelineHandle>(null);
   const [mode, setMode] = useState<SpacingMode>("time");
@@ -436,7 +440,7 @@ export function WalletTimeline({
                 onClick={() => {
                   setSelected(null);
                   setMode("time");
-                  onGraphRangeChange?.(null);
+                  onDateRangeChange?.(null);
                   timeline.current?.fit();
                 }}
               >
@@ -492,7 +496,7 @@ export function WalletTimeline({
         </div>
         <div className="shrink-0 border-t px-2 pt-2 pb-3">
           <TimelineMinimap
-            times={times}
+            times={overviewTimes ?? times}
             range={bounds}
             view={view}
             onNavigate={(time) => {
@@ -505,7 +509,7 @@ export function WalletTimeline({
               timeline.current?.showTimeRange(time - span / 2, time + span / 2, false);
             }}
             onSelectRange={(start, end) => {
-              onGraphRangeChange?.({ start, end });
+              onDateRangeChange?.({ start, end });
               timeline.current?.showTimeRange(start, end, false);
             }}
           />

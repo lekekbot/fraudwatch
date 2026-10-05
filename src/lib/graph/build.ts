@@ -97,13 +97,13 @@ export type GraphEdge = {
   kind: "interaction" | "program";
   /** Chronological. */
   interactions: Interaction[];
-  /** Precomputed once when the filtered graph is built; shared by every graph view. */
-  summary?: RelationshipSummary;
+  /** Computed once when the filtered graph is built; shared by every graph view. */
+  summary: RelationshipSummary;
 };
 
 /** Who made the first move on a connection: how many transactions each end approved (signed), and anyone else. */
 export function startedBy(edge: GraphEdge, names: Pick<Names, "of">): string {
-  const s = edge.summary ?? summarizeRelationship(edge);
+  const s = edge.summary;
   const parts = [
     ...(s.initiatedByA ? [`${names.of(edge.a)} ${s.initiatedByA.toLocaleString()}`] : []),
     ...(s.initiatedByB ? [`${names.of(edge.b)} ${s.initiatedByB.toLocaleString()}`] : []),
@@ -164,15 +164,6 @@ export function summarizeRelationship(edge: Pick<GraphEdge, "a" | "b" | "interac
   };
 }
 
-/** Actual value-flow direction across an aggregate edge, independent of its alphabetic endpoint order. */
-export function edgeFlow(edge: GraphEdge) {
-  const aToB = edge.interactions.filter((it) => it.movements.some((m) => m.from === edge.a && m.to === edge.b)).length;
-  const bToA = edge.interactions.filter((it) => it.movements.some((m) => m.from === edge.b && m.to === edge.a)).length;
-  return bToA > 0 && aToB === 0
-    ? { from: edge.b, to: edge.a, forward: bToA, reverse: 0, bidirectional: false }
-    : { from: edge.a, to: edge.b, forward: aToB, reverse: bToA, bidirectional: aToB > 0 && bToA > 0 };
-}
-
 /**
  * How much value each direction of each line moved, 0–1, comparable across lines without prices: per asset, the
  * amount over the largest amount of that asset any line moved one way; a direction takes its best asset. Assets that
@@ -181,7 +172,7 @@ export function edgeFlow(edge: GraphEdge) {
 export function flowShares(edges: readonly GraphEdge[]): Map<string, { aToB: number; bToA: number }> {
   const largest = new Map<string, bigint>();
   for (const edge of edges) {
-    for (const asset of edge.summary?.assets ?? []) {
+    for (const asset of edge.summary.assets) {
       const most = BigInt(asset.aToB) > BigInt(asset.bToA) ? BigInt(asset.aToB) : BigInt(asset.bToA);
       if (most > (largest.get(asset.assetId) ?? BigInt(0))) largest.set(asset.assetId, most);
     }
@@ -192,7 +183,7 @@ export function flowShares(edges: readonly GraphEdge[]): Map<string, { aToB: num
   };
   return new Map(
     edges.map((edge) => {
-      const assets = edge.summary?.assets ?? [];
+      const assets = edge.summary.assets;
       return [edge.id, { aToB: Math.max(0, ...assets.map((a) => share(a.aToB, a.assetId))), bToA: Math.max(0, ...assets.map((a) => share(a.bToA, a.assetId))) }];
     }),
   );
@@ -257,7 +248,8 @@ export function buildInteractionGraph(
   const hidden = options.hiddenAssets ?? new Set<string>();
   const maxNodes = options.maxNodes ?? MAX_GRAPH_NODES;
   const mapped = new Set(sides.map((s) => s.wallet));
-  const edges = new Map<string, GraphEdge & { bySignature: Map<string, Interaction> }>();
+  type Building = Omit<GraphEdge, "summary"> & { bySignature: Map<string, Interaction> };
+  const edges = new Map<string, Building>();
   // The same movement seen from both mapped wallets' sides is recorded once.
   const seen = new Set<string>();
   const seenNftRelated = new Set<string>();
@@ -282,7 +274,7 @@ export function buildInteractionGraph(
     }
     return edge;
   };
-  const interactionOn = (edge: GraphEdge & { bySignature: Map<string, Interaction> }, e: WalletTransactionEffect, s: EffectSummary) => {
+  const interactionOn = (edge: Building, e: WalletTransactionEffect, s: EffectSummary) => {
     let it = edge.bySignature.get(e.signature);
     if (!it) {
       // The summary names the fee payer only when it isn't the wallet; otherwise the wallet approved it itself.
@@ -349,16 +341,9 @@ export function buildInteractionGraph(
     });
   }
 
-  const all: GraphEdge[] = [...edges.values()].map((edge) => {
-    const built: GraphEdge = {
-      id: edge.id,
-      a: edge.a,
-      b: edge.b,
-      kind: edge.kind,
-      interactions: [...edge.interactions].sort((x, y) => (x.time ?? 0) - (y.time ?? 0) || x.signature.localeCompare(y.signature)),
-    };
-    built.summary = summarizeRelationship(built);
-    return built;
+  const all: GraphEdge[] = [...edges.values()].map(({ id, a, b, kind, interactions }) => {
+    const sorted = [...interactions].sort((x, y) => (x.time ?? 0) - (y.time ?? 0) || x.signature.localeCompare(y.signature));
+    return { id, a, b, kind, interactions: sorted, summary: summarizeRelationship({ a, b, interactions: sorted }) };
   });
   const programEdges = all.filter((e) => e.kind === "program");
   const drawn = all.filter((e) => e.kind === "interaction" || options.showPrograms);

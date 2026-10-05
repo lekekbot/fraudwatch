@@ -7,10 +7,11 @@ import { ArrowDownLeftIcon, ArrowUpRightIcon, ChevronDownIcon, ChevronUpIcon, Fo
 import { Button } from "@/components/ui/button";
 import type { AddressState } from "@/lib/case/address-state";
 import { graphWheelAction } from "@/lib/gestures";
-import { BURNED_NODE_ID, CLUSTER_LABELS, type ClusterKind, edgeFlow, entityNodeId, flowShares, startedBy, summarizeRelationship, type GraphEdge, type GraphNode, type GraphRanking, type WalletGraph as Graph } from "@/lib/graph/build";
-import { classifyLayout, layoutGraph, majorEdges, nodeRadius, type Point, type Spacing, SPACINGS, type ZoomTier, zoomTier } from "@/lib/graph/layout";
+import { BURNED_NODE_ID, CLUSTER_LABELS, type ClusterKind, entityNodeId, flowShares, startedBy, type GraphEdge, type GraphNode, type GraphRanking, type WalletGraph as Graph } from "@/lib/graph/build";
+import { classifyLayout, hashId, layoutGraph, majorEdges, nodeRadius, type Point, type Spacing, SPACINGS, type ZoomTier, zoomTier } from "@/lib/graph/layout";
 import type { Names } from "@/lib/labels/labels";
 import { AssetIcon } from "../asset-icon";
+import { kindLabel } from "../filter-panel";
 
 /** Remembers the chosen graph spacing in this browser. */
 const SPACING_KEY = "fraudwatch:graph-spacing";
@@ -52,9 +53,7 @@ type HoverCard = {
 
 function edgePerspective(edge: GraphEdge, wallet: string, nodes: ReadonlyMap<string, { kind: string }>) {
   const reference = edge.a === wallet || edge.b === wallet ? wallet : nodes.get(edge.a)?.kind === "wallet" ? edge.a : edge.b;
-  const flow = edgeFlow(edge);
-  const aToB = edge.summary?.aToB ?? (flow.from === edge.a ? flow.forward : flow.reverse);
-  const bToA = edge.summary?.bToA ?? (flow.from === edge.b ? flow.forward : flow.reverse);
+  const { aToB, bToA } = edge.summary;
   return {
     reference,
     counterparty: reference === edge.a ? edge.b : edge.a,
@@ -67,7 +66,6 @@ function nodeLabel(node: GraphNode, names: Names) {
   return node.cluster ? `${CLUSTER_LABELS[node.cluster.kind]} (${node.cluster.addresses})` : (names.known(node.id) ?? names.of(node.id, 4));
 }
 
-const kindLabel = (kind: string) => kind.replaceAll("_", " ").toLowerCase();
 
 const shortDate = (time: number) => new Date(time).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
@@ -82,9 +80,9 @@ function nodeFacts(id: string, graph: Graph) {
     if (edge.kind !== "interaction" || (edge.a !== id && edge.b !== id)) continue;
     const other = edge.a === id ? edge.b : edge.a;
     if (wallets.has(other)) connected.add(other);
-    for (const asset of edge.summary?.assets ?? []) assets.add(asset.assetId);
-    if (edge.summary?.firstInteraction != null) first = Math.min(first, edge.summary.firstInteraction);
-    if (edge.summary?.lastInteraction != null) last = Math.max(last, edge.summary.lastInteraction);
+    for (const asset of edge.summary.assets) assets.add(asset.assetId);
+    if (edge.summary.firstInteraction !== null) first = Math.min(first, edge.summary.firstInteraction);
+    if (edge.summary.lastInteraction !== null) last = Math.max(last, edge.summary.lastInteraction);
   }
   return { assets: assets.size, connected: [...connected], first: Number.isFinite(first) ? first : null, last: Number.isFinite(last) ? last : null };
 }
@@ -150,7 +148,7 @@ function routeControl(edge: GraphEdge, from: Point, to: Point, nodes: GraphNode[
   if (!obstruction) return undefined;
   const point = positions.get(obstruction.id)!;
   const cross = dx * (point.y - middle.y) - dy * (point.x - middle.x);
-  const fallback = [...edge.id].reduce((hash, char) => hash + char.charCodeAt(0), 0) % 2 ? 1 : -1;
+  const fallback = hashId(edge.id) % 2 ? 1 : -1;
   const side = cross === 0 ? fallback : -Math.sign(cross);
   const offset = obstruction.kind === "wallet" ? 46 : 32;
   return { x: middle.x + (-dy / length) * offset * side, y: middle.y + (dx / length) * offset * side };
@@ -228,7 +226,6 @@ export function WalletGraph({
   const zoomRef = useRef<ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
   const transformRef = useRef<ZoomTransform>(zoomIdentity);
   const sizeRef = useRef({ width: 800, height: 600 });
-  const [layoutSize, setLayoutSize] = useState({ width: 800, height: 600 });
   const frameRef = useRef<number | null>(null);
   const hoverRef = useRef<{ node?: string; edge?: string }>({});
   const dragRef = useRef<{ id: string; x: number; y: number; moved: boolean } | null>(null);
@@ -242,8 +239,8 @@ export function WalletGraph({
     return saved && saved in SPACINGS ? (saved as Spacing) : "normal";
   });
   const layout = useMemo(
-    () => layoutGraph(graph.nodes, graph.edges, primaryWallet, layoutSize, undefined, SPACINGS[spacing]),
-    [graph, primaryWallet, layoutSize, spacing],
+    () => layoutGraph(graph.nodes, graph.edges, primaryWallet, SPACINGS[spacing]),
+    [graph, primaryWallet, spacing],
   );
   // Positions start from the layout; dragging moves them without re-running it.
   const positions = useRef(new Map<string, Point>());
@@ -378,7 +375,7 @@ export function WalletGraph({
       if (edge.kind === "interaction" && (tier !== "far" || inFocus)) {
         // Who made the first move: a solid diamond just outside each end that approved (signed) transactions on this line;
         // a hollow one at the middle when someone else entirely signed them (a delegate, drainer or bot).
-        const started = edge.summary ?? summarizeRelationship(edge);
+        const started = edge.summary;
         const diamond = (at: Point, filled: boolean) => {
           const size = (selected ? 4.2 : 3.4) / t.k;
           ctx.beginPath();
@@ -441,7 +438,7 @@ export function WalletGraph({
           // Dots run source → target along the line: 1 for little value, up to 5 for the largest flows of an asset.
           // Each keeps its own speed and start, so a busy line doesn't move in lockstep.
           const particles = 1 + Math.round(4 * Math.sqrt(flow.share));
-          const seed = [...edge.id, ...flow.source].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) % 100_003, 7);
+          const seed = hashId(edge.id + flow.source) % 100_003;
           for (let i = 0; i < particles; i++) {
             const speed = 0.8 + 0.4 * jitter(seed + i * 3);
             const progress = ((now / 5200) * speed + jitter(seed + i * 3 + 1) + i / particles) % 1;
@@ -651,7 +648,6 @@ export function WalletGraph({
       const width = canvas.parentElement?.clientWidth ?? 800;
       const height = canvas.parentElement?.clientHeight ?? 600;
       sizeRef.current = { width, height };
-      setLayoutSize((current) => (current.width === width && current.height === height ? current : { width, height }));
       const dpr = window.devicePixelRatio || 1;
       canvas.width = Math.round(width * dpr);
       canvas.height = Math.round(height * dpr);
@@ -872,7 +868,7 @@ export function WalletGraph({
             });
           } else if (edge) {
             const { counterparty, sent, received } = edgePerspective(edge, latest.current.wallet, latest.current.nodesById);
-            const assets = (edge.summary?.assets.map((asset) => asset.assetId) ?? [...new Set(edge.interactions.flatMap((it) => it.movements.map((m) => m.assetId)))]).map(assetInfo);
+            const assets = edge.summary.assets.map((asset) => assetInfo(asset.assetId));
             const flowTotal = sent + received;
             const flowSummary =
               edge.kind !== "interaction" || flowTotal === 0
@@ -889,10 +885,10 @@ export function WalletGraph({
               kicker: edge.kind === "program" ? "Program connection" : "Wallet interaction",
               lines: [
                 `${edge.interactions.length.toLocaleString()} ${edge.kind === "program" ? "program calls" : "transactions"}`,
-                ...(edge.summary?.transactionTypes.length
+                ...(edge.summary.transactionTypes.length
                   ? [edge.summary.transactionTypes.slice(0, 3).map((type) => `${kindLabel(type.kind)} ${type.count.toLocaleString()}`).join(" · ")]
                   : []),
-                ...(edge.summary?.assets.length
+                ...(edge.summary.assets.length
                   ? [edge.summary.assets.slice(0, 3).map((asset) => `${assetInfo(asset.assetId).label} ${asset.txCount.toLocaleString()} tx`).join(" · ")]
                   : []),
                 ...(flowSummary ? [flowSummary] : []),
@@ -1131,10 +1127,9 @@ export function WalletGraph({
             <>
               <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
               <span className="pl-1 text-xs tabular-nums">
-                {new Date(timeRange.start).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })} –{" "}
-                {new Date(timeRange.end).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })}
+                {shortDate(timeRange.start)} – {shortDate(timeRange.end)}
               </span>
-              <Button variant="ghost" size="icon-sm" aria-label="Clear timeline range" title="Show the full case range" onClick={onClearTimeRange}>
+              <Button variant="ghost" size="icon-sm" aria-label="Clear date filter" title="Clear the date filter: show the full case range" onClick={onClearTimeRange}>
                 <XIcon />
               </Button>
             </>

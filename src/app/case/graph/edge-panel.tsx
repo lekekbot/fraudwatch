@@ -3,11 +3,12 @@
 import { ArrowDownLeftIcon, ArrowUpRightIcon, ChartNoAxesGanttIcon, ExternalLinkIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { BURNED_NODE_ID, edgeFlow, entityProtocol, startedBy, summarizeRelationship, type GraphEdge } from "@/lib/graph/build";
+import { BURNED_NODE_ID, entityProtocol, startedBy, type GraphEdge } from "@/lib/graph/build";
 import type { Names } from "@/lib/labels/labels";
 import { type Assets, assetLabel, formatUtc } from "../asset-format";
 import { AssetFlows } from "../asset-flows";
 import { PanelSection } from "../panel";
+import { kindLabel } from "../filter-panel";
 
 const NFT_RELATED_LABEL = {
   royalty: "Royalty",
@@ -60,8 +61,10 @@ export function EdgePanel({
       </button>
     );
   const program = edge.kind === "program";
-  const flow = edgeFlow(edge);
-  const summary = edge.summary ?? summarizeRelationship(edge);
+  const summary = edge.summary;
+  // Name the sender first when value only went one way.
+  const [from, to] = summary.bToA > 0 && summary.aToB === 0 ? [edge.b, edge.a] : [edge.a, edge.b];
+  const oneWay = !program && (summary.aToB === 0) !== (summary.bToA === 0);
   // The panel reads from the focused wallet's side; when the focus isn't an endpoint, side with edge.b.
   const you = focusWallet === edge.a ? edge.a : edge.b;
   const counterparty = edge.a === focusWallet ? edge.b : edge.a;
@@ -82,11 +85,11 @@ export function EdgePanel({
         }
       >
         <div className="flex min-w-0 items-center gap-1.5 text-sm">
-          {name(flow.from)}
-          <span className="shrink-0 text-muted-foreground" aria-label={program || flow.forward === 0 || flow.bidirectional ? "interacted with" : "sent to"}>
-            {program || flow.forward === 0 || flow.bidirectional ? "↔" : "→"}
+          {name(from)}
+          <span className="shrink-0 text-muted-foreground" aria-label={oneWay ? "sent to" : "interacted with"}>
+            {oneWay ? "→" : "↔"}
           </span>
-          {name(flow.to)}
+          {name(to)}
         </div>
         {program && (
           <p className="text-xs leading-relaxed text-muted-foreground">
@@ -112,7 +115,7 @@ export function EdgePanel({
             {/* Types add something only when they're mixed; a single type is already the direction. */}
             {summary.transactionTypes.length > 1 &&
               summary.transactionTypes.slice(0, 4).map((type) => (
-                <Badge key={type.kind} variant="outline">{type.kind.replaceAll("_", " ").toLowerCase()} · {type.count}</Badge>
+                <Badge key={type.kind} variant="outline">{kindLabel(type.kind)} · {type.count}</Badge>
               ))}
           </div>
           {/* Who made the first move: each side's approved (signed) transactions, and any signed by someone else. */}
@@ -145,7 +148,7 @@ export function EdgePanel({
                 <div className="flex items-center gap-2">
                   <span className="text-xs tabular-nums">{formatUtc(it.time)} UTC</span>
                   <Badge variant="outline" className="text-[10px]">
-                    {it.kind.replace("_", " ")}
+                    {kindLabel(it.kind)}
                   </Badge>
                 </div>
                 {it.initiator !== edge.a && it.initiator !== edge.b && (

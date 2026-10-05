@@ -20,7 +20,7 @@ export function TimelineMinimap({
   onPan,
   onSelectRange,
 }: {
-  times: number[];
+  times: readonly number[];
   range: { start: number; end: number };
   view: { start: number; end: number } | null;
   /** A click at `time`. */

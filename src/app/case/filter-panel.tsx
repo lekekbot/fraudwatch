@@ -72,6 +72,9 @@ function FilterGroup({ title, active, open = false, children }: { title: string;
   );
 }
 
+/** How a transaction kind reads anywhere in the interface. */
+export const kindLabel = (kind: EffectKind) => KINDS.find((k) => k.kind === kind)?.label ?? kind;
+
 /** Protocol id → display name, from the registry. */
 export const protocolName = (id: string) => registry.protocols.get(id)?.name ?? id;
 
@@ -145,7 +148,7 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
       }
     >
       <p className="text-xs text-muted-foreground" aria-live="polite">
-        Showing {shown.toLocaleString()} of {rows.length.toLocaleString()} transactions
+        Showing {shown.toLocaleString()} of {new Set(rows.map((row) => row.signature)).size.toLocaleString()} transactions
       </p>
 
       {filter.address && (

@@ -1,17 +1,7 @@
-import {
-  forceCollide,
-  forceLink,
-  forceManyBody,
-  forceSimulation,
-  forceX,
-  forceY,
-  type SimulationLinkDatum,
-  type SimulationNodeDatum,
-} from "d3-force";
+import { forceCollide, forceSimulation, forceX, forceY, type SimulationNodeDatum } from "d3-force";
 import type { GraphEdge, GraphNode } from "./build";
 
 export type Point = { x: number; y: number };
-export type LayoutViewport = { width: number; height: number };
 export type LayoutRole = "core" | "bridge" | "peripheral" | "aggregate";
 
 /** Wallet identity stays primary; interaction volume is shown on relationships. */
@@ -22,8 +12,7 @@ export type LayoutRole = "core" | "bridge" | "peripheral" | "aggregate";
 export const nodeRadius = (node: GraphNode) =>
   node.kind === "wallet" ? 16 : node.kind === "aggregate" ? 13 : node.kind === "program" ? 6 : Math.min(21, 6 + 5 * Math.log10(Math.max(1, node.txCount)));
 
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
-const interactionCount = (edge: GraphEdge) => edge.summary?.totalInteractions ?? edge.interactions.length;
+const interactionCount = (edge: GraphEdge) => edge.summary.totalInteractions;
 const edgeWeight = (edge: GraphEdge) => Math.log1p(interactionCount(edge));
 
 export function classifyLayout(nodes: GraphNode[], edges: GraphEdge[]): Map<string, LayoutRole> {
@@ -47,16 +36,14 @@ export function classifyLayout(nodes: GraphNode[], edges: GraphEdge[]): Map<stri
   );
 }
 
-function stableAngle(id: string) {
+/** A fixed 32-bit number for a string: stable positions, sides and seeds without randomness. */
+export function hashId(id: string): number {
   let hash = 0;
   for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return (hash / 0xffffffff) * Math.PI * 2 - Math.PI;
+  return hash;
 }
 
-function crosses(a: Point, b: Point, c: Point, d: Point) {
-  const side = (p: Point, q: Point, r: Point) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
-  return side(a, b, c) * side(a, b, d) < 0 && side(c, d, a) * side(c, d, b) < 0;
-}
+const stableAngle = (id: string) => (hashId(id) / 0xffffffff) * Math.PI * 2 - Math.PI;
 
 function coreOrder(nodes: GraphNode[], edges: GraphEdge[], primary: string) {
   const ids = new Set(nodes.map((node) => node.id));
@@ -82,77 +69,22 @@ function coreOrder(nodes: GraphNode[], edges: GraphEdge[], primary: string) {
   return ordered;
 }
 
-function layoutCore(nodes: GraphNode[], edges: GraphEdge[], primary: string, viewport: LayoutViewport, ticks: number) {
-  if (nodes.length === 1) return new Map([[nodes[0].id, { x: 0, y: 0 }]]);
-  const degree = new Map(nodes.map((node) => [node.id, 0]));
-  for (const edge of edges) {
-    degree.set(edge.a, (degree.get(edge.a) ?? 0) + interactionCount(edge));
-    degree.set(edge.b, (degree.get(edge.b) ?? 0) + interactionCount(edge));
-  }
-  const orders = [
-    [...nodes].sort((a, b) => a.id.localeCompare(b.id)).map((node) => node.id),
-    [...nodes].sort((a, b) => (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0) || a.id.localeCompare(b.id)).map((node) => node.id),
-    coreOrder(nodes, edges, primary),
-  ].filter((order, index, all) => all.findIndex((item) => item.join("|") === order.join("|")) === index);
-  const radius = clamp(Math.min(viewport.width, viewport.height) * 0.22, 150, 260);
-  const maxWeight = Math.max(1, ...edges.map(edgeWeight));
-  const idealDistance = (edge: GraphEdge) => clamp(260 - (edgeWeight(edge) / maxWeight) * 100, 140, 260);
-  let best = new Map<string, Point>();
-  let bestScore = Infinity;
-
-  for (const order of orders) {
-    type CoreNode = SimulationNodeDatum & { id: string };
-    type CoreLink = SimulationLinkDatum<CoreNode> & { ideal: number };
-    const simNodes: CoreNode[] = order.map((id, index) => {
-      const angle = -Math.PI / 2 + (index / order.length) * Math.PI * 2;
-      return { id, x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
-    });
-    const links: CoreLink[] = edges.map((edge) => ({ source: edge.a, target: edge.b, ideal: idealDistance(edge) }));
-    const simulation = forceSimulation(simNodes)
-      .alpha(0.9)
-      .alphaDecay(0.05)
-      .velocityDecay(0.45)
-      .force(
-        "link",
-        forceLink<CoreNode, CoreLink>(links)
-          .id((node) => node.id)
-          .distance((link) => link.ideal)
-          .strength(0.65),
-      )
-      .force("charge", forceManyBody<CoreNode>().strength(-650))
-      .force("x", forceX<CoreNode>(0).strength((node) => (node.id === primary ? 0.35 : 0.035)))
-      .force("y", forceY<CoreNode>(0).strength((node) => (node.id === primary ? 0.35 : 0.035)))
-      .force("collide", forceCollide<CoreNode>(86).iterations(2))
-      .stop();
-    simulation.tick(ticks);
-    const positions = new Map(simNodes.map((node) => [node.id, { x: node.x ?? 0, y: node.y ?? 0 }]));
-    let score = Math.hypot(positions.get(primary)?.x ?? 0, positions.get(primary)?.y ?? 0) ** 2 * 4;
-    for (const edge of edges) {
-      const a = positions.get(edge.a)!;
-      const b = positions.get(edge.b)!;
-      score += (Math.hypot(a.x - b.x, a.y - b.y) - idealDistance(edge)) ** 2;
-    }
-    for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        const a = positions.get(nodes[i].id)!;
-        const b = positions.get(nodes[j].id)!;
-        score += Math.max(0, 170 - Math.hypot(a.x - b.x, a.y - b.y)) ** 2 * 10;
-      }
-    }
-    for (let i = 0; i < edges.length; i++) {
-      for (let j = i + 1; j < edges.length; j++) {
-        const a = edges[i];
-        const b = edges[j];
-        if (a.a === b.a || a.a === b.b || a.b === b.a || a.b === b.b) continue;
-        if (crosses(positions.get(a.a)!, positions.get(a.b)!, positions.get(b.a)!, positions.get(b.b)!)) score += 100_000;
-      }
-    }
-    if (score < bestScore) {
-      bestScore = score;
-      best = positions;
-    }
-  }
-  return best;
+/**
+ * Mapped wallets: the primary at the centre, the others evenly around it in link order, so wallets that deal
+ * with each other sit side by side. Only their directions matter: the caller pushes them out past the
+ * primary's own counterparties.
+ */
+function layoutCore(nodes: GraphNode[], edges: GraphEdge[], primary: string): Map<string, Point> {
+  const others = coreOrder(nodes, edges, primary).filter((id) => id !== primary);
+  // One or two hang below the primary; more go all the way round.
+  const step = (Math.PI * 2) / Math.max(3, others.length);
+  return new Map([
+    [primary, { x: 0, y: 0 }],
+    ...others.map((id, i): [string, Point] => {
+      const angle = Math.PI / 2 + (i - (others.length - 1) / 2) * step;
+      return [id, { x: Math.cos(angle) * 200, y: Math.sin(angle) * 200 }];
+    }),
+  ]);
 }
 
 /** How far apart the graph is drawn: 1 is the default; larger spreads every ring and gap. */
@@ -172,8 +104,6 @@ export function layoutGraph(
   nodes: GraphNode[],
   edges: GraphEdge[],
   primary?: string,
-  viewport: LayoutViewport = { width: 1100, height: 760 },
-  ticks = 220,
   spacing = 1,
 ): Map<string, Point> {
   // With the primary's lane hidden it can still appear as another wallet's counterparty: anchor on a shown wallet.
@@ -184,7 +114,7 @@ export function layoutGraph(
   const core = nodes.filter((node) => roles.get(node.id) === "core");
   const coreIds = new Set(core.map((node) => node.id));
   const coreEdges = edges.filter((edge) => coreIds.has(edge.a) && coreIds.has(edge.b));
-  const targets = layoutCore(core, coreEdges, primary, viewport, ticks);
+  const targets = layoutCore(core, coreEdges, primary);
   const coreLinks = new Map<string, { id: string; weight: number }[]>();
   for (const edge of edges) {
     if (coreIds.has(edge.a) && !coreIds.has(edge.b)) coreLinks.set(edge.b, [...(coreLinks.get(edge.b) ?? []), { id: edge.a, weight: edgeWeight(edge) }]);
