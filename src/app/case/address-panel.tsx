@@ -184,40 +184,48 @@ export function AddressPanel({
             Map wallet
           </Button>
         )}
-        {lane && (
-          <Button variant="ghost" size="sm" className="self-start text-muted-foreground" onClick={lane.onToggle}>
-            {lane.hidden ? <EyeIcon /> : <EyeOffIcon />}
-            {lane.hidden ? "Show lane" : "Hide lane"}
-          </Button>
-        )}
         {mapped && (
           <>
             <p className="text-xs text-muted-foreground">History loaded {mapped.rangeText}.</p>
             {mapped.paused && (
               <p className="text-xs text-muted-foreground">Paused: only its cached history is shown. Loads skip it and never ask the RPC.</p>
             )}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="self-start text-muted-foreground"
-              aria-pressed={mapped.paused}
-              title={mapped.paused ? "Load this wallet from the RPC again" : "Keep its cached history, but never load more from the RPC"}
-              onClick={mapped.onTogglePaused}
-            >
-              {mapped.paused ? <PlayIcon /> : <PauseIcon />}
-              {mapped.paused ? "Resume loading" : "Pause loading"}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="self-start text-muted-foreground"
-              title="Removes it from the case. Its label and cached transactions stay."
-              onClick={mapped.onUnmap}
-            >
-              <UnlinkIcon />
-              Remove from map
-            </Button>
           </>
+        )}
+        {(lane || mapped) && (
+          // Outlined like the panel's other actions, so they read as buttons rather than notes.
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Wallet actions">
+            {lane && (
+              <Button variant="outline" size="sm" onClick={lane.onToggle}>
+                {lane.hidden ? <EyeIcon /> : <EyeOffIcon />}
+                {lane.hidden ? "Show lane" : "Hide lane"}
+              </Button>
+            )}
+            {mapped && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-pressed={mapped.paused}
+                  title={mapped.paused ? "Load this wallet from the RPC again" : "Keep its cached history, but never load more from the RPC"}
+                  onClick={mapped.onTogglePaused}
+                >
+                  {mapped.paused ? <PlayIcon /> : <PauseIcon />}
+                  {mapped.paused ? "Resume loading" : "Pause loading"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="hover:border-destructive/60 hover:text-destructive"
+                  title="Removes it from the case. Its label and cached transactions stay."
+                  onClick={mapped.onUnmap}
+                >
+                  <UnlinkIcon />
+                  Remove from map
+                </Button>
+              </>
+            )}
+          </div>
         )}
       </PanelSection>
 

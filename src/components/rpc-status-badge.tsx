@@ -17,7 +17,16 @@ export function RpcStatusBadge() {
       {rpc ? (
         <>
           <span className="hidden truncate sm:inline">{redactRpcUrl(rpc.url)}</span>
-          <Badge variant={rpc.lastTest?.ok ? "secondary" : "outline"}>{rpc.lastTest?.ok ? "RPC ok" : "RPC untested"}</Badge>
+          <Badge
+            variant={!rpc.lastTest ? "outline" : rpc.lastTest.ok ? "secondary" : "destructive"}
+            title={
+              rpc.lastTest
+                ? `${rpc.lastTest.ok ? "Working" : "Failed"} when last ${rpc.lastTest.source === "load" ? "used to load transactions" : "tested"}, ${new Date(rpc.lastTest.at).toLocaleString()}`
+                : "Not used or tested yet"
+            }
+          >
+            {!rpc.lastTest ? "RPC untested" : rpc.lastTest.ok ? "RPC ok" : "RPC error"}
+          </Badge>
         </>
       ) : (
         <Badge variant="destructive">No RPC configured</Badge>

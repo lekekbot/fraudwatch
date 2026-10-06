@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownIcon, ArrowUpIcon, CalendarIcon, EyeIcon, EyeOffIcon, FocusIcon, Link2Icon, PanelLeftIcon, HashIcon, PanelRightIcon, PauseIcon, PlayIcon, PlusIcon, SearchIcon, ShieldIcon, Trash2Icon, WalletIcon, XIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, CalendarIcon, EyeIcon, EyeOffIcon, FocusIcon, Link2Icon, PanelLeftIcon, HashIcon, PanelRightIcon, PauseIcon, PencilIcon, PlayIcon, PlusIcon, SearchIcon, ShieldIcon, Trash2Icon, WalletIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { RpcStatusBadge } from "@/components/rpc-status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -49,6 +49,7 @@ import { AddressPanel } from "./address-panel";
 import { LookalikeMark } from "./lookalike";
 import { AssetFlows } from "./asset-flows";
 import { CounterpartyList } from "./counterparty-list";
+import { CaseNameInput } from "./case-name-input";
 import { DeleteCaseButton } from "./delete-case-button";
 import { FilterPanel, kindLabel } from "./filter-panel";
 import { HidingSection, type RulesDialogState } from "./hide-rules";
@@ -137,6 +138,8 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   const { state } = ingestion;
   const walletStates = useWalletStates(state.status === "done" ? state.result : null, c.range, rpc?.url, walletRanges(c));
   const [leftOpen, setLeftOpen] = useState(true);
+  /** The case name in the header is being edited. */
+  const [renaming, setRenaming] = useState(false);
   const [rightOpen, setRightOpen] = useState(true);
   const view = route.view;
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
@@ -1097,8 +1100,21 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
         >
           <PanelLeftIcon />
         </Button>
-        <div className="ml-1 flex min-w-0 items-baseline gap-2">
-          <h1 className="truncate text-sm font-medium">{c.name}</h1>
+        <div className="ml-1 flex min-w-0 items-center gap-2">
+          {renaming ? (
+            <CaseNameInput id={c.id} name={c.name} onDone={() => setRenaming(false)} className="h-7 w-64 text-sm" />
+          ) : (
+            <button
+              type="button"
+              className="group/name flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 hover:bg-muted"
+              title="Rename case"
+              onClick={() => setRenaming(true)}
+            >
+              <h1 className="truncate text-sm font-medium">{c.name}</h1>
+              <PencilIcon className="size-3 shrink-0 text-muted-foreground opacity-60 group-hover/name:opacity-100" aria-hidden />
+              <span className="sr-only">Rename case</span>
+            </button>
+          )}
           <span className="hidden truncate text-xs text-muted-foreground md:inline">{formatRange(c.range)}</span>
         </div>
 
@@ -1326,7 +1342,8 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
             {walletState && walletStates && visibleState && (
               <FilterPanel
                 // Every view covers the same visible lanes.
-                rows={shownLanes.flatMap((w) => filterables.get(w) ?? [])}
+                // Hidden transactions are out of every view, so the filters count only what's left.
+                rows={shownLanes.flatMap((w) => filterables.get(w) ?? []).filter((row) => !reasons.get(row.signature))}
                 assets={walletStates.assets}
                 names={names}
                 decimalsOf={(assetId) =>
@@ -1338,6 +1355,10 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
                 shown={shownNow.length}
                 onChange={updateFilter}
                 decoyCount={decoySet.size}
+                hidden={{
+                  count: new Set(shownLanes.flatMap((w) => filterables.get(w) ?? []).filter((row) => reasons.get(row.signature)).map((row) => row.signature)).size,
+                  onShow: () => document.getElementById("hidden-transactions")?.scrollIntoView({ behavior: "smooth", block: "nearest" }),
+                }}
                 // Filtering to the noise, then hiding it, is the everyday way to bulk-hide.
                 hide={{
                   shown: { count: shownNow.length, run: () => hideBatch(shownNow, filter) },
@@ -1346,19 +1367,21 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
               />
             )}
             {walletStates && (
-              <HidingSection
-                c={c}
-                rows={hidingRows}
-                assets={walletStates.assets}
-                names={names}
-                decimalsOf={(assetId) =>
-                  walletStates.assets.get(assetId)?.decimals ?? walletStates.states.find((st) => assetId in st.decimals)?.decimals[assetId] ?? 0
-                }
-                dialog={rulesDialog}
-                onDialog={setRulesDialog}
-                onPickInTable={view === "table" ? undefined : () => routeTo("table", filter.address)}
-                onSave={(next) => void updateCase(next)}
-              />
+              <div id="hidden-transactions">
+                <HidingSection
+                  c={c}
+                  rows={hidingRows}
+                  assets={walletStates.assets}
+                  names={names}
+                  decimalsOf={(assetId) =>
+                    walletStates.assets.get(assetId)?.decimals ?? walletStates.states.find((st) => assetId in st.decimals)?.decimals[assetId] ?? 0
+                  }
+                  dialog={rulesDialog}
+                  onDialog={setRulesDialog}
+                  onPickInTable={view === "table" ? undefined : () => routeTo("table", filter.address)}
+                  onSave={(next) => void updateCase(next)}
+                />
+              </div>
             )}
             {(c.bookmarks ?? []).length > 0 && (
               <PanelSection title={`Bookmarks (${c.bookmarks!.length})`} collapsible>
