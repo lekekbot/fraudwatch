@@ -69,10 +69,20 @@ fixtures/solana/      Recorded mainnet transactions used by the tests
 docs/                 Architecture, terminology, open issues and the sprint plans
 ```
 
+## Roadmap
+
+Where FraudWatch is heading, in [ROADMAP.md](ROADMAP.md). There are no dates; items are ordered by what they build on:
+
+- **Investigation graph:** start from one suspicious wallet or transaction, then add the relevant wallets, services, swaps, bridges and transactions as you investigate. FraudWatch suggests likely continuations, each with its reason and evidence, but you control what stays on the graph.
+- **Ethereum, with bridging to and from Solana:** the same events, relationships and evidence on Ethereum and other EVM chains, with bridge transfers matched across chains in both directions.
+- **Bitcoin, with bridging to the other chains:** Bitcoin modelled as inputs and outputs, with wrapped BTC and native swaps linking it to Solana, Ethereum and the EVM chains.
+- **Deeper protocol coverage, investigation workflow, behaviour observations, labels and scale:** more decoders (Drift, Metaplex Core, more bridges), notes, reports, portable cases and watch mode, adjustable thresholds and cross-wallet patterns, sourced labels, and a demo case.
+
 ## Docs
 
 - [Architecture](docs/ARCHITECTURE.md): the data lifecycle and the semantic model
 - [Terminology](docs/TERMINOLOGY.md)
+- [Roadmap](ROADMAP.md): where the project is heading
 - [Open issues](docs/CHRONOLOGY_OPEN_ISSUES.md): known gaps and the suggested order of work
 - [Contributing](CONTRIBUTING.md)
 - [Sprint plans](docs/sprints/)
