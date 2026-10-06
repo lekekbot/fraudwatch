@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { InfoIcon } from "lucide-react";
+import { InfoIcon, PlusIcon, XIcon } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,7 +28,9 @@ import {
   validateNewCaseInput,
 } from "@/lib/case/model";
 import { type CaseRange, datesFromRange, formatRange, rangeFromDates, sameRange } from "@/lib/case/range";
+import { mapWallet, secondaryWalletProblems } from "@/lib/case/wallet-range";
 import { findDuplicateCases, saveCase } from "@/lib/db/cases";
+import { registry } from "@/lib/protocols/registry";
 import { getDb } from "@/lib/db/db";
 import { getRpcSettings } from "@/lib/db/rpc-settings";
 import { findActivitySpan } from "@/lib/ingest/activity-span";
@@ -58,6 +60,9 @@ export function NewCaseForm() {
   const [{ input: initial, widenedFrom }] = useState(() => initialInput(new URLSearchParams(searchParams.toString())));
   const [input, setInput] = useState<NewCaseInput>(initial);
   const [errors, setErrors] = useState<NewCaseErrors>({});
+  /** Extra wallets to map from the start, one row each; blank rows are ignored. */
+  const [secondary, setSecondary] = useState<string[]>([]);
+  const [secondaryErrors, setSecondaryErrors] = useState<(string | null)[]>([]);
   const [saving, setSaving] = useState(false);
   const [pending, setPending] = useState<Pending | null>(null);
   /** Looking up empty dates from the wallet's history: what's being found, and signatures scanned so far. */
@@ -71,10 +76,20 @@ export function NewCaseForm() {
     setErrors((prev) => ({ ...prev, [key]: undefined }));
   }
 
+  /** A registry program or protocol account can't be a wallet; exchange wallets can. */
+  const isInfrastructure = (address: string) => {
+    const entry = registry.lookup(address);
+    return Boolean(entry && entry.role !== "wallet");
+  };
+
   async function persist(value: Pending["value"]) {
     setSaving(true);
     try {
-      const fwCase = createCase(value);
+      // Secondary wallets load over the case's whole range, like the primary.
+      const fwCase = secondary
+        .map((a) => a.trim())
+        .filter(Boolean)
+        .reduce((c, address) => mapWallet(c, { address, rangeMode: "case" }), createCase(value));
       await saveCase(getDb(), fwCase);
       router.push(buildCasePath(fwCase.id, "timeline"));
     } catch (err) {
@@ -112,10 +127,13 @@ export function NewCaseForm() {
 
   async function submit() {
     const result = validateNewCaseInput(input);
+    const walletProblems = secondaryWalletProblems(secondary, input.primaryWallet, isInfrastructure);
+    setSecondaryErrors(walletProblems);
     if (!result.ok) {
       setErrors(result.errors);
       return;
     }
+    if (walletProblems.some(Boolean)) return;
     const { dates, ...rest } = result.value;
     let activity: WalletActivity | null = null;
     if (!dates.startDate || !dates.endDate) {
@@ -187,6 +205,51 @@ export function NewCaseForm() {
                   className="font-mono"
                 />
                 <FieldError>{errors.primaryWallet}</FieldError>
+              </Field>
+
+              <Field>
+                <FieldLabel>Secondary wallets</FieldLabel>
+                {secondary.map((address, i) => (
+                  <div key={i} className="flex flex-col gap-1">
+                    <div className="flex gap-2">
+                      <Input
+                        aria-label={`Secondary wallet ${i + 1}`}
+                        // A row just added takes focus, so you can paste straight away.
+                        autoFocus={i === secondary.length - 1 && address === ""}
+                        placeholder="Solana address"
+                        value={address}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setSecondary((prev) => prev.map((a, j) => (j === i ? value : a)));
+                          setSecondaryErrors((prev) => prev.map((err, j) => (j === i ? null : err)));
+                        }}
+                        autoComplete="off"
+                        spellCheck={false}
+                        aria-invalid={secondaryErrors[i] ? true : undefined}
+                        className="font-mono"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon-sm"
+                        aria-label={`Remove secondary wallet ${i + 1}`}
+                        title="Remove"
+                        onClick={() => {
+                          setSecondary((prev) => prev.filter((_, j) => j !== i));
+                          setSecondaryErrors((prev) => prev.filter((_, j) => j !== i));
+                        }}
+                      >
+                        <XIcon />
+                      </Button>
+                    </div>
+                    {secondaryErrors[i] && <FieldError>{secondaryErrors[i]}</FieldError>}
+                  </div>
+                ))}
+                <Button type="button" variant="outline" size="sm" className="self-start" onClick={() => setSecondary((prev) => [...prev, ""])}>
+                  <PlusIcon />
+                  Add secondary wallet
+                </Button>
+                <FieldDescription>Optional. Each is mapped from the start and loads its full history over the case range. You can also map wallets later from inside the case.</FieldDescription>
               </Field>
 
               <div className="grid gap-4 sm:grid-cols-2">

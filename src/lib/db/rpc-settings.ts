@@ -20,6 +20,17 @@ export async function saveRpcSettings(
   return settings;
 }
 
+/**
+ * Records how the endpoint behaved in real use (a transaction load), so the
+ * status reflects more than the last manual test. Ignored when the endpoint has
+ * changed since the load started.
+ */
+export async function recordRpcResult(db: FraudWatchDB, url: string, ok: boolean, now = new Date()): Promise<void> {
+  const current = await getRpcSettings(db);
+  if (!current || current.url !== url.trim()) return;
+  await db.rpc_settings.put({ ...current, lastTest: { ok, at: now.toISOString(), source: "load" } });
+}
+
 export async function clearRpcSettings(db: FraudWatchDB): Promise<void> {
   await db.rpc_settings.delete("default");
 }

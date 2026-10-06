@@ -109,8 +109,8 @@ const tabClass =
   "flex-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none data-active:bg-secondary data-active:text-foreground";
 
 /** Left-panel section: choose which transactions appear on the map and in the table. */
-export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter, shown, onChange, hide, decoyCount = 0 }: {
-  /** Every transaction the views could show, one per wallet side. */
+export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter, shown, onChange, hide, decoyCount = 0, hidden }: {
+  /** Every transaction the views could show, one per wallet side: hidden ones are already left out, so counts match the map. */
   rows: FilterableTx[];
   assets: Assets;
   names: Names;
@@ -124,6 +124,8 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
   hide?: { shown: { count: number; run: () => void }; filteredOut: { count: number; run: () => void } };
   /** Likely dust decoys (address-poisoning look-alikes) in the case; offers a filter to leave them out. */
   decoyCount?: number;
+  /** Transactions hidden by hand or by rule, which the filters never see; `onShow` points to where they're managed. */
+  hidden?: { count: number; onShow: () => void };
 }) {
   const categoryCounts = new Map<EventCategory, number>();
   let lowConfidence = 0;
@@ -177,6 +179,14 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
     >
       <p className="text-xs text-muted-foreground" aria-live="polite">
         Showing {shown.toLocaleString()} of {new Set(rows.map((row) => row.signature)).size.toLocaleString()} transactions
+        {hidden && hidden.count > 0 && (
+          <>
+            {" · "}
+            <button type="button" className="underline-offset-4 hover:text-foreground hover:underline" title="Hidden by hand or by rule: they never reach the filters. Manage them below." onClick={hidden.onShow}>
+              {hidden.count.toLocaleString()} hidden
+            </button>
+          </>
+        )}
       </p>
 
       {filter.address && (

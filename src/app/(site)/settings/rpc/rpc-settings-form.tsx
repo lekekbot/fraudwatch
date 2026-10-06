@@ -64,6 +64,7 @@ export function RpcSettingsForm() {
         ? {
             ok: testResult.ok,
             at: new Date().toISOString(),
+            source: "test" as const,
             ...(testResult.ok ? { latencyMs: testResult.latencyMs, solanaCore: testResult.solanaCore ?? undefined } : {}),
           }
         : undefined;

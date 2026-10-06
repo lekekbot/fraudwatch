@@ -95,6 +95,22 @@ export function newWalletProblem(
   return null;
 }
 
+/**
+ * Problems with the secondary wallets typed into a new case, one per row (null
+ * when fine). Blank rows are allowed and ignored; each address is checked like
+ * a mapped wallet, against the primary and the rows above it.
+ */
+export function secondaryWalletProblems(addresses: readonly string[], primaryWallet: string, isInfrastructure: (address: string) => boolean): (string | null)[] {
+  const seen: Pick<FraudWatchCase, "mappedWallets"> = { mappedWallets: [{ address: primaryWallet.trim(), rangeMode: "case" }] };
+  return addresses.map((raw) => {
+    const address = raw.trim();
+    if (!address) return null;
+    const problem = address === primaryWallet.trim() ? "That's the primary wallet." : newWalletProblem(address, seen, isInfrastructure);
+    if (!problem) seen.mappedWallets.push({ address, rangeMode: "case" });
+    return problem;
+  });
+}
+
 /** Pauses or resumes RPC loading for a mapped wallet (never the primary); its cached history stays. */
 export function toggleWalletPaused(c: FraudWatchCase, address: string, now = new Date()): FraudWatchCase {
   if (address === c.primaryWallet) return c;

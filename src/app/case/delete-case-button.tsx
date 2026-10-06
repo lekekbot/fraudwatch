@@ -16,7 +16,8 @@ import {
 import { deleteCase } from "@/lib/db/cases";
 import { describeStorageError, getDb } from "@/lib/db/db";
 
-export function DeleteCaseButton({ id, name }: { id: string; name: string }) {
+/** `compact`: an icon-only button for lists; it stays on the page after deleting instead of going home. */
+export function DeleteCaseButton({ id, name, compact = false }: { id: string; name: string; compact?: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -26,19 +27,27 @@ export function DeleteCaseButton({ id, name }: { id: string; name: string }) {
     try {
       await deleteCase(getDb(), id);
       toast.success("Case deleted.");
-      router.replace("/");
+      if (compact) setOpen(false);
+      else router.replace("/");
     } catch (err) {
       toast.error(describeStorageError(err));
+    } finally {
       setBusy(false);
     }
   }
 
   return (
     <>
-      <Button variant="ghost" size="sm" className="text-destructive" onClick={() => setOpen(true)}>
-        <Trash2Icon />
-        Delete case
-      </Button>
+      {compact ? (
+        <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" aria-label={`Delete ${name}`} title="Delete case" onClick={() => setOpen(true)}>
+          <Trash2Icon />
+        </Button>
+      ) : (
+        <Button variant="ghost" size="sm" className="text-destructive" onClick={() => setOpen(true)}>
+          <Trash2Icon />
+          Delete case
+        </Button>
+      )}
       <Dialog open={open} onOpenChange={(next) => !busy && setOpen(next)}>
         <DialogContent>
           <DialogHeader>

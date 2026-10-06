@@ -5,6 +5,7 @@ import type { FraudWatchCase } from "@/lib/case/model";
 import { walletRanges } from "@/lib/case/wallet-range";
 import { getDb } from "@/lib/db/db";
 import { readCachedIngestion, saveIngestionJob } from "@/lib/db/ingestion-jobs";
+import { recordRpcResult } from "@/lib/db/rpc-settings";
 import { createDbIngestionCache } from "@/lib/db/transaction-cache";
 import { type IngestionProgress, type IngestionResult, ingestWallets } from "@/lib/ingest/ingest";
 import { createIngestionAdapter } from "@/lib/rpc/helius-adapter";
@@ -71,6 +72,8 @@ export function useIngestion(c: FraudWatchCase) {
         db = null;
       }
 
+      // With every wallet paused, nothing asks the RPC, so the load says nothing about it.
+      const usesRpc = config.mappedWallets.some((w) => !w.paused);
       let latest: IngestionProgress | null = null;
       let timer: ReturnType<typeof setTimeout> | null = null;
       const retries = { total: 0, rateLimited: 0 };
@@ -102,10 +105,13 @@ export function useIngestion(c: FraudWatchCase) {
         }
         const finishedAt = new Date();
         if (db) await saveIngestionJob(db, config.id, config.range, result, finishedAt).catch(() => {});
+        if (db && usesRpc) await recordRpcResult(db, rpcUrl, true, finishedAt).catch(() => {});
         if (controller.current === current) {
           setState({ status: "done", result, source: "rpc", lastLoadedAt: finishedAt.toISOString() });
         }
       } catch (err) {
+        // A cancelled load isn't the endpoint's fault.
+        if (db && usesRpc && !current.signal.aborted) await recordRpcResult(db, rpcUrl, false).catch(() => {});
         if (controller.current === current) {
           setState({ status: "error", error: err instanceof Error ? err.message : "Loading failed." });
         }
