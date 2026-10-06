@@ -173,7 +173,7 @@ function outwardText(pos: Point, radius: number, gap = 7): { x: number; y: numbe
  * line to inspect it.
  */
 export function WalletGraph({
-  graph,
+  graph: fullGraph,
   wallet,
   primaryWallet,
   names,
@@ -196,6 +196,7 @@ export function WalletGraph({
   expandedEntities,
   onToggleEntity,
 }: {
+  /** Clusters of collapsed addresses come in as `aggregate` nodes; they're listed in a strip over the map, not drawn on it. */
   graph: Graph;
   /** Case primary. `wallet` may change as investigator focuses another mapped wallet. */
   primaryWallet: string;
@@ -222,6 +223,9 @@ export function WalletGraph({
   expandedEntities: ReadonlySet<string>;
   onToggleEntity: (protocolId: string) => void;
 }) {
+  // Collapsed-address clusters aren't connected to anything: they sit in a strip over the map, readable at any zoom.
+  const graph = useMemo<Graph>(() => ({ ...fullGraph, nodes: fullGraph.nodes.filter((node) => node.kind !== "aggregate") }), [fullGraph]);
+  const clusters = useMemo(() => fullGraph.nodes.filter((node) => node.kind === "aggregate" && node.cluster), [fullGraph]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const zoomRef = useRef<ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
   const transformRef = useRef<ZoomTransform>(zoomIdentity);
@@ -314,26 +318,6 @@ export function WalletGraph({
     const focusing = Boolean(focusEdge || focusNode);
     const tier = (tierRef.current = zoomTier(tierRef.current, t.k));
 
-    const line = 1.25 / t.k;
-    // Hovering a cluster or a mapped wallet ties the cluster by a dashed line to each wallet its addresses dealt with.
-    ctx.globalAlpha = 0.6;
-    ctx.strokeStyle = p.muted;
-    ctx.lineWidth = line;
-    ctx.setLineDash([3 / t.k, 4 / t.k]);
-    for (const n of graph.nodes) {
-      const at = positions.current.get(n.id);
-      if (!n.cluster || !at || (visible && !visible.has(n.id))) continue;
-      for (const id of n.cluster.wallets) {
-        if (hover.node !== n.id && hover.node !== id) continue;
-        const owner = positions.current.get(id);
-        if (!owner) continue;
-        ctx.beginPath();
-        ctx.moveTo(owner.x, owner.y);
-        ctx.lineTo(at.x, at.y);
-        ctx.stroke();
-      }
-    }
-    ctx.setLineDash([]);
     ctx.globalAlpha = 1;
     for (const segment of segments()) {
       const { edge, from, to, control } = segment;
@@ -496,43 +480,21 @@ export function WalletGraph({
       if (!pos) continue;
       const role = layoutRoles.get(n.id) ?? "peripheral";
       const r = nodeRadius(n) + (role === "bridge" ? 3 : 0);
-      const known = n.kind === "aggregate" ? undefined : names.known(n.id);
+      const known = names.known(n.id);
       const label = nodeLabel(n, names);
       const infrastructure = n.kind === "program" || n.kind === "entity" || (n.kind === "counterparty" && stateOf(n.id) === "INFRASTRUCTURE");
       const primaryNode = n.id === primaryWallet;
-      const restingAlpha = role === "core" ? 1 : role === "bridge" ? 0.88 : role === "aggregate" ? 0.58 : 0.66;
+      const restingAlpha = role === "core" ? 1 : role === "bridge" ? 0.88 : 0.66;
       const nodeAlpha = litNodes.size > 0 && !litNodes.has(n.id) ? (role === "core" ? 0.55 : 0.15) : restingAlpha;
       // An opaque backing in the page colour keeps connections
       // from showing through a translucent node body — they read as a line across the node
       // once you zoom in.
       ctx.globalAlpha = 1;
       ctx.beginPath();
-      if (n.kind === "aggregate") ctx.roundRect(pos.x - 58, pos.y - 21, 116, 42, 7);
-      else if (infrastructure) ctx.roundRect(pos.x - r, pos.y - r, r * 2, r * 2, 4);
+      if (infrastructure) ctx.roundRect(pos.x - r, pos.y - r, r * 2, r * 2, 4);
       else ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
       ctx.fillStyle = p.bg;
       ctx.fill();
-      if (n.kind === "aggregate") {
-        ctx.globalAlpha = nodeAlpha;
-        ctx.fillStyle = p.card;
-        ctx.fill();
-        ctx.lineWidth = n.id === nodeFocus ? 2.5 : 1.5;
-        // Likely decoys keep their warning colour even collapsed.
-        const decoys = n.cluster?.kind === "decoy";
-        ctx.strokeStyle = n.id === nodeFocus ? p.fg : decoys ? p.send : p.muted;
-        ctx.setLineDash([4, 3]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.font = "600 10px ui-sans-serif, system-ui, sans-serif";
-        ctx.textAlign = "left";
-        ctx.textBaseline = "middle";
-        ctx.fillStyle = decoys ? p.send : p.fg;
-        ctx.fillText(n.cluster ? CLUSTER_LABELS[n.cluster.kind] : "", pos.x - 50, pos.y - 6, 100);
-        ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
-        ctx.fillStyle = p.muted;
-        ctx.fillText(`${n.cluster?.addresses.toLocaleString()} addresses · ${n.txCount.toLocaleString()} tx`, pos.x - 50, pos.y + 8, 100);
-        continue;
-      }
       ctx.globalAlpha = nodeAlpha;
       if (primaryNode) {
         ctx.globalAlpha = nodeAlpha * 0.14;
@@ -684,7 +646,7 @@ export function WalletGraph({
         const pos = positions.current.get(n.id);
         if (!pos) continue;
         const radius = nodeRadius(n) + (layoutRoles.get(n.id) === "bridge" ? 3 : 0);
-        if (n.kind === "aggregate" ? Math.abs(pos.x - w.x) <= 62 && Math.abs(pos.y - w.y) <= 25 : Math.hypot(pos.x - w.x, pos.y - w.y) <= radius + 4) return { node: n.id };
+        if (Math.hypot(pos.x - w.x, pos.y - w.y) <= radius + 4) return { node: n.id };
       }
       let best: { id: string; d: number } | null = null;
       for (const sgm of segments()) {
@@ -789,7 +751,7 @@ export function WalletGraph({
         onPointerDown={(event) => {
           setHoverCard(null);
           const hit = hitAt(event);
-          if (!hit.node || latest.current.nodesById.get(hit.node)?.kind === "aggregate") return;
+          if (!hit.node) return;
           dragRef.current = { id: hit.node, x: event.clientX, y: event.clientY, moved: false };
           event.currentTarget.setPointerCapture(event.pointerId);
         }}
@@ -822,20 +784,8 @@ export function WalletGraph({
             : node && node.id !== latest.current.wallet
               ? (latest.current.relationshipsByNode.get(node.id) ?? latest.current.graph.edges.find((item) => item.a === node.id || item.b === node.id))
               : undefined;
-          event.currentTarget.style.cursor = node?.kind === "aggregate" ? "pointer" : hit.node ? "grab" : hit.edge ? "pointer" : "";
-          if (node?.cluster) {
-            const { kind, addresses, wallets } = node.cluster;
-            place({
-              title: CLUSTER_LABELS[kind],
-              kicker: "Collapsed addresses",
-              lines: [
-                `${addresses.toLocaleString()} addresses · ${node.txCount.toLocaleString()} transactions`,
-                `With ${wallets.map((id) => latest.current.names.of(id)).join(", ")}`,
-                ...(kind === "decoy" ? ["Look-alikes that only moved dust: likely address poisoning."] : []),
-              ],
-              hint: "Click to show these addresses",
-            });
-          } else if (node) {
+          event.currentTarget.style.cursor = hit.node ? "grab" : hit.edge ? "pointer" : "";
+          if (node) {
             const facts = nodeFacts(node.id, latest.current.graph);
             const shared = node.kind !== "wallet" && facts.connected.length >= 2;
             place({
@@ -929,11 +879,6 @@ export function WalletGraph({
           }
           const hit = hitAt(event);
           if (hit.node) {
-            const cluster = nodesById.get(hit.node)?.cluster;
-            if (cluster) {
-              setHoverCard(null);
-              return onToggleCluster(cluster.kind);
-            }
             const relationship = relationshipsByNode.get(hit.node);
             // The burn node isn't an address: it opens its burns, not an address panel.
             onSelectNode(hit.node === wallet || hit.node === BURNED_NODE_ID ? null : hit.node);
@@ -1142,6 +1087,37 @@ export function WalletGraph({
           )}
         </div>
       </div>
+
+      {clusters.length > 0 && (
+        // Addresses the ranking left off the map, by group: always on screen, whatever the zoom.
+        <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center px-3">
+          <div className="pointer-events-auto flex max-w-full flex-wrap items-center gap-1.5 rounded-lg border bg-popover/95 p-1.5 shadow-lg backdrop-blur" role="group" aria-label="Addresses not drawn on the map">
+            <span className="px-1 text-xs text-muted-foreground">Not on the map</span>
+            {clusters.map((node) => {
+              const { kind, addresses, wallets } = node.cluster!;
+              const decoys = kind === "decoy";
+              return (
+                <Button
+                  key={node.id}
+                  variant="outline"
+                  size="sm"
+                  className={decoys ? "border-destructive/60 text-destructive hover:text-destructive" : undefined}
+                  title={[
+                    `${addresses.toLocaleString()} addresses · ${node.txCount.toLocaleString()} transactions`,
+                    `With ${wallets.map((id) => names.of(id)).join(", ")}`,
+                    ...(decoys ? ["Look-alikes that only moved dust: likely address poisoning."] : []),
+                    "Click to draw these addresses on the map",
+                  ].join("\n")}
+                  onClick={() => onToggleCluster(kind)}
+                >
+                  {CLUSTER_LABELS[kind]}
+                  <span className="tabular-nums text-muted-foreground">{addresses.toLocaleString()}</span>
+                </Button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="pointer-events-auto absolute bottom-3 left-3 flex flex-col gap-1 rounded-lg border bg-popover/90 px-2.5 py-2 text-[11px] text-muted-foreground backdrop-blur">
         <div className="flex items-center gap-2">
