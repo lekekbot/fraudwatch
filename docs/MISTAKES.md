@@ -28,3 +28,8 @@ Rule: For save-on-Enter fields, handle Enter on the field itself (e.g. blur to t
 What happened: Ran `npx prettier --write` on `wallet-state-view.tsx` and later `filter-panel.tsx` to tidy an edit. The repo has no Prettier config and its files use long lines, so Prettier reformatted the entire file (+381/−122), burying the real change and mixing it with another session's uncommitted work.
 Why: Assumed a formatter was part of the workflow without checking for a config.
 Rule: Don't run a formatter unless the repo configures one (`.prettierrc`, a `format` script, or a lint rule). Match the surrounding style by hand. If a file does get reformatted, rebuild it from `HEAD` plus the known content changes, and confirm with a formatted-vs-formatted diff before overwriting.
+
+### 2026-10-06 — Rewrote a hand-formatted JSON file through a serializer
+What happened: To drop one section from `protocols/sources/tribixbite-solana-programs.json`, loaded it and wrote it back with `json.dump`. The file's irregular hand formatting (trailing spaces, `" : "`, blank lines) was normalised, turning a 26-line removal into a 1,700-line diff. Caught before committing and redone as a text edit.
+Why: Treated "valid JSON in, valid JSON out" as equivalent, ignoring that the diff is part of the change.
+Rule: Edit committed data files textually (remove or insert only the lines that change), then parse the result to confirm it's still valid. Check `git diff --stat` matches the size of the intended change before moving on.

@@ -1,7 +1,7 @@
 # Protocol registry sources
 
 Raw third-party inputs for the Sprint 06 protocol registry (`protocols/solana.json`).
-Files here are **unmodified snapshots**. Convert them into the versioned registry schema; never load them into the app directly.
+Files here are snapshots, unmodified except where noted below. Convert them into the versioned registry schema; never load them into the app directly.
 
 ## tribixbite-solana-programs.json
 
@@ -11,7 +11,7 @@ Files here are **unmodified snapshots**. Convert them into the versioned registr
 - Shape: `{ "<section>": { "<address>": "<display name>" } }`
   - `program` (263): program IDs → names
   - `address` (1,169): non-program addresses (vaults, authorities, exchange wallets, …) → names
-  - `hacker` (24): addresses the gist author attributes to exploits
+  - `hacker` (24): addresses the gist author attributes to exploits. **Removed from this snapshot** (2026-10-06): third-party accusations aren't something FraudWatch redistributes, and the importer never used them.
   - `trust_token` (3)
 - May be outdated; the maintainer does not guarantee it. Every entry needs verifying before it counts as fact.
 
@@ -50,3 +50,7 @@ Exchange labels describe known service wallets, not every deposit address. Phant
 ## Community labels
 
 `protocols/community-labels.json` is generated from the tribixbite snapshot by `node scripts/import-community-labels.ts`. It holds display names only (address → name) for the `program` and `address` sections, minus every address already in the verified registry; `hacker` attributions are left out. The app shows these names attributed as "community list, unverified" and never uses them to decide what protocol a transaction used. Verify an entry and move it into `solana.json` to make it count.
+
+## Licensing
+
+The gist states no licence. FraudWatch redistributes the `program` and `address` names (as `protocols/community-labels.json`, shown as unverified and attributed) on the understanding that they are factual address–name pairs collected from public sources. Before relying on that for a public release, confirm with the gist's author, or ship only `scripts/import-community-labels.ts` and have users fetch the snapshot themselves.

@@ -212,6 +212,11 @@ These protocols are in the registry (so they're named and attributed), but nothi
 - **Today:** `EXCHANGE_DEPOSIT` only fires for registry entries in category `exchange`. Deposit addresses (per-user, swept to hot wallets) are almost never in the registry. Most real exchange deposits are therefore invisible: only direct transfers to listed hot wallets count. This is correct by the sprint's rule (no inference from community labels), but recall is low.
 - **Next step:** detect deposit addresses by structure. An address that receives from the case, then sweeps everything to a verified exchange hot wallet within a short window, can be labelled as a likely deposit address, kept separate from verified attribution.
 
+### 5.4 Community label data has no stated licence — Medium (blocks a public release)
+- **Origin:** open-source prep.
+- **Today:** `protocols/community-labels.json` is built from a snapshot of the tribixbite solana-programs gist, which states no licence. Its third-party "hacker" attributions were removed from the snapshot (they were never imported).
+- **Next step:** confirm with the gist's author that redistributing the address–name pairs is fine. If not, remove the snapshot and the generated labels, and ship only `scripts/import-community-labels.ts` for users to run themselves.
+
 ### 5.3 Two Magic Eden addresses were added from public labels plus observation — Low
 - **Origin:** C3.
 - **Today:** `rFqFJ9g7TGBD8Ed7TPDnvGKZ5pWLPDyxLcvcH2eRCtt` (treasury, `fee_account`) and `1BWutmTvYPwDtmw9abTkS4Ssr8no61spGAvW1X6NDix` (v2 escrow authority, `authority`) were added because Solscan labels them and the captured sale behaves that way. They're treated as verified registry entries.
@@ -377,16 +382,10 @@ These protocols are in the registry (so they're named and attributed), but nothi
 - **Today:** 121 tests (after C8) cover the semantic model, interpreters, NFT and DeFi readings, timeline cards, behaviour detectors, graph building, event explanations, cache invalidation, a pinned regression table over every recorded fixture, and performance at the target scales. The pre-existing modules (reconstruction, ingestion, IndexedDB caches, hiding rules, layout, search, labels) have no tests since the suite was removed. `summarize.ts`'s per-wallet NFT reading is covered only indirectly, plus one "unchanged behaviour" test.
 - **Next step:** decide whether to restore the old suite (it's recoverable from `665e55c^`), or add tests per module as each is touched.
 
-### 11.2 Fixture capture isn't reproducible from the repo — Medium
+### 11.2 Fixture capture isn't reproducible from the repo — Resolved (script committed)
 - **Origin:** C3/C4.
-- **Today:** fixtures were captured with throwaway Python scripts in `/tmp` against the public mainnet RPC, picking transactions by Anchor instruction names in the logs. The public RPC rate-limits hard:
-  - 254 HTTP 429s in one scan;
-  - 25 of 81 Jupiter fetches failed, 15 of 456 Kamino and 1 of 150 Marinade.
-
-  Failed fetches were skipped silently, so scans may have missed matches. Two Magic Eden sales came from a web search.
-
-  The old capture scripts (`scripts/fixtures/*`) were deleted with the test suite. A hook suggested `scripts/fixtures/generate-synthetic.ts`, but it isn't in the working tree.
-- **Next step:** commit one small capture script that takes a program, instruction names, an RPC URL and a count, logs every failed fetch, and records signature plus capture date in each fixture. Run it against a non-rate-limited RPC (e.g. your Helius key) to fill the gaps below.
+- **Now:** `scripts/capture-fixture.ts` records transactions by signature, or by searching a program's recent transactions for Anchor instruction names. It retries with backoff, logs every failed fetch, and reports what's missing. The early fixtures were captured with throwaway scripts against the rate-limited public RPC, so some searches may have missed matches.
+- **Still open:** fill the gaps in 11.3 by running it against a non-rate-limited RPC.
 
 ### 11.3 Fixture gaps — Medium
 No real fixture yet for:
