@@ -132,7 +132,7 @@ export function TransactionDetails({
             title={bookmarked ? "Remove bookmark" : "Bookmark transaction"}
             onClick={onToggleBookmark}
           >
-            <StarIcon className={bookmarked ? "fill-current text-[oklch(0.8_0.15_80)]" : undefined} />
+            <StarIcon className={bookmarked ? "fill-current text-tone-approval" : undefined} />
           </Button>
           {onShowInGraph && (
             <Button variant="ghost" size="icon-sm" aria-label="Show in graph" title="Show the wallets in this event on the Graph" onClick={onShowInGraph}>

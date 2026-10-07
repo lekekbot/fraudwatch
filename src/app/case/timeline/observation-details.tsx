@@ -116,7 +116,7 @@ export function ObservationDetails({
   return (
     <section className="flex min-w-0 flex-col gap-4 p-3" aria-label="Behaviour observation">
       <div className="flex items-center justify-between gap-2">
-        <Badge className="bg-[oklch(0.83_0.16_92)] text-black">◆ {BEHAVIOR_LABEL[o.type]}</Badge>
+        <Badge className="bg-tone-behavior text-black">◆ {BEHAVIOR_LABEL[o.type]}</Badge>
         <Button variant="ghost" size="icon-sm" aria-label="Close observation" onClick={onClose}>
           <XIcon />
         </Button>
