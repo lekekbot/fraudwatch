@@ -33,7 +33,6 @@ export function EntityPanel({
   return (
     <PanelSection
       title="Service"
-      collapsible
       action={
         <Button variant="ghost" size="icon-xs" aria-label="Close" onClick={onClose}>
           <XIcon />

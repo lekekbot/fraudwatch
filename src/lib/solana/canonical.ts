@@ -70,8 +70,6 @@ export type CanonicalInstruction = {
   stackHeight: number | null;
 };
 
-export class CanonicalizeError extends Error {}
-
 function delta(pre: bigint, post: bigint): string {
   return (post - pre).toString();
 }
@@ -122,9 +120,9 @@ function tokenChanges(
 
 export function canonicalize(raw: RawParsedTransaction): CanonicalTransaction {
   const signature = raw.transaction?.signatures?.[0];
-  if (!signature) throw new CanonicalizeError("Transaction has no signature.");
+  if (!signature) throw new Error("Transaction has no signature.");
   const meta = raw.meta;
-  if (!meta) throw new CanonicalizeError(`Transaction ${signature} has no status metadata.`);
+  if (!meta) throw new Error(`Transaction ${signature} has no status metadata.`);
 
   const accounts: CanonicalAccount[] = raw.transaction.message.accountKeys.map((k) => ({
     address: k.pubkey,

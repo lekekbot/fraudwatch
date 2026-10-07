@@ -1,8 +1,7 @@
 /**
- * Bump when the event shape or the pipeline changes; each interpreter also
- * carries its own version. Events are computed on read from canonical
- * transactions and never stored, so nothing stale can be reused yet; a store
- * for them must check both (see `DERIVED_CACHES`).
+ * Bump when the event shape, the pipeline or any interpreter changes. Events
+ * are computed on read from canonical transactions and never stored, so nothing
+ * stale can be reused yet; a store for them must check it (see `DERIVED_CACHES`).
  */
 export const SEMANTIC_VERSION = 5;
 
@@ -165,9 +164,9 @@ export type SemanticEvent = {
   confidence: EventConfidence;
   evidence: EvidenceRef[];
   /** The interpreter whose reading this is. */
-  interpreter: { id: string; version: number };
+  interpreter: { id: string };
   /** Every interpreter tried, in priority order, up to the one that matched: for debugging a reading. */
-  trace: { id: string; version: number; outcome: "matched" | "no_match" | "failed" }[];
+  trace: { id: string; outcome: "matched" | "no_match" | "failed" }[];
   /** Interpreters that failed, flows balances couldn't pair, and similar caveats. */
   warnings: string[];
   /** Set for NFT_TRADE, NFT_TRANSFER and NFT_MINT events read by the NFT parser. */

@@ -29,12 +29,12 @@ import {
 } from "@/lib/case/model";
 import { type CaseRange, datesFromRange, formatRange, rangeFromDates, sameRange } from "@/lib/case/range";
 import { mapWallet, secondaryWalletProblems } from "@/lib/case/wallet-range";
-import { findDuplicateCases, saveCase } from "@/lib/db/cases";
+import { findDuplicateCases } from "@/lib/db/cases";
 import { registry } from "@/lib/protocols/registry";
 import { getDb } from "@/lib/db/db";
 import { getRpcSettings } from "@/lib/db/rpc-settings";
 import { findActivitySpan } from "@/lib/ingest/activity-span";
-import { createGenericAdapter } from "@/lib/rpc/generic-adapter";
+import { createRpcAdapter } from "@/lib/rpc/generic-adapter";
 import { parseMapParams } from "@/lib/routing/map-params";
 import { buildCasePath } from "@/lib/routing/case-path";
 
@@ -90,7 +90,7 @@ export function NewCaseForm() {
         .map((a) => a.trim())
         .filter(Boolean)
         .reduce((c, address) => mapWallet(c, { address, rangeMode: "case" }), createCase(value));
-      await saveCase(getDb(), fwCase);
+      await getDb().cases.put(fwCase);
       router.push(buildCasePath(fwCase.id, "timeline"));
     } catch (err) {
       setSaving(false);
@@ -111,7 +111,7 @@ export function NewCaseForm() {
     const what = needFirst ? "the wallet's first transaction" : "the wallet's latest transaction";
     setLookup({ what, scanned: 0 });
     try {
-      return await findActivitySpan(createGenericAdapter(rpc.url), wallet, {
+      return await findActivitySpan(createRpcAdapter(rpc.url), wallet, {
         needFirst,
         signal: controller.signal,
         onProgress: (scanned) => setLookup({ what, scanned }),

@@ -53,7 +53,7 @@ export function WalletTimeline({
   lanes,
   transactions,
   events: semanticEvents,
-  observations = [],
+  observations,
   range,
   assets,
   names,
@@ -82,7 +82,7 @@ export function WalletTimeline({
   /** The semantic event of every loaded transaction, interpreted once by the workspace. */
   events: ReadonlyMap<string, SemanticEvent>;
   /** Behaviour patterns across each mapped wallet's events, detected once by the workspace. */
-  observations?: readonly BehaviorObservation[];
+  observations: readonly BehaviorObservation[];
   /** The case range: the x axis. */
   range: { start: string; end: string };
   assets: Assets;
@@ -112,9 +112,9 @@ export function WalletTimeline({
   /** A transaction was selected; the inspector should show it over any open address. */
   onSelectTransaction: () => void;
   /** Show the wallets in one event on the Graph. */
-  onShowInGraph?: (signature: string) => void;
+  onShowInGraph: (signature: string) => void;
   /** A minimap brush becomes the case's date filter, for every view; resetting the view clears it. */
-  onDateRangeChange?: (range: { start: number; end: number } | null) => void;
+  onDateRangeChange: (range: { start: number; end: number } | null) => void;
   /** What the minimap draws: activity through every filter but the date range, so it still shows the whole case. */
   overviewTimes?: readonly number[];
 }) {
@@ -206,16 +206,13 @@ export function WalletTimeline({
     return [...counts].sort((a, b) => b[1] - a[1]).map(([label, n]) => `${n} ${label.toLowerCase()}`).join(" · ");
   }, [laneObservations]);
 
-  const selectedIndex = selection ? items.findIndex((i) => i.signature === selection.signature) : -1;
-  const selectedLane =
-    selectedIndex === -1
-      ? -1
-      : (() => {
-          const entries = items[selectedIndex].entries;
-          const onWallet = entries.find((e) => lanes[e.lane].wallet === selection?.wallet);
-          return (onWallet ?? entries[0]).lane;
-        })();
-  const selected: TimelineSelection | null = selectedIndex === -1 ? null : { index: selectedIndex, lane: selectedLane };
+  /** A transaction's index in `items` (-1 if it isn't shown), and its lane on `wallet` if it's on one. */
+  const at = (signature: string, wallet?: string | null) => {
+    const index = items.findIndex((i) => i.signature === signature);
+    return { index, lane: items[index]?.entries.find((e) => lanes[e.lane].wallet === wallet)?.lane };
+  };
+  const { index: selectedIndex, lane: selectedLane } = selection ? at(selection.signature, selection.wallet) : { index: -1, lane: undefined };
+  const selected: TimelineSelection | null = selectedIndex === -1 ? null : { index: selectedIndex, lane: selectedLane ?? items[selectedIndex].entries[0].lane };
   const setSelected = (index: number | null, lane?: number) => {
     setObservationId(null);
     if (index === null || !items[index]) return setSelection(null);
@@ -260,12 +257,16 @@ export function WalletTimeline({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const step = (direction: 1 | -1) => select(stepEvent(items.length, selected?.index ?? null, direction));
+  /** Centre the view on a moment, keeping the span shown. */
+  const centreOn = (time: number) => {
+    const span = view ? view.end - view.start : bounds.end - bounds.start;
+    timeline.current?.showTimeRange(time - span / 2, time + span / 2, false);
+  };
 
   useImperativeHandle(ref, () => ({
     jumpTo: (signature, wallet) => {
-      const index = items.findIndex((i) => i.signature === signature);
+      const { index, lane } = at(signature, wallet);
       if (index === -1) return false;
-      const lane = items[index].entries.find((e) => lanes[e.lane].wallet === wallet)?.lane;
       select(index, lane);
       return true;
     },
@@ -273,10 +274,7 @@ export function WalletTimeline({
       setSelection(null);
       setObservationId(null);
     },
-    showTime: (time) => {
-      const span = view ? view.end - view.start : bounds.end - bounds.start;
-      timeline.current?.showTimeRange(time - span / 2, time + span / 2, false);
-    },
+    showTime: centreOn,
   }));
 
   const currentLane = selected ? lanes[selected.lane] : null;
@@ -299,9 +297,8 @@ export function WalletTimeline({
           names={names}
           onSelectAddress={onSelectAddress}
           onSelectEvent={(signature) => {
-            const index = items.findIndex((i) => i.signature === signature);
-            if (index === -1) return;
-            select(index, items[index].entries.find((e) => lanes[e.lane].wallet === openObservation.wallet)?.lane);
+            const { index, lane } = at(signature, openObservation.wallet);
+            if (index !== -1) select(index, lane);
           }}
           onClose={() => setObservationId(null)}
           together={observations.filter((o) => together.includes(o.id) && o.id !== openObservation.id)}
@@ -332,7 +329,7 @@ export function WalletTimeline({
           walletName={lanes.length > 1 ? currentLane.label : undefined}
           bookmarked={isBookmarked(current.signature)}
           onToggleBookmark={() => onToggleBookmark(current.signature, currentLane.wallet)}
-          onShowInGraph={onShowInGraph && (() => onShowInGraph(current.signature))}
+          onShowInGraph={() => onShowInGraph(current.signature)}
           observations={observations.filter((o) => o.events.some((e) => e.signature === current.signature))}
         />
       ) : (
@@ -376,9 +373,8 @@ export function WalletTimeline({
                 range={bounds}
                 names={names}
                 onPick={(signature, wallet) => {
-                  const index = items.findIndex((i) => i.signature === signature);
-                  if (index === -1) return;
-                  setSelected(index, items[index].entries.find((e) => lanes[e.lane].wallet === wallet)?.lane);
+                  const { index, lane } = at(signature, wallet);
+                  if (index !== -1) setSelected(index, lane);
                 }}
               />
             </div>
@@ -472,7 +468,7 @@ export function WalletTimeline({
                 onClick={() => {
                   setSelected(null);
                   setMode("time");
-                  onDateRangeChange?.(null);
+                  onDateRangeChange(null);
                   timeline.current?.fit();
                 }}
               >
@@ -536,12 +532,9 @@ export function WalletTimeline({
               const target = minimapTarget(time, view, bounds);
               timeline.current?.showTimeRange(target.start, target.end, false);
             }}
-            onPan={(time) => {
-              const span = view ? view.end - view.start : bounds.end - bounds.start;
-              timeline.current?.showTimeRange(time - span / 2, time + span / 2, false);
-            }}
+            onPan={centreOn}
             onSelectRange={(start, end) => {
-              onDateRangeChange?.({ start, end });
+              onDateRangeChange({ start, end });
               timeline.current?.showTimeRange(start, end, false);
             }}
           />

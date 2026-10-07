@@ -131,6 +131,15 @@ export function getDb(): FraudWatchDB {
   return instance;
 }
 
+/** `getDb()`, or null where IndexedDB isn't available. */
+export function tryGetDb(): FraudWatchDB | null {
+  try {
+    return getDb();
+  } catch {
+    return null;
+  }
+}
+
 /** Forget the shared connection, e.g. after the database was deleted. */
 export function resetDbInstance(): void {
   instance?.close();

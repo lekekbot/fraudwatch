@@ -80,7 +80,3 @@ export async function getAssetMetadata(
   });
   return { known, toFetch };
 }
-
-export async function saveAssetMetadata(db: FraudWatchDB, metadata: AssetMetadata[]): Promise<void> {
-  await db.token_metadata.bulkPut(metadata);
-}

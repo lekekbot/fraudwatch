@@ -3,8 +3,6 @@ import type { EvidenceRef, FlowRole, Infrastructure, NftDetail, SemanticFlow } f
 import { netByAddress, netOf, withSettlement } from "./flows";
 import type { Interpretation, TransactionContext } from "./interpret";
 
-const ZERO = BigInt(0);
-
 function categoryAndAction(summary: EffectSummary) {
   switch (summary.kind) {
     case "NFT_BUY":
@@ -51,13 +49,13 @@ export function readNft(ctx: TransactionContext): Omit<Interpretation, "confiden
   const payee = payment ? (paid ? n.party : wallet) : null;
   if (payment && payee) {
     const received = netOf(net, payment.assetId, payee);
-    if (received > ZERO) flow(payment.assetId, received, payer, payee, "payment");
+    if (received > 0n) flow(payment.assetId, received, payer, payee, "payment");
   }
   if (payment) for (const o of n.others) flow(payment.assetId, o.amount, payer, o.address, o.role);
   // An accepted bid is paid from the bidder's escrow, which the parser sees as the other party;
   // the NFT itself goes to the bidder.
   const nftRecipient =
-    ctx.tx.tokenChanges.find((t) => n.sent.includes(t.mint) && BigInt(t.delta) > ZERO && t.owner && t.owner !== wallet)?.owner ??
+    ctx.tx.tokenChanges.find((t) => n.sent.includes(t.mint) && BigInt(t.delta) > 0n && t.owner && t.owner !== wallet)?.owner ??
     ctx.cnftMoves.find((m) => n.sent.includes(m.assetId) && m.to !== wallet)?.to ??
     null;
   const bidEscrow = kind === "NFT_SELL" && nftRecipient && n.party && nftRecipient !== n.party ? n.party : null;
@@ -75,17 +73,17 @@ export function readNft(ctx: TransactionContext): Omit<Interpretation, "confiden
   // An NFT leaving an account that belongs to neither side sat in escrow (a marketplace listing).
   const sides = new Set([wallet, buyer, seller, bidEscrow ? null : n.party].filter((a) => a !== null));
   const escrows = new Set(bidEscrow ? [bidEscrow] : []);
-  for (const owner of ctx.tx.tokenChanges.filter((t) => assets.includes(t.mint) && BigInt(t.delta) < ZERO && t.owner && !sides.has(t.owner)).map((t) => t.owner!)) escrows.add(owner);
+  for (const owner of ctx.tx.tokenChanges.filter((t) => assets.includes(t.mint) && BigInt(t.delta) < 0n && t.owner && !sides.has(t.owner)).map((t) => t.owner!)) escrows.add(owner);
   const infrastructure: Infrastructure[] = [...escrows].map((address) => ({ address, role: "ESCROW", label: null }));
 
   // The bidder's escrow paid on the bidder's behalf.
   const spender = bidEscrow ?? buyer;
-  const spent = spender && payment ? -netOf(net, payment.assetId, spender) : ZERO;
+  const spent = spender && payment ? -netOf(net, payment.assetId, spender) : 0n;
   const nft: NftDetail = {
     assets,
     buyer,
     seller,
-    price: payment && spent > ZERO ? { assetId: payment.assetId, amount: spent.toString() } : null,
+    price: payment && spent > 0n ? { assetId: payment.assetId, amount: spent.toString() } : null,
     bundle: n.received.length > 1 || n.sent.length > 1,
     compressed: assets.some((id) => !balanceAssets.has(id)),
   };

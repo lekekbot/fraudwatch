@@ -3,6 +3,7 @@
 import { ArrowDownLeftIcon, ArrowUpRightIcon, ChartNoAxesGanttIcon, ExternalLinkIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { cn } from "cn";
 import type { BehaviorObservation } from "@/lib/behavior/observations";
 import { BURNED_NODE_ID, entityProtocol, startedBy, type GraphEdge } from "@/lib/graph/build";
 import type { Names } from "@/lib/labels/labels";
@@ -12,7 +13,17 @@ import { AssetFlows } from "../asset-flows";
 import { PanelSection } from "../panel";
 import { categoryLabel, kindLabel } from "../filter-panel";
 import { eventLabel } from "../timeline/event-card";
+import { AddressButton } from "../timeline/inspector-ui";
 import { BEHAVIOR_LABEL, observationSummary } from "../timeline/observation-details";
+
+/** Red up-right for value the focused wallet sent, green down-left for what it received. */
+function FlowArrow({ outgoing }: { outgoing: boolean }) {
+  return outgoing ? (
+    <ArrowUpRightIcon className="size-3.5 shrink-0 text-destructive" aria-label="sent" />
+  ) : (
+    <ArrowDownLeftIcon className="size-3.5 shrink-0 text-emerald-500" aria-label="received" />
+  );
+}
 
 const NFT_RELATED_LABEL = {
   royalty: "Royalty",
@@ -33,7 +44,7 @@ export function EdgePanel({
   assets,
   formatAmount,
   events,
-  observations = [],
+  observations,
   onSelectAddress,
   onShowOnTimeline,
   onViewAll,
@@ -49,7 +60,7 @@ export function EdgePanel({
   /** Semantic events by signature: what each transaction on the line was. */
   events: ReadonlyMap<string, SemanticEvent>;
   /** Behaviour observations this pair took part in. */
-  observations?: readonly BehaviorObservation[];
+  observations: readonly BehaviorObservation[];
   onSelectAddress: (address: string) => void;
   onShowOnTimeline: (signature: string, wallet: string) => void;
   onViewAll: (counterparty: string) => void;
@@ -57,18 +68,12 @@ export function EdgePanel({
   onOpenInTimeline: () => void;
   onClose: () => void;
 }) {
-  const name = (address: string) =>
+  // The burn node has nothing to inspect.
+  const name = (address: string, className?: string) =>
     address === BURNED_NODE_ID ? (
       <span className="min-w-0 truncate">Burned</span>
     ) : (
-      <button
-        type="button"
-        title={address}
-        onClick={() => onSelectAddress(address)}
-        className={`min-w-0 truncate text-left underline-offset-4 hover:underline ${names.known(address) ? "" : "font-mono"}`}
-      >
-        {names.of(address)}
-      </button>
+      <AddressButton address={address} names={names} onSelect={onSelectAddress} className={cn("min-w-0", className)} />
     );
   const program = edge.kind === "program";
   const summary = edge.summary;
@@ -87,7 +92,6 @@ export function EdgePanel({
     <>
       <PanelSection
         title={program ? "Program connection" : "Wallet interaction"}
-        collapsible
         action={
           <Button variant="ghost" size="icon-xs" aria-label="Close" onClick={onClose}>
             <XIcon />
@@ -95,11 +99,11 @@ export function EdgePanel({
         }
       >
         <div className="flex min-w-0 items-center gap-1.5 text-sm">
-          {name(from)}
+          {name(from, "text-sm")}
           <span className="shrink-0 text-muted-foreground" aria-label={oneWay ? "sent to" : "interacted with"}>
             {oneWay ? "→" : "↔"}
           </span>
-          {name(to)}
+          {name(to, "text-sm")}
         </div>
         {program && (
           <p className="text-xs leading-relaxed text-muted-foreground">
@@ -109,7 +113,7 @@ export function EdgePanel({
       </PanelSection>
 
       {!program && (
-        <PanelSection title="Relationship" collapsible>
+        <PanelSection title="Relationship">
           <div className="grid grid-cols-2 gap-2 text-xs">
             <div className="rounded-md border bg-destructive/5 p-2">
               <span className="flex items-center gap-1 text-destructive"><ArrowUpRightIcon className="size-3.5" /> Sent</span>
@@ -138,7 +142,7 @@ export function EdgePanel({
       )}
 
       {!program && summary.eventCategories.length > 0 && (
-        <PanelSection title="What the events were" collapsible>
+        <PanelSection title="What the events were">
           <ul className="flex flex-col gap-0.5 text-xs">
             {summary.eventCategories.map((c) => (
               <li key={c.category} className="flex justify-between gap-2">
@@ -151,12 +155,12 @@ export function EdgePanel({
       )}
 
       {observations.length > 0 && (
-        <PanelSection title="Behaviour seen" collapsible>
+        <PanelSection title="Behaviour seen">
           <ul className="flex flex-col gap-1">
             {observations.slice(0, 8).map((o) => (
               <li key={o.id} className="flex items-start justify-between gap-2 text-xs">
                 <span className="min-w-0">
-                  <span className="font-medium text-[oklch(0.83_0.16_92)]">◆ {BEHAVIOR_LABEL[o.type]}</span>{" "}
+                  <span className="font-medium text-tone-behavior">◆ {BEHAVIOR_LABEL[o.type]}</span>{" "}
                   <span className="text-muted-foreground">{observationSummary(o, formatAmount, assets, names)}</span>
                 </span>
                 <Button
@@ -189,10 +193,7 @@ export function EdgePanel({
         />
       )}
 
-      <PanelSection
-        title={edge.interactions.length > representatives.length ? "Representative transactions" : "Transactions"}
-        collapsible
-      >
+      <PanelSection title={edge.interactions.length > representatives.length ? "Representative transactions" : "Transactions"}>
         <ol className="-mx-1 flex flex-col">
           {representatives.map((it) => (
             <li key={it.signature} className="flex gap-2 rounded-md px-1 py-1.5 hover:bg-muted/50">
@@ -210,14 +211,9 @@ export function EdgePanel({
                 )}
                 {it.movements.map((m, i) => {
                   // The pair is named in the header; a colored arrow is all a movement line needs.
-                  const outgoing = m.from === you;
                   return (
                     <div key={`${m.assetId}:${i}`} className="flex min-w-0 items-center gap-1.5 text-xs">
-                      {outgoing ? (
-                        <ArrowUpRightIcon className="size-3.5 shrink-0 text-destructive" aria-label="sent" />
-                      ) : (
-                        <ArrowDownLeftIcon className="size-3.5 shrink-0 text-emerald-500" aria-label="received" />
-                      )}
+                      <FlowArrow outgoing={m.from === you} />
                       <span className="min-w-0 truncate tabular-nums" title={`${names.of(m.from)} → ${names.of(m.to)}`}>
                         {formatAmount(m.amount, m.assetId)} <span className="text-muted-foreground">{assetLabel(m.assetId, assets)}</span>
                       </span>
@@ -236,11 +232,7 @@ export function EdgePanel({
                       const other = outgoing ? m.to : m.from;
                       return (
                         <div key={`${m.assetId}:${m.from}:${m.to}:${i}`} className="flex min-w-0 items-center gap-1.5 text-xs">
-                          {outgoing ? (
-                            <ArrowUpRightIcon className="size-3.5 shrink-0 text-destructive" aria-label="sent" />
-                          ) : (
-                            <ArrowDownLeftIcon className="size-3.5 shrink-0 text-emerald-500" aria-label="received" />
-                          )}
+                          <FlowArrow outgoing={outgoing} />
                           <span className="shrink-0 tabular-nums">
                             {formatAmount(m.amount, m.assetId)} <span className="text-muted-foreground">{assetLabel(m.assetId, assets)}</span>
                           </span>

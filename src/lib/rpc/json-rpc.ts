@@ -14,12 +14,8 @@ export class RpcRequestError extends Error {
 }
 
 export type JsonRpcOptions = {
-  fetchImpl?: typeof fetch;
   /** Retries for rate limits (429), server errors (500, 502–504), timeouts, and network failures. */
   maxRetries?: number;
-  /** Per-attempt limit; a request still pending after this is abandoned and retried. */
-  timeoutMs?: number;
-  sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   /** Called before each retry; for instrumentation. */
   onRetry?: (err: RpcRequestError) => void;
   /** Shared by one adapter so an HTTP 429 pauses every request, not only its retry. */
@@ -32,9 +28,10 @@ const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 const BASE_BACKOFF_MS = 500;
 const MAX_BACKOFF_MS = 8_000;
 const RATE_LIMIT_PAUSE_MS = 1_000;
-const DEFAULT_TIMEOUT_MS = 30_000;
+/** Per-attempt limit; a request still pending after this is abandoned and retried. */
+const TIMEOUT_MS = 30_000;
 
-export function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
+function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) return reject(signal.reason);
     const onAbort = () => {
@@ -64,12 +61,12 @@ export async function rpcCall<T>(
   signal: AbortSignal,
   options: JsonRpcOptions = {},
 ): Promise<T> {
-  const { fetchImpl = fetch, maxRetries = 0, timeoutMs = DEFAULT_TIMEOUT_MS, sleep = abortableSleep, onRetry, rateLimit } = options;
+  const { maxRetries = 0, onRetry, rateLimit } = options;
   for (let attempt = 0; ; attempt++) {
     const pausedFor = (rateLimit?.until ?? 0) - Date.now();
-    if (pausedFor > 0) await sleep(pausedFor, signal);
+    if (pausedFor > 0) await abortableSleep(pausedFor, signal);
     try {
-      return await rpcCallOnce<T>(url, method, params, signal, fetchImpl, timeoutMs);
+      return await rpcCallOnce<T>(url, method, params, signal);
     } catch (err) {
       if (err instanceof RpcRequestError && err.status === 429 && rateLimit) {
         rateLimit.until = Math.max(rateLimit.until, Date.now() + Math.max(RATE_LIMIT_PAUSE_MS, err.retryAfterMs ?? 0));
@@ -78,7 +75,7 @@ export async function rpcCall<T>(
       onRetry?.(err);
       // Jittered so parallel requests rate-limited together don't retry in lockstep.
       const backoff = Math.min(MAX_BACKOFF_MS, err.retryAfterMs ?? BASE_BACKOFF_MS * 2 ** attempt * (0.5 + Math.random() / 2));
-      await sleep(backoff, signal);
+      await abortableSleep(backoff, signal);
     }
   }
 }
@@ -88,13 +85,11 @@ async function rpcCallOnce<T>(
   method: string,
   params: unknown[] | Record<string, unknown>,
   signal: AbortSignal,
-  fetchImpl: typeof fetch,
-  timeoutMs: number,
 ): Promise<T> {
-  const timeout = AbortSignal.timeout(timeoutMs);
+  const timeout = AbortSignal.timeout(TIMEOUT_MS);
   let res: Response;
   try {
-    res = await fetchImpl(url, {
+    res = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
@@ -105,7 +100,7 @@ async function rpcCallOnce<T>(
     });
   } catch (err) {
     if (signal.aborted) throw err;
-    if (timeout.aborted) throw new RpcRequestError("network_or_cors", `RPC request ${method} timed out after ${timeoutMs / 1000}s.`);
+    if (timeout.aborted) throw new RpcRequestError("network_or_cors", `RPC request ${method} timed out after ${TIMEOUT_MS / 1000}s.`);
     // Browsers report CORS rejections and network failures identically.
     throw new RpcRequestError(
       "network_or_cors",
@@ -134,7 +129,7 @@ async function rpcCallOnce<T>(
     body = (await res.json()) as JsonRpcResponse<T>;
   } catch (err) {
     if (signal.aborted) throw err;
-    if (timeout.aborted) throw new RpcRequestError("network_or_cors", `RPC request ${method} timed out after ${timeoutMs / 1000}s.`);
+    if (timeout.aborted) throw new RpcRequestError("network_or_cors", `RPC request ${method} timed out after ${TIMEOUT_MS / 1000}s.`);
     throw new RpcRequestError("malformed", "RPC response was not valid JSON.");
   }
   if (body.error) {

@@ -15,34 +15,23 @@ export type IngestionCoverage = {
   warnings: string[];
 };
 
-export type IngestionLimits = {
-  /** Most in-range signatures kept per address (wallet or token account). */
-  maxSignaturesPerAddress: number;
-  /**
-   * Most signature pages scanned per address, including pages newer than the
-   * range end. Busy addresses can need hundreds of pages to reach the range.
-   */
-  maxPagesPerAddress: number;
-  /**
-   * Most getTransaction requests in flight at once. Retries keep their slot, so
-   * rate limiting slows the pool down rather than adding requests.
-   */
-  concurrency: number;
-  /** Token accounts whose signature history is paged at once, alongside transaction fetches. */
-  accountScanConcurrency: number;
-};
-
-export const DEFAULT_LIMITS: IngestionLimits = {
-  maxSignaturesPerAddress: 5_000,
-  maxPagesPerAddress: 25,
-  concurrency: 8,
-  accountScanConcurrency: 2,
-};
+/** Most in-range signatures kept per address (wallet or token account). */
+const MAX_SIGNATURES_PER_ADDRESS = 5_000;
+/**
+ * Most signature pages scanned per address, including pages newer than the
+ * range end. Busy addresses can need hundreds of pages to reach the range.
+ */
+const MAX_PAGES_PER_ADDRESS = 25;
+/**
+ * Most getTransaction requests in flight at once. Retries keep their slot, so
+ * rate limiting slows the pool down rather than adding requests.
+ */
+const CONCURRENCY = 8;
+/** Token accounts whose signature history is paged at once, alongside transaction fetches. */
+const ACCOUNT_SCAN_CONCURRENCY = 2;
 
 /** Fetched transactions are saved locally in batches of this size as they arrive. */
 const CACHE_WRITE_BATCH = 250;
-
-const DEV = process.env.NODE_ENV === "development";
 
 // Helius's token-account history index starts in December 2022; older ranges retain the standard RPC scan.
 const INDEXED_TOKEN_HISTORY_START = Date.parse("2022-12-01T00:00:00.000Z") / 1000;
@@ -82,8 +71,6 @@ export type IngestionStats = {
   /** Transactions reused instead of fetched: from the local cache, or already loaded for another wallet in this run. */
   cachedTransactions: number;
   fetchedTransactions: number;
-  /** Sub-ranges that had to be fetched because the cache didn't cover them. */
-  rangesFetched: CaseRange[];
 };
 
 export type SignatureEntry = { signature: string; blockTime: number };
@@ -113,13 +100,11 @@ export type IngestOptions = {
   /** Per-wallet ranges (mapped wallets can start later than the case); `range` otherwise. */
   ranges?: Record<string, CaseRange>;
   signal: AbortSignal;
-  limits?: Partial<IngestionLimits>;
   onProgress?: (progress: IngestionProgress) => void;
   /** When set, cached coverage and transactions are reused and new results are saved. */
   cache?: IngestionCache;
   /** Wallets that must not touch the RPC: only their cached history is returned. */
   cacheOnly?: ReadonlySet<string>;
-  now?: () => Date;
 };
 
 class Cancelled extends Error {}
@@ -140,13 +125,12 @@ type IndexedHistoryScan = {
 
 async function scanIndexedHistory(
   fetchPage: (paginationToken?: string) => Promise<{ data: RawParsedTransaction[]; paginationToken?: string | null }>,
-  limits: IngestionLimits,
   onPage?: (found: number) => void,
 ): Promise<IndexedHistoryScan> {
   const scan: IndexedHistoryScan = { entries: [], limitHit: null, missingBlockTime: 0 };
   let paginationToken: string | undefined;
   for (let page = 0; ; page++) {
-    if (page >= limits.maxPagesPerAddress) {
+    if (page >= MAX_PAGES_PER_ADDRESS) {
       scan.limitHit = "pages";
       return scan;
     }
@@ -156,7 +140,7 @@ async function scanIndexedHistory(
         scan.missingBlockTime++;
         continue;
       }
-      if (scan.entries.length >= limits.maxSignaturesPerAddress) {
+      if (scan.entries.length >= MAX_SIGNATURES_PER_ADDRESS) {
         scan.limitHit = "signatures";
         return scan;
       }
@@ -194,7 +178,6 @@ async function scanSignatures(
   adapter: SolanaRpcAdapter,
   address: string,
   caseRange: CaseRange,
-  limits: IngestionLimits,
   signal: AbortSignal,
   onPage: (entries: SignatureEntry[]) => Promise<void>,
 ): Promise<SignatureScan> {
@@ -202,7 +185,7 @@ async function scanSignatures(
   const scan: SignatureScan = { entries: [], reachedStart: false, limitHit: null, missingBlockTime: 0 };
   let before: string | undefined;
   for (let page = 0; ; page++) {
-    if (page >= limits.maxPagesPerAddress) {
+    if (page >= MAX_PAGES_PER_ADDRESS) {
       scan.limitHit = "pages";
       return scan;
     }
@@ -218,7 +201,7 @@ async function scanSignatures(
         scan.reachedStart = true;
         continue;
       }
-      if (scan.entries.length >= limits.maxSignaturesPerAddress) {
+      if (scan.entries.length >= MAX_SIGNATURES_PER_ADDRESS) {
         scan.limitHit = "signatures";
         break;
       }
@@ -234,12 +217,12 @@ async function scanSignatures(
   }
 }
 
-function describeLimit(what: string, scan: SignatureScan, limits: IngestionLimits): string | null {
+function describeLimit(what: string, scan: SignatureScan): string | null {
   if (scan.limitHit === "signatures") {
-    return `${what}: stopped at the safety limit of ${limits.maxSignaturesPerAddress.toLocaleString()} signatures; older activity in the range was not loaded.`;
+    return `${what}: stopped at the safety limit of ${MAX_SIGNATURES_PER_ADDRESS.toLocaleString()} signatures; older activity in the range was not loaded.`;
   }
   if (scan.limitHit === "pages") {
-    return `${what}: stopped after scanning ${(limits.maxPagesPerAddress * SIGNATURE_PAGE_LIMIT).toLocaleString()} signatures without reaching the range start. The address is too busy to page through; try a more recent range.`;
+    return `${what}: stopped after scanning ${(MAX_PAGES_PER_ADDRESS * SIGNATURE_PAGE_LIMIT).toLocaleString()} signatures without reaching the range start. The address is too busy to page through; try a more recent range.`;
   }
   return null;
 }
@@ -254,7 +237,7 @@ function describeLimit(what: string, scan: SignatureScan, limits: IngestionLimit
  * on the wallet itself does not return.
  *
  * Discovery and transaction fetching overlap: each signature page is queued
- * for a bounded worker pool (`limits.concurrency`) as soon as it arrives, and
+ * for a bounded worker pool (`CONCURRENCY`) as soon as it arrives, and
  * the next page is requested while those transactions load. A signature is
  * requested at most once per run, and a failed request is recorded without
  * stopping the rest.
@@ -266,8 +249,7 @@ function describeLimit(what: string, scan: SignatureScan, limits: IngestionLimit
  */
 export async function ingestWallets(options: IngestOptions): Promise<IngestionResult> {
   const { adapter, wallets, signal, onProgress, cache } = options;
-  const limits: IngestionLimits = { ...DEFAULT_LIMITS, ...options.limits };
-  const startedAt = (options.now ?? (() => new Date()))();
+  const startedAt = new Date();
   const transactions = new Map<string, CanonicalTransaction>();
   // Signatures the RPC returned null for (pruned history) vs. requests that failed.
   const unavailable = new Set<string>();
@@ -315,7 +297,7 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
     const newEntries: SignatureEntry[] = [];
     const tokenAccounts: string[] = [];
     const warnings: string[] = [];
-    const stats: IngestionStats = { cachedTransactions: 0, fetchedTransactions: 0, rangesFetched: [] };
+    const stats: IngestionStats = { cachedTransactions: 0, fetchedTransactions: 0 };
     let complete = true;
     let error: string | undefined;
     let phase: IngestionPhase = "signatures";
@@ -326,9 +308,6 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
     let settled = 0;
     let failedHere = 0;
     let accountsDone = 0;
-    const walletStartedAt = performance.now();
-    let discoveryMs = 0;
-    let fetchMs = 0;
 
     let toSave: Array<{ tx: CanonicalTransaction; raw: RawParsedTransaction }> = [];
     const saves: Promise<void>[] = [];
@@ -339,8 +318,7 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
       saves.push(write((c) => c.putTransactions(batch)));
     };
 
-    const queue = createWorkQueue<string>(limits.concurrency, async (signature) => {
-      const t0 = performance.now();
+    const queue = createWorkQueue<string>(CONCURRENCY, async (signature) => {
       try {
         const raw = await adapter.getTransaction(signature, signal);
         if (raw) {
@@ -356,7 +334,6 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
         failed.set(signature, (err as Error).message);
         failedHere++;
       }
-      fetchMs += performance.now() - t0;
       settled++;
       report();
     });
@@ -417,7 +394,7 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
     };
 
     const addScan = (scan: SignatureScan, what: string) => {
-      const limit = describeLimit(what, scan, limits);
+      const limit = describeLimit(what, scan);
       if (limit) {
         complete = false;
         warnings.push(limit);
@@ -451,7 +428,6 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
           known.push(e.signature);
         }
       }
-      stats.rangesFetched = gaps;
 
       let standardGaps = gaps;
       if (gaps.length > 0 && adapter.getTransactionsForAddress) {
@@ -463,7 +439,6 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
             const scan = await guard(
               scanIndexedHistory(
                 (paginationToken) => adapter.getTransactionsForAddress!(wallet, rangeSeconds, paginationToken, signal),
-                limits,
                 (found) => {
                   phase = "transactions";
                   report(found);
@@ -486,8 +461,8 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
               complete = false;
               warnings.push(
                 scan.limitHit === "signatures"
-                  ? `Indexed wallet history: stopped at the safety limit of ${limits.maxSignaturesPerAddress.toLocaleString()} transactions.`
-                  : `Indexed wallet history: stopped after ${limits.maxPagesPerAddress.toLocaleString()} pages.`,
+                  ? `Indexed wallet history: stopped at the safety limit of ${MAX_SIGNATURES_PER_ADDRESS.toLocaleString()} transactions.`
+                  : `Indexed wallet history: stopped after ${MAX_PAGES_PER_ADDRESS.toLocaleString()} pages.`,
               );
             }
             if (scan.missingBlockTime > 0) {
@@ -508,17 +483,14 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
       if (standardGaps.length > 0) {
         phase = "signatures";
         report();
-        const t0 = performance.now();
         try {
           for (const gap of standardGaps) {
-            addScan(await guard(scanSignatures(adapter, wallet, gap, limits, signal, (entries) => hydrate(record(entries)))), "Wallet history");
+            addScan(await guard(scanSignatures(adapter, wallet, gap, signal, (entries) => hydrate(record(entries)))), "Wallet history");
           }
         } catch (err) {
           if (err instanceof Cancelled) throw err;
           error = `Could not load wallet history: ${(err as Error).message}`;
           throw err;
-        } finally {
-          discoveryMs += performance.now() - t0;
         }
       }
 
@@ -533,7 +505,7 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
         const owned = new Set<string>();
         for (const programId of TOKEN_PROGRAMS) {
           try {
-            for (const ta of await guard(adapter.getTokenAccountsByOwner(wallet, programId, signal))) owned.add(ta.address);
+            for (const address of await guard(adapter.getTokenAccountsByOwner(wallet, programId, signal))) owned.add(address);
           } catch (err) {
             if (err instanceof Cancelled) throw err;
             complete = false;
@@ -549,12 +521,11 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
         tokenAccounts.push(...owned);
         phase = "token_accounts";
         report();
-        const t0 = performance.now();
-        await mapPool(tokenAccounts, limits.accountScanConcurrency, async (account) => {
+        await mapPool(tokenAccounts, ACCOUNT_SCAN_CONCURRENCY, async (account) => {
           try {
             for (const gap of standardGaps) {
               addScan(
-                await guard(scanSignatures(adapter, account, gap, limits, signal, (entries) => hydrate(record(entries)))),
+                await guard(scanSignatures(adapter, account, gap, signal, (entries) => hydrate(record(entries)))),
                 `Token account ${account}`,
               );
             }
@@ -565,8 +536,6 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
           }
           accountsDone++;
           report();
-        }).finally(() => {
-          discoveryMs += performance.now() - t0;
         });
 
         phase = "transactions";
@@ -624,15 +593,6 @@ export async function ingestWallets(options: IngestOptions): Promise<IngestionRe
       .map((s) => transactions.get(s)?.timestamp)
       .filter((t): t is string => t != null)
       .sort();
-    if (DEV) {
-      const fetches = stats.fetchedTransactions + failedHere;
-      console.debug(
-        `[ingest] ${wallet}: ${((performance.now() - walletStartedAt) / 1000).toFixed(1)}s total, ` +
-          `signature discovery ${(discoveryMs / 1000).toFixed(1)}s; ` +
-          `${stats.fetchedTransactions} fetched, ${failedHere} failed, ${settled - fetches} reused; ` +
-          `avg latency ${fetches ? Math.round(fetchMs / fetches) : 0}ms, peak concurrency ${queue.peak}/${limits.concurrency}`,
-      );
-    }
 
     results.push({
       wallet,

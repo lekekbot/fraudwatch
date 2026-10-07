@@ -1,3 +1,4 @@
+import { toggled } from "@/lib/timeline/filter";
 import type { FraudWatchCase } from "./model";
 
 /**
@@ -30,9 +31,7 @@ export function moveLane(c: FraudWatchCase, order: string[], wallet: string, dir
 }
 
 export function toggleLaneHidden(c: FraudWatchCase, wallet: string, now = new Date()): FraudWatchCase {
-  const hidden = new Set(c.hiddenLanes ?? []);
-  if (!hidden.delete(wallet)) hidden.add(wallet);
-  return { ...c, hiddenLanes: [...hidden], updatedAt: now.toISOString() };
+  return { ...c, hiddenLanes: [...toggled(new Set(c.hiddenLanes ?? []), wallet)], updatedAt: now.toISOString() };
 }
 
 /** Lanes to draw: in order, minus hidden ones; with a focus set, only those. */

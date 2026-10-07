@@ -4,7 +4,6 @@ import type { SemanticFlow } from "./events";
 
 export type Delta = { address: string; account: string; assetId: string; delta: bigint };
 
-const ZERO = BigInt(0);
 const keyOf = (assetId: string, address: string) => `${assetId}|${address}`;
 
 /** Value deltas by owner (wallet for SOL), with the payer's fee added back. Token accounts' rent lamports are left out. */
@@ -13,12 +12,12 @@ export function deltas(tx: CanonicalTransaction, feePayer: string | null): Delta
   const out: Delta[] = [];
   for (const n of tx.nativeChanges) {
     if (tokenAccounts.has(n.account)) continue;
-    const delta = BigInt(n.delta) + (n.account === feePayer ? BigInt(tx.feeLamports) : ZERO);
-    if (delta !== ZERO) out.push({ address: n.account, account: n.account, assetId: NATIVE_SOL, delta });
+    const delta = BigInt(n.delta) + (n.account === feePayer ? BigInt(tx.feeLamports) : 0n);
+    if (delta !== 0n) out.push({ address: n.account, account: n.account, assetId: NATIVE_SOL, delta });
   }
   for (const t of tx.tokenChanges) {
     const delta = BigInt(t.delta);
-    if (delta !== ZERO) out.push({ address: t.owner ?? t.account, account: t.account, assetId: t.mint, delta });
+    if (delta !== 0n) out.push({ address: t.owner ?? t.account, account: t.account, assetId: t.mint, delta });
   }
   return out;
 }
@@ -34,24 +33,24 @@ export function balanceFlows(all: Delta[]): { flows: SemanticFlow[]; ambiguousAs
   for (const d of all) {
     const key = `${d.assetId}|${d.address}`;
     if (!assets.includes(d.assetId)) assets.push(d.assetId);
-    byAddress.set(key, (byAddress.get(key) ?? ZERO) + d.delta);
+    byAddress.set(key, (byAddress.get(key) ?? 0n) + d.delta);
   }
   const flows: SemanticFlow[] = [];
   const ambiguousAssets: string[] = [];
   for (const assetId of assets) {
-    const net = [...byAddress].filter(([key, v]) => key.startsWith(`${assetId}|`) && v !== ZERO).map(([key, v]) => ({ address: key.slice(assetId.length + 1), v }));
-    const senders = net.filter((n) => n.v < ZERO).map((n) => ({ address: n.address, amount: -n.v }));
-    const receivers = net.filter((n) => n.v > ZERO).map((n) => ({ address: n.address, amount: n.v }));
-    const sum = (xs: { amount: bigint }[]) => xs.reduce((s, x) => s + x.amount, ZERO);
+    const net = [...byAddress].filter(([key, v]) => key.startsWith(`${assetId}|`) && v !== 0n).map(([key, v]) => ({ address: key.slice(assetId.length + 1), v }));
+    const senders = net.filter((n) => n.v < 0n).map((n) => ({ address: n.address, amount: -n.v }));
+    const receivers = net.filter((n) => n.v > 0n).map((n) => ({ address: n.address, amount: n.v }));
+    const sum = (xs: { amount: bigint }[]) => xs.reduce((s, x) => s + x.amount, 0n);
     const flow = (amount: bigint, from: string | null, to: string | null): SemanticFlow => ({ assetId, amount: amount.toString(), from, to, source: "balance" });
     if (senders.length === 1 && receivers.length > 0 && sum(receivers) <= senders[0].amount) {
       flows.push(...receivers.map((r) => flow(r.amount, senders[0].address, r.address)));
       const rest = senders[0].amount - sum(receivers);
-      if (rest > ZERO) flows.push(flow(rest, senders[0].address, null));
+      if (rest > 0n) flows.push(flow(rest, senders[0].address, null));
     } else if (receivers.length === 1 && senders.length > 0 && sum(senders) <= receivers[0].amount) {
       flows.push(...senders.map((s) => flow(s.amount, s.address, receivers[0].address)));
       const rest = receivers[0].amount - sum(senders);
-      if (rest > ZERO) flows.push(flow(rest, null, receivers[0].address));
+      if (rest > 0n) flows.push(flow(rest, null, receivers[0].address));
     } else {
       if (senders.length > 0 && receivers.length > 0) ambiguousAssets.push(assetId);
       flows.push(...senders.map((s) => flow(s.amount, s.address, null)), ...receivers.map((r) => flow(r.amount, null, r.address)));
@@ -63,11 +62,11 @@ export function balanceFlows(all: Delta[]): { flows: SemanticFlow[]; ambiguousAs
 /** Net change per asset and address. */
 export function netByAddress(all: Delta[]): Map<string, bigint> {
   const net = new Map<string, bigint>();
-  for (const d of all) net.set(keyOf(d.assetId, d.address), (net.get(keyOf(d.assetId, d.address)) ?? ZERO) + d.delta);
+  for (const d of all) net.set(keyOf(d.assetId, d.address), (net.get(keyOf(d.assetId, d.address)) ?? 0n) + d.delta);
   return net;
 }
 
-export const netOf = (net: Map<string, bigint>, assetId: string, address: string) => net.get(keyOf(assetId, address)) ?? ZERO;
+export const netOf = (net: Map<string, bigint>, assetId: string, address: string) => net.get(keyOf(assetId, address)) ?? 0n;
 
 /**
  * `flows` plus settlement flows for whatever balances moved beyond them
@@ -83,7 +82,7 @@ export function withSettlement(all: Delta[], flows: SemanticFlow[]): { flows: Se
     if (f.to) residual.set(keyOf(f.assetId, f.to), netOf(residual, f.assetId, f.to) - BigInt(f.amount));
   }
   const rest: Delta[] = [...residual]
-    .filter(([, delta]) => delta !== ZERO)
+    .filter(([, delta]) => delta !== 0n)
     .map(([key, delta]) => {
       const [assetId, address] = [key.slice(0, key.indexOf("|")), key.slice(key.indexOf("|") + 1)];
       return { assetId, address, account: address, delta };

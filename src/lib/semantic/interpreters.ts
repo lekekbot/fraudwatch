@@ -13,14 +13,12 @@ import { actionName, actorFlows, kindIs, knownProgram, protocolOf, refsWhere, su
 
 const failed: Interpreter = {
   id: "failed",
-  version: 1,
   interpret: (ctx) => (ctx.tx.success ? null : { category: "FAILED", action: "FAILED", confidence: "HIGH" }),
 };
 
 /** An NFT changing hands for value through a marketplace program the registry verifies. */
 const marketplaceNftTrade: Interpreter = {
   id: "marketplace-nft-trade",
-  version: 1,
   interpret: (ctx) => {
     const kind = ctx.nft?.summary.kind;
     const market = kind === "NFT_BUY" || kind === "NFT_SELL" || kind === "NFT_SWAP" ? knownProgram(ctx, ["nft_marketplace"]) : null;
@@ -39,7 +37,6 @@ const marketplaceNftTrade: Interpreter = {
 /** One asset out, another in, through a DEX or aggregator program the registry verifies. */
 const knownDexSwap: Interpreter = {
   id: "known-dex-swap",
-  version: 1,
   interpret: (ctx) => {
     const dex = kindIs(ctx, "SWAP") ? knownProgram(ctx, ["dex_aggregator", "dex"]) : null;
     if (!dex || !ctx.feePayer) return null;
@@ -53,7 +50,6 @@ const UNSTAKE = new Set(["deactivate", "deactivateDelinquent", "withdraw"]);
 /** A top-level call to the native stake program; the RPC decodes its instructions. */
 const nativeStake: Interpreter = {
   id: "native-stake",
-  version: 1,
   interpret: (ctx) => {
     // Only top-level calls: a protocol invoking the stake program inside its own instruction is that protocol's action.
     const calls = ctx.tx.instructions.filter((ix) => ix.programId === STAKE_PROGRAM);
@@ -76,7 +72,6 @@ const nativeStake: Interpreter = {
 /** Burns, approvals and token account setup: decoded SPL token, system and ATA instructions. */
 const tokenInstruction: Interpreter = {
   id: "token-instruction",
-  version: 1,
   interpret: (ctx) => {
     const kind = ctx.summary.kind;
     if (kind !== "BURN" && kind !== "APPROVAL" && kind !== "ACCOUNT") return null;
@@ -87,7 +82,6 @@ const tokenInstruction: Interpreter = {
 /** NFTs moving with no verified marketplace: a trade is read from balances alone. */
 const genericNft: Interpreter = {
   id: "generic-nft",
-  version: 1,
   interpret: (ctx) => {
     const reading = readNft(ctx);
     if (!reading) return null;
@@ -97,7 +91,6 @@ const genericNft: Interpreter = {
 
 const genericSwap: Interpreter = {
   id: "generic-swap",
-  version: 1,
   interpret: (ctx) => {
     if (!kindIs(ctx, "SWAP") || !ctx.feePayer) return null;
     return { category: "SWAP", action: "SWAP", confidence: "LOW", ...actorFlows(ctx, ctx.feePayer) };
@@ -110,7 +103,6 @@ const TRANSFERS = new Set(["transfer", "transferChecked", "transferWithSeed"]);
 
 const genericTransfer: Interpreter = {
   id: "generic-transfer",
-  version: 1,
   interpret: (ctx) => {
     if (!kindIs(ctx, "SEND", "RECEIVE")) return null;
     const transfers = refsWhere(ctx, (ix) => TRANSFER_PROGRAMS.has(ix.programId) && TRANSFERS.has(ix.type ?? ""));
@@ -122,7 +114,6 @@ const genericTransfer: Interpreter = {
 /** A call that moved none of the fee payer's value, named after its main instruction. */
 const genericProgram: Interpreter = {
   id: "generic-program",
-  version: 1,
   interpret: (ctx) => {
     const action = ctx.summary.action;
     if (!kindIs(ctx, "PROGRAM") || !action) return null;
@@ -132,7 +123,6 @@ const genericProgram: Interpreter = {
 
 const unknown: Interpreter = {
   id: "unknown",
-  version: 1,
   interpret: () => ({ category: "UNKNOWN", action: "UNKNOWN", confidence: "LOW" }),
 };
 

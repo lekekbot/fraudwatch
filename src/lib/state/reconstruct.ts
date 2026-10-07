@@ -60,8 +60,6 @@ type Observation = { index: number; pre: bigint; post: bigint };
 
 type Holding = { account: string; assetId: string; observations: Observation[] };
 
-const ZERO = BigInt(0);
-
 /** Chronological order: slot, then position in the slot, then signature as a stable tiebreak. */
 export function compareTransactions(a: CanonicalTransaction, b: CanonicalTransaction): number {
   if (a.slot !== b.slot) return a.slot - b.slot;
@@ -141,7 +139,7 @@ export function reconstructWalletState(
     return balance;
   };
   const sumBy = (assetId: string, value: (h: Holding) => bigint) =>
-    [...holdings.values()].filter((h) => h.assetId === assetId).reduce((sum, h) => sum + value(h), ZERO);
+    [...holdings.values()].filter((h) => h.assetId === assetId).reduce((sum, h) => sum + value(h), 0n);
 
   const effects: WalletTransactionEffect[] = ordered.map((tx, index) => {
     const assets = [...new Set([...touched[index]].map((key) => holdings.get(key)!.assetId))];
@@ -201,7 +199,7 @@ export function netChange(state: Pick<WalletState, "opening" | "closing">): { as
   const ids = [...new Set([...state.opening, ...state.closing].map((a) => a.assetId))];
   const closing = new Map(state.closing.map((a) => [a.assetId, BigInt(a.amount)]));
   return ids
-    .map((assetId) => ({ assetId, delta: (closing.get(assetId) ?? BigInt(0)) - (opening.get(assetId) ?? BigInt(0)) }))
-    .filter((c) => c.delta !== BigInt(0))
+    .map((assetId) => ({ assetId, delta: (closing.get(assetId) ?? 0n) - (opening.get(assetId) ?? 0n) }))
+    .filter((c) => c.delta !== 0n)
     .map((c) => ({ assetId: c.assetId, delta: c.delta.toString() }));
 }

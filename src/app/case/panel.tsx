@@ -6,45 +6,28 @@ import { Button } from "@/components/ui/button";
 import { cn } from "cn";
 
 /** A docked side panel of the case workspace, scrolling independently of the canvas. */
-export function SidePanel({ side, label, className, children }: {
+export function SidePanel({ side, label, children }: {
   side: "left" | "right";
   label: string;
-  className?: string;
   children: React.ReactNode;
 }) {
   return (
     <aside
       aria-label={label}
-      className={cn(
-        "flex shrink-0 flex-col overflow-y-auto bg-background",
-        side === "left" ? "w-64 border-r" : "w-80 border-l",
-        className,
-      )}
+      className={cn("flex shrink-0 flex-col overflow-y-auto bg-background", side === "left" ? "w-64 border-r" : "w-80 border-l")}
     >
       {children}
     </aside>
   );
 }
 
-export function PanelSection({ title, action, collapsible = false, defaultCollapsed = false, children }: {
+/** The header toggles the section open and closed; `defaultCollapsed` is its starting state. */
+export function PanelSection({ title, action, defaultCollapsed = false, children }: {
   title: string;
   action?: React.ReactNode;
-  /** The header toggles the section open and closed; `defaultCollapsed` is its starting state. */
-  collapsible?: boolean;
   defaultCollapsed?: boolean;
   children: React.ReactNode;
 }) {
-  if (!collapsible) {
-    return (
-      <section className="flex flex-col gap-2 border-b p-3">
-        <div className="flex min-h-6 items-center justify-between gap-2">
-          <h2 className="text-xs font-medium text-muted-foreground">{title}</h2>
-          {action}
-        </div>
-        {children}
-      </section>
-    );
-  }
   return (
     <details open={!defaultCollapsed} className="group flex flex-col border-b">
       <summary className="flex min-h-6 cursor-pointer list-none items-center justify-between gap-2 p-3 [&::-webkit-details-marker]:hidden">

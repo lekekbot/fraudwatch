@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { ChevronLeftIcon, ChevronRightIcon, CopyIcon, ExternalLinkIcon, EyeOffIcon, StarIcon, WaypointsIcon, XIcon } from "lucide-react";
-import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { getDb } from "@/lib/db/db";
@@ -16,13 +15,13 @@ import type { WalletState, WalletTransactionEffect } from "@/lib/state/reconstru
 import type { BehaviorObservation } from "@/lib/behavior/observations";
 import type { SemanticEvent } from "@/lib/semantic/events";
 import { describeAction, type EffectSummary } from "@/lib/state/summarize";
-import { type Assets, assetLabel, formatAssetAmount, formatUtc } from "../asset-format";
+import { type Assets, assetLabel, deltaClass, formatAssetAmount, formatUtc } from "../asset-format";
 import { kindLabel } from "../filter-panel";
 import { eventLabel } from "./event-card";
 import { DebugDetails } from "./debug-details";
 import { EventEvidence, EventSummary } from "./event-details";
 import { BEHAVIOR_LABEL, observationSummary } from "./observation-details";
-import { AddressButton, Section } from "./inspector-ui";
+import { AddressButton, copy, Section } from "./inspector-ui";
 
 function Raw({ label, value }: { label: string; value: unknown }) {
   return (
@@ -165,7 +164,7 @@ export function TransactionDetails({
             variant="ghost"
             size="icon-xs"
             aria-label="Copy signature"
-            onClick={() => navigator.clipboard.writeText(effect.signature).then(() => toast.success("Signature copied."), () => {})}
+            onClick={() => copy(effect.signature, "Signature")}
           >
             <CopyIcon />
           </Button>
@@ -235,11 +234,7 @@ export function TransactionDetails({
                   <dt className="text-muted-foreground">Before</dt>
                   <dd className="text-right tabular-nums">{c.before ? format(c.before, c.assetId) : "—"}</dd>
                   <dt className="text-muted-foreground">Change</dt>
-                  <dd
-                    className={`text-right tabular-nums ${c.delta.startsWith("-") ? "text-destructive" : c.delta !== "0" ? "text-emerald-500" : "text-muted-foreground"}`}
-                  >
-                    {format(c.delta, c.assetId, true)}
-                  </dd>
+                  <dd className={`text-right tabular-nums ${deltaClass(c.delta)}`}>{format(c.delta, c.assetId, true)}</dd>
                   <dt className="text-muted-foreground">After</dt>
                   <dd className="text-right tabular-nums">{c.after ? format(c.after, c.assetId) : "—"}</dd>
                 </dl>
@@ -293,7 +288,7 @@ export function TransactionDetails({
           assets={assets}
           names={names}
           onSelectAddress={onSelectAddress}
-          observations={observations.map((o) => `◆ ${BEHAVIOR_LABEL[o.type]}: ${observationSummary(o, (amount, assetId) => formatAssetAmount(amount, assetId, state, assets), assets, names)}`)}
+          observations={observations.map((o) => `◆ ${BEHAVIOR_LABEL[o.type]}: ${observationSummary(o, format, assets, names)}`)}
         />
       )}
       {event && <DebugDetails event={event} tx={tx} effect={effect} summary={summary} observations={observations} />}

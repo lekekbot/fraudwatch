@@ -2,6 +2,7 @@ import type { Names } from "@/lib/labels/labels";
 import { registry } from "@/lib/protocols/registry";
 import type { EventCategory, FlowRole, SemanticEvent } from "@/lib/semantic/events";
 import { projectEvent } from "@/lib/semantic/projection";
+import { abs } from "@/lib/solana/amount";
 import type { WalletTransactionEffect } from "@/lib/state/reconstruct";
 import type { EffectKind, EffectSummary, RecipientRole } from "@/lib/state/summarize";
 
@@ -148,7 +149,7 @@ export function summarizeRelationship(edge: Pick<GraphEdge, "a" | "b" | "interac
     if (interaction.movements.some((movement) => movement.from === edge.b && movement.to === edge.a)) bToA++;
     for (const movement of interaction.movements) {
       let asset = assets.get(movement.assetId);
-      if (!asset) assets.set(movement.assetId, (asset = { signatures: new Set(), aToB: BigInt(0), bToA: BigInt(0) }));
+      if (!asset) assets.set(movement.assetId, (asset = { signatures: new Set(), aToB: 0n, bToA: 0n }));
       asset.signatures.add(interaction.signature);
       // A movement on this connection always runs between its two endpoints.
       if (movement.to === edge.b) asset.aToB += BigInt(movement.amount);
@@ -188,12 +189,12 @@ export function flowShares(edges: readonly GraphEdge[]): Map<string, { aToB: num
   for (const edge of edges) {
     for (const asset of edge.summary.assets) {
       const most = BigInt(asset.aToB) > BigInt(asset.bToA) ? BigInt(asset.aToB) : BigInt(asset.bToA);
-      if (most > (largest.get(asset.assetId) ?? BigInt(0))) largest.set(asset.assetId, most);
+      if (most > (largest.get(asset.assetId) ?? 0n)) largest.set(asset.assetId, most);
     }
   }
   const share = (amount: string, assetId: string) => {
-    const max = largest.get(assetId) ?? BigInt(0);
-    return max > BigInt(1) ? Number(amount) / Number(max) : 0;
+    const max = largest.get(assetId) ?? 0n;
+    return max > 1n ? Number(amount) / Number(max) : 0;
   };
   return new Map(
     edges.map((edge) => {
@@ -237,8 +238,6 @@ export const withGraphNames = (names: Names): Names => {
 };
 
 export const pairId = (x: string, y: string) => (x < y ? `${x}|${y}` : `${y}|${x}`);
-
-const abs = (v: bigint) => (v < BigInt(0) ? -v : v);
 
 /**
  * Builds the map from each mapped wallet's (already filtered) effects and
@@ -453,16 +452,16 @@ export function buildInteractionGraph(
       for (const m of it.movements) {
         for (const id of [m.from, m.to]) {
           const assets = moved.get(id) ?? new Map<string, bigint>();
-          assets.set(m.assetId, (assets.get(m.assetId) ?? BigInt(0)) + BigInt(m.amount));
+          assets.set(m.assetId, (assets.get(m.assetId) ?? 0n) + BigInt(m.amount));
           moved.set(id, assets);
         }
       }
     }
   }
   const mostMoved = new Map<string, bigint>();
-  for (const id of others) for (const [assetId, amount] of moved.get(id) ?? []) if (amount > (mostMoved.get(assetId) ?? BigInt(0))) mostMoved.set(assetId, amount);
+  for (const id of others) for (const [assetId, amount] of moved.get(id) ?? []) if (amount > (mostMoved.get(assetId) ?? 0n)) mostMoved.set(assetId, amount);
   const valueShare = (id: string) =>
-    Math.max(0, ...[...(moved.get(id) ?? [])].map(([assetId, amount]) => ((mostMoved.get(assetId) ?? BigInt(0)) > BigInt(1) ? Number(amount) / Number(mostMoved.get(assetId)) : 0)));
+    Math.max(0, ...[...(moved.get(id) ?? [])].map(([assetId, amount]) => ((mostMoved.get(assetId) ?? 0n) > 1n ? Number(amount) / Number(mostMoved.get(assetId)) : 0)));
   const observed = options.observed ?? new Map<string, number>();
   const rankings: Record<GraphRanking, string[]> = {
     interactions: byInteractions,

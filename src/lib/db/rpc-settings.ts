@@ -30,7 +30,3 @@ export async function recordRpcResult(db: FraudWatchDB, url: string, ok: boolean
   if (!current || current.url !== url.trim()) return;
   await db.rpc_settings.put({ ...current, lastTest: { ok, at: now.toISOString(), source: "load" } });
 }
-
-export async function clearRpcSettings(db: FraudWatchDB): Promise<void> {
-  await db.rpc_settings.delete("default");
-}

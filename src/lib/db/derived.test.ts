@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { INTERPRETERS } from "@/lib/semantic/interpreters";
 import { interpretTransaction } from "@/lib/semantic/interpret";
 import { FEE, makeTx, SOL } from "@/lib/semantic/testing";
-import { analysisFingerprint, analysisVersions } from "@/lib/semantic/versions";
+import { analysisVersions } from "@/lib/semantic/versions";
 import { PARSER_VERSION } from "@/lib/solana/canonical";
 import { RECONSTRUCTION_VERSION } from "@/lib/state/reconstruct";
 import type { FraudWatchDB, WalletStateRecord } from "./db";
@@ -67,17 +67,15 @@ describe("derived cache invalidation", () => {
 });
 
 describe("analysis versions", () => {
-  it("covers every stage and every interpreter, with unique ids and positive versions", () => {
+  it("covers every stage, and interpreters have unique ids", () => {
     const v = analysisVersions();
-    expect(Object.keys(v)).toEqual(["parser", "reconstruction", "semantic", "interpreters", "registry", "behavior"]);
+    expect(Object.keys(v)).toEqual(["parser", "reconstruction", "semantic", "registry", "behavior"]);
     expect(new Set(INTERPRETERS.map((i) => i.id)).size).toBe(INTERPRETERS.length);
-    expect(INTERPRETERS.every((i) => Number.isInteger(i.version) && i.version > 0)).toBe(true);
-    for (const i of INTERPRETERS) expect(analysisFingerprint()).toContain(`${i.id}@${i.version}`);
   });
 
   it("stamps every event with the model version and the interpreters it tried", () => {
     const [event] = interpretTransaction(makeTx({ native: { A: [SOL, SOL - FEE] }, success: false }));
     expect(event.version).toBe(analysisVersions().semantic);
-    expect(event.trace).toEqual([{ id: "failed", version: 1, outcome: "matched" }]);
+    expect(event.trace).toEqual([{ id: "failed", outcome: "matched" }]);
   });
 });

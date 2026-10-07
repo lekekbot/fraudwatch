@@ -2,10 +2,10 @@
 
 import { type ScaleLinear, type ScaleTime, scaleLinear, scaleUtc } from "d3-scale";
 import { select } from "d3-selection";
-import { type ZoomBehavior, type ZoomTransform, zoom, zoomIdentity } from "d3-zoom";
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react";
-import { wheelAction } from "@/lib/gestures";
+import { type ZoomBehavior, type ZoomTransform, zoomIdentity } from "d3-zoom";
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react";
 import { connectors, type Flow, mergeConnectors } from "@/lib/timeline/lanes";
+import { horizontalZoom, readPalette, sizeCanvas } from "../canvas";
 import type { Tone } from "./event-card";
 import {
   chooseBucket,
@@ -58,6 +58,7 @@ export type TimelineHandle = {
 };
 
 type Props = {
+  ref?: React.Ref<TimelineHandle>;
   items: TimelineItem[];
   observations?: TimelineObservation[];
   selectedObservation?: string | null;
@@ -101,31 +102,24 @@ type Hit =
   | { type: "lane"; x0: number; y0: number; x1: number; y1: number; lane: number }
   | { type: "observation"; x0: number; y0: number; x1: number; y1: number; keys: string[]; start: number; end: number; label: string };
 
-type Palette = Record<"fg" | "muted" | "border" | "card" | "bg" | "behavior" | Tone, string>;
-
-function readPalette(el: HTMLElement): Palette {
-  const css = getComputedStyle(el);
-  const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
-  return {
-    fg: v("--foreground", "#eee"),
-    muted: v("--muted-foreground", "#999"),
-    border: v("--border", "#333"),
-    card: v("--card", "#1a1a1a"),
-    bg: v("--background", "#111"),
-    send: v("--destructive", "#e5484d"),
-    receive: "oklch(0.72 0.16 155)",
-    swap: "oklch(0.7 0.14 250)",
-    nft: "oklch(0.72 0.16 310)",
-    defi: "oklch(0.74 0.12 195)",
-    behavior: "oklch(0.83 0.16 92)",
-    bridge: "oklch(0.7 0.15 285)",
-    burn: "oklch(0.72 0.17 50)",
-    approval: "oklch(0.8 0.15 80)",
-    neutral: v("--muted-foreground", "#999"),
-    failed: v("--destructive", "#e5484d"),
-  };
-}
-
+const PALETTE: Record<"fg" | "muted" | "border" | "card" | "bg" | "behavior" | Tone, string> = {
+  fg: "--foreground",
+  muted: "--muted-foreground",
+  border: "--border",
+  card: "--card",
+  bg: "--background",
+  send: "--destructive",
+  receive: "--tone-receive",
+  swap: "--tone-swap",
+  nft: "--tone-nft",
+  defi: "--tone-defi",
+  behavior: "--tone-behavior",
+  bridge: "--tone-bridge",
+  burn: "--tone-burn",
+  approval: "--tone-approval",
+  neutral: "--muted-foreground",
+  failed: "--destructive",
+};
 
 const formatUtc = (options: Intl.DateTimeFormatOptions) => {
   const formatter = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", ...options });
@@ -184,21 +178,13 @@ function fitText(ctx: CanvasRenderingContext2D, font: string, text: string, max:
   return `${text.slice(0, lo)}…`;
 }
 
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
-  ctx.beginPath();
-  ctx.roundRect(x, y, w, h, r);
-}
-
 /**
  * Wallet lanes on a canvas: one lane per mapped wallet, stacked. X is time (or
  * event order, shared by every lane); zoom stretches the axis instead of
  * magnifying cards, so dense periods open up as you zoom in. A transaction
  * several lanes share is drawn once at one x, joined across lanes.
  */
-export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function TimelineCanvas(
-  { items, lanes, range, mode, selected, onSelect, onSelectLane, onViewChange, onNeedsEventSpacing, observations, selectedObservation, onSelectObservation },
-  ref,
-) {
+export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSelect, onSelectLane, onViewChange, onNeedsEventSpacing, observations, selectedObservation, onSelectObservation }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const zoomRef = useRef<ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
   const transformRef = useRef<ZoomTransform>(zoomIdentity);
@@ -246,7 +232,7 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
     const dpr = window.devicePixelRatio || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
-    const p = readPalette(canvas);
+    const p = readPalette(canvas, PALETTE);
 
     const base = baseScale();
     const scale = transformRef.current.rescaleX(base);
@@ -405,11 +391,6 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
       const key = `${firstGlobal}:${lastGlobal}:${count}`;
       const cached = pillCache.get(key);
       if (cached) return cached;
-      const lines = formatPill(firstGlobal, lastGlobal, count);
-      pillCache.set(key, lines);
-      return lines;
-    };
-    const formatPill = (firstGlobal: number, lastGlobal: number, count: number): [string, string] => {
       const t0 = new Date(items[firstGlobal].time);
       const t1 = new Date(items[lastGlobal].time);
       const sameDay = nodeDay(t0) === nodeDay(t1);
@@ -418,7 +399,9 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
           ? `${nodeDay(t0)} ${timeFormat(t0)}`
           : nodeDay(t0)
         : `${nodeDay(t0)} – ${nodeDay(t1)}`;
-      return [`${count.toLocaleString()} tx`, when];
+      const lines: [string, string] = [`${count.toLocaleString()} tx`, when];
+      pillCache.set(key, lines);
+      return lines;
     };
     const inView = (x0: number, x1: number) => x1 >= -CARD_W && x0 <= width + CARD_W;
 
@@ -458,7 +441,8 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
             kinds.set(label, { n: (kinds.get(label)?.n ?? 0) + 1, tone });
           }
           const breakdown = [...kinds].sort((a, b) => b[1].n - a[1].n);
-          roundRect(ctx, x, y - PILL_H / 2, w, PILL_H, 10);
+          ctx.beginPath();
+          ctx.roundRect(x, y - PILL_H / 2, w, PILL_H, 10);
           ctx.fillStyle = p.card;
           ctx.fill();
           ctx.save();
@@ -471,7 +455,8 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
             bx += bw;
           }
           ctx.restore();
-          roundRect(ctx, x, y - PILL_H / 2, w, PILL_H, 10);
+          ctx.beginPath();
+          ctx.roundRect(x, y - PILL_H / 2, w, PILL_H, 10);
           ctx.lineWidth = isSelected ? 2 : 1;
           ctx.strokeStyle = isSelected || isEcho ? p.fg : p.muted;
           ctx.stroke();
@@ -502,7 +487,8 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
           ctx.moveTo(g.x, y);
           ctx.lineTo(g.x, placement.tier === 0 ? top + CARD_H : top);
           ctx.stroke();
-          roundRect(ctx, left, top, CARD_W, CARD_H, 8);
+          ctx.beginPath();
+          ctx.roundRect(left, top, CARD_W, CARD_H, 8);
           ctx.fillStyle = p.card;
           ctx.fill();
           ctx.lineWidth = isSelected ? 2 : 1;
@@ -519,9 +505,9 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
           ];
           const colors = [p.muted, color, p.fg, p.muted];
           entry.lines.slice(0, 4).forEach((line, li) => {
-            ctx.font = fonts[li];
             ctx.fillStyle = colors[li];
             const text = fitText(ctx, fonts[li], line, CARD_W - 18);
+            // fitText only sets the font when it has to measure.
             ctx.font = fonts[li];
             ctx.fillText(text, left + 10, top + 16 + li * 14);
           });
@@ -557,12 +543,7 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
         const i = items.findIndex((it) => it.time >= time);
         return xOf(i === -1 ? items.length - 1 : i);
       };
-      const endX = (time: number) => {
-        if (mode === "time") return scale(time);
-        let i = items.length - 1;
-        while (i > 0 && items[i].time > time) i--;
-        return xOf(i);
-      };
+      const endX = (time: number) => (mode === "time" ? scale(time) : xOf(Math.max(0, items.findLastIndex((it) => it.time <= time))));
       for (let l = 0; l < lanes.length; l++) {
         const y = laneY(l);
         const placed = observations
@@ -599,16 +580,16 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
             ctx.strokeRect(-4.5, -4.5, 9, 9);
           }
           ctx.restore();
-          const text = group.length === 1 ? `◆ ${group[0].o.label}` : `◆ ${group.length}`;
+          const text = group.length === 1 ? group[0].o.label : `${group.length}`;
           ctx.font = "600 10px ui-sans-serif, system-ui, sans-serif";
           let w = ctx.measureText(text).width;
           const left = Math.max(4, Math.min(x0 - 4, width - w - 8));
           // A label that would run into the next marker shortens to its count.
           const next = groups[gi + 1]?.[0].x0 ?? Number.POSITIVE_INFINITY;
-          const shown = left + w + 6 < next - 4 ? text : group.length === 1 ? "◆" : `◆ ${group.length}`;
+          const shown = left + w + 6 < next - 4 ? text : group.length === 1 ? "" : `${group.length}`;
           w = ctx.measureText(shown).width;
           ctx.fillStyle = p.bg;
-          ctx.globalAlpha = 0.85;
+          ctx.globalAlpha = shown ? 0.85 : 0;
           ctx.fillRect(left - 2, y + 6, w + 6, 13);
           ctx.globalAlpha = 1;
           ctx.fillStyle = p.behavior;
@@ -761,6 +742,22 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
     [applyTransform, baseScale, maxZoom],
   );
 
+  /** Show [start, end] in ms of case time, in either spacing mode; `padded` adds a margin of 10% (at least a minute) in time spacing. */
+  const zoomTo = useCallback(
+    (start: number, end: number, padded = true) => {
+      const { items, mode } = latest.current;
+      if (mode === "time") {
+        const pad = padded ? Math.max((end - start) * 0.1, 60_000) : 0;
+        return showBaseRange(start - pad, end + pad);
+      }
+      const first = items.findIndex((i) => i.time >= start);
+      const last = items.findLastIndex((i) => i.time <= end);
+      if (first === -1 || last < first) return;
+      showBaseRange(first - 1, last + 1);
+    },
+    [showBaseRange],
+  );
+
   useImperativeHandle(
     ref,
     () => ({
@@ -799,20 +796,9 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
           }
         }
       },
-      showTimeRange: (start, end, padded = true) => {
-        const { items, mode } = latest.current;
-        if (mode === "time") {
-          const pad = padded ? Math.max((end - start) * 0.1, 60_000) : 0;
-          return showBaseRange(start - pad, end + pad);
-        }
-        const first = items.findIndex((i) => i.time >= start);
-        let last = -1;
-        for (let i = items.length - 1; i >= 0; i--) if (items[i].time <= end) { last = i; break; }
-        if (first === -1 || last < first) return;
-        showBaseRange(first - 1, last + 1);
-      },
+      showTimeRange: zoomTo,
     }),
-    [applyTransform, baseScale, laneY, maxZoom, showBaseRange],
+    [applyTransform, baseScale, laneY, maxZoom, zoomTo],
   );
 
   // Size to the container, with crisp rendering on HiDPI screens. With many
@@ -826,7 +812,6 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
       const width = scroller.clientWidth || 800;
       const viewHeight = Math.max(MIN_HEIGHT, scroller.clientHeight || MIN_HEIGHT);
       const height = Math.max(viewHeight, contentHeight(latest.current.lanes.length));
-      const dpr = window.devicePixelRatio || 1;
       // Keep the same stretch of time in view when the canvas changes width
       // (e.g. the details panel opens); the transform alone is in old pixels.
       const previousWidth = widthRef.current;
@@ -835,10 +820,7 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
       widthRef.current = width;
       heightRef.current = height;
       viewportRef.current = { top: scroller.scrollTop, height: viewHeight };
-      canvas.width = Math.round(width * dpr);
-      canvas.height = Math.round(height * dpr);
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
+      sizeCanvas(canvas, width, height);
       zoomRef.current?.extent([[0, 0], [width, height]]).scaleExtent([1, maxZoom()]);
       if (width !== previousWidth && transformRef.current.k > 1) showBaseRange(visible[0], visible[1]);
       schedule();
@@ -860,50 +842,18 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
     };
   }, [baseScale, maxZoom, schedule, showBaseRange, laneCount]);
 
-  // Drag pans on the x axis; wheel and trackpad gestures are handled below (see `wheelAction`).
+  // Drag pans on the x axis; a vertical swipe scrolls overflowing lanes or zooms when they fit.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const width = widthRef.current;
-    const height = heightRef.current;
-    const behavior = zoom<HTMLCanvasElement, unknown>()
-      .extent([[0, 0], [width, height]])
-      .scaleExtent([1, maxZoom()])
-      .filter((event: MouseEvent) => event.type !== "wheel" && !event.button)
-      .on("zoom", (event: { transform: ZoomTransform }) => {
-        // Vertical pan belongs to the scroll container; keep only x.
-        transformRef.current = zoomIdentity.translate(event.transform.x, 0).scale(event.transform.k);
-        schedule();
-      });
+    const { behavior, dispose } = horizontalZoom(canvas, maxZoom(), () => heightRef.current > viewportRef.current.height + 1, (t) => {
+      transformRef.current = t;
+      schedule();
+    });
+    behavior.extent([[0, 0], [widthRef.current, heightRef.current]]);
     zoomRef.current = behavior;
-    select(canvas).call(behavior).on("dblclick.zoom", null);
-    return () => {
-      select(canvas).on(".zoom", null);
-    };
+    return dispose;
   }, [maxZoom, schedule]);
-
-  // Pinch zooms around the pointer, a sideways swipe pans, and a vertical swipe
-  // scrolls overflowing lanes or zooms when they fit.
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const onWheel = (event: WheelEvent) => {
-      const behavior = zoomRef.current;
-      if (!behavior) return;
-      const overflow = heightRef.current > viewportRef.current.height + 1;
-      const action = wheelAction(event, overflow);
-      if (action.type === "scroll") return; // the browser scrolls the lanes
-      event.preventDefault();
-      if (action.type === "zoom") {
-        const rect = canvas.getBoundingClientRect();
-        select(canvas).call(behavior.scaleBy, action.factor, [event.clientX - rect.left, 0]);
-      } else {
-        select(canvas).call(behavior.translateBy, -action.dx / transformRef.current.k, 0);
-      }
-    };
-    canvas.addEventListener("wheel", onWheel, { passive: false });
-    return () => canvas.removeEventListener("wheel", onWheel);
-  }, []);
 
   // A new mode or range starts from the full range.
   useEffect(() => {
@@ -945,12 +895,7 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
         if (hit.type === "lane") return onSelectLane(hit.lane);
         if (hit.type === "observation") {
           if (hit.keys.length === 1 || hit.end - hit.start < UNRESOLVABLE_MS) return onSelectObservation?.(hit.keys[0], hit.keys);
-          const pad = Math.max((hit.end - hit.start) * 0.1, 60_000);
-          if (latest.current.mode === "time") return showBaseRange(hit.start - pad, hit.end + pad);
-          const { items } = latest.current;
-          const first = Math.max(0, items.findIndex((it) => it.time >= hit.start));
-          const last = items.findLastIndex((it) => it.time <= hit.end);
-          return showBaseRange(first - 1, Math.max(first, last) + 1);
+          return zoomTo(hit.start, hit.end);
         }
         if (hit.first === hit.last) onSelect(hit.first, hit.lane);
         else {
@@ -959,10 +904,7 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
           const start = items[hit.first].time;
           const end = items[hit.last].time;
           if (latest.current.mode === "time" && end - start < UNRESOLVABLE_MS) onNeedsEventSpacing(hit.first, hit.lane);
-          else if (latest.current.mode === "time") {
-            const pad = Math.max((end - start) * 0.1, 60_000);
-            showBaseRange(start - pad, end + pad);
-          } else showBaseRange(hit.first - 1, hit.last + 1);
+          else zoomTo(start, end);
         }
       }}
       onMouseMove={(event) => {
@@ -974,4 +916,4 @@ export const TimelineCanvas = forwardRef<TimelineHandle, Props>(function Timelin
       }}
     />
   );
-});
+}

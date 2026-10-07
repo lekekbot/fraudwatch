@@ -7,8 +7,6 @@ import { type CaseRange, isValidRange, rangeFromUnix, rangeToUnix } from "@/lib/
  * Only these three keys are ever read or written. Labels, RPC settings, and
  * fetched data must never be encoded in query parameters.
  */
-export const MAP_PARAM_KEYS = ["wallet", "from", "to"] as const;
-
 export type MapParams = { wallet: string; range: CaseRange };
 
 export type MapParamsResult =

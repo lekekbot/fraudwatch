@@ -26,6 +26,15 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  --color-tone-receive: var(--tone-receive);
+  --color-tone-swap: var(--tone-swap);
+  --color-tone-nft: var(--tone-nft);
+  --color-tone-defi: var(--tone-defi);
+  --color-tone-bridge: var(--tone-bridge);
+  --color-tone-burn: var(--tone-burn);
+  --color-tone-approval: var(--tone-approval);
+  --color-tone-behavior: var(--tone-behavior);
+  --color-tone-lookalike: var(--tone-lookalike);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -55,6 +64,16 @@
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
   --radius: 0.625rem;
+  /* Event tones, the same in both themes: timeline and graph canvases read these, and Tailwind has bg-tone-* etc. */
+  --tone-receive: oklch(0.72 0.16 155);
+  --tone-swap: oklch(0.7 0.14 250);
+  --tone-nft: oklch(0.72 0.16 310);
+  --tone-defi: oklch(0.74 0.12 195);
+  --tone-bridge: oklch(0.7 0.15 285);
+  --tone-burn: oklch(0.72 0.17 50);
+  --tone-approval: oklch(0.8 0.15 80);
+  --tone-behavior: oklch(0.83 0.16 92);
+  --tone-lookalike: oklch(0.77 0.16 70);
 }
 
 @media (prefers-color-scheme: dark) {

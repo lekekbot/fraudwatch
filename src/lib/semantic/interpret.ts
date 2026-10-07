@@ -1,5 +1,4 @@
 import { NATIVE_SOL } from "@/lib/assets/assets";
-import type { AddressLabel } from "@/lib/labels/labels";
 import type { ProtocolRegistry } from "@/lib/protocols/registry";
 import { BUBBLEGUM_PROGRAM, type CnftMove, cnftMoves } from "@/lib/solana/bubblegum";
 import type { CanonicalInstruction, CanonicalTransaction } from "@/lib/solana/canonical";
@@ -80,15 +79,12 @@ export type Interpretation = {
  */
 export type Interpreter = {
   id: string;
-  version: number;
   interpret: (context: TransactionContext) => Interpretation | null;
 };
 
-const ZERO = BigInt(0);
-
 export function buildContext(
   tx: CanonicalTransaction,
-  options: { nfts?: NftCatalog; registry?: ProtocolRegistry; labels?: ReadonlyMap<string, AddressLabel> } = {},
+  options: { nfts?: NftCatalog; registry?: ProtocolRegistry } = {},
 ): TransactionContext {
   const nfts = options.nfts ?? NO_NFTS;
   const feePayer = tx.accounts[0]?.address ?? null;
@@ -114,9 +110,9 @@ export function buildContext(
     const nftTokens = tx.tokenChanges.filter((t) => t.owner && nfts.isNft(t.mint));
     const sides = [
       ...moves.map((m) => m.to),
-      ...nftTokens.filter((t) => BigInt(t.delta) > ZERO).map((t) => t.owner!),
+      ...nftTokens.filter((t) => BigInt(t.delta) > 0n).map((t) => t.owner!),
       ...moves.map((m) => m.from),
-      ...nftTokens.filter((t) => BigInt(t.delta) < ZERO).map((t) => t.owner!),
+      ...nftTokens.filter((t) => BigInt(t.delta) < 0n).map((t) => t.owner!),
     ];
     for (const wallet of new Set(sides.filter((w) => w !== null && w !== feePayer))) {
       const other = summarize(wallet!);
@@ -218,7 +214,7 @@ function participantsOf(
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-const FALLBACK = { id: "fallback", version: SEMANTIC_VERSION };
+const FALLBACK = { id: "fallback" };
 
 /**
  * The meaningful action(s) in one canonical transaction. Interpreters run in
@@ -232,8 +228,6 @@ export function interpretTransaction(
   options: {
     nfts?: NftCatalog;
     registry?: ProtocolRegistry;
-    /** The case's own labels: recorded as attribution, never used to interpret. */
-    labels?: ReadonlyMap<string, AddressLabel>;
     interpreters?: readonly Interpreter[];
   } = {},
 ): SemanticEvent[] {
@@ -268,7 +262,7 @@ export function interpretTransaction(
   }
 
   const warnings: string[] = [];
-  let chosen: { interpreter: { id: string; version: number }; reading: Interpretation } = {
+  let chosen: { interpreter: { id: string }; reading: Interpretation } = {
     interpreter: FALLBACK,
     reading: { category: "UNKNOWN", action: "UNKNOWN", confidence: "LOW" },
   };
@@ -279,12 +273,12 @@ export function interpretTransaction(
       reading = interpreter.interpret(ctx);
     } catch (error) {
       warnings.push(`Interpreter ${interpreter.id} failed: ${message(error)}`);
-      trace.push({ id: interpreter.id, version: interpreter.version, outcome: "failed" });
+      trace.push({ id: interpreter.id, outcome: "failed" });
       continue;
     }
-    trace.push({ id: interpreter.id, version: interpreter.version, outcome: reading ? "matched" : "no_match" });
+    trace.push({ id: interpreter.id, outcome: reading ? "matched" : "no_match" });
     if (!reading) continue;
-    chosen = { interpreter: { id: interpreter.id, version: interpreter.version }, reading };
+    chosen = { interpreter: { id: interpreter.id }, reading };
     break;
   }
   const { reading } = chosen;

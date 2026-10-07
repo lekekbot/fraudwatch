@@ -10,7 +10,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/c
 import { Input } from "@/components/ui/input";
 import { useLocalQuery } from "@/hooks/use-local-db";
 import { getDb } from "@/lib/db/db";
-import { clearRpcSettings, getRpcSettings, saveRpcSettings } from "@/lib/db/rpc-settings";
+import { getRpcSettings, saveRpcSettings } from "@/lib/db/rpc-settings";
 import { type RpcTestResult, testRpcConnection } from "@/lib/rpc/test-connection";
 import { validateRpcUrl } from "@/lib/rpc/url";
 
@@ -77,7 +77,7 @@ export function RpcSettingsForm() {
   }
 
   async function clear() {
-    await clearRpcSettings(getDb());
+    await getDb().rpc_settings.delete("default");
     setUrl("");
     setTestResult(null);
     toast.success("RPC settings cleared from this browser.");

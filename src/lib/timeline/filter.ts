@@ -1,4 +1,5 @@
 import type { EventCategory, SemanticEvent } from "@/lib/semantic/events";
+import { abs } from "@/lib/solana/amount";
 import type { EffectKind, EffectSummary } from "@/lib/state/summarize";
 
 /**
@@ -85,8 +86,6 @@ export function involvedAddresses(summary: EffectSummary): string[] {
 export function movedAssets(summary: EffectSummary): string[] {
   return [...new Set([...summary.outflows, ...summary.inflows].map((c) => c.assetId))];
 }
-
-const abs = (v: bigint) => (v < BigInt(0) ? -v : v);
 
 /** `isDecoy` says whether an address is a likely dust decoy; only consulted when `hideDecoys` is on. */
 export function passesFilter(

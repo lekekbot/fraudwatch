@@ -3,37 +3,34 @@
 import { select } from "d3-selection";
 import { type ZoomBehavior, type ZoomTransform, zoom, zoomIdentity } from "d3-zoom";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownLeftIcon, ArrowUpRightIcon, ChevronDownIcon, ChevronUpIcon, FocusIcon, MaximizeIcon, MinusIcon, PlusIcon, RotateCcwIcon, WorkflowIcon, XIcon } from "lucide-react";
+import { ArrowDownLeftIcon, ArrowUpRightIcon, ChevronUpIcon, FocusIcon, MaximizeIcon, MinusIcon, PlusIcon, RotateCcwIcon, WorkflowIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { AddressState } from "@/lib/case/address-state";
 import { graphWheelAction } from "@/lib/gestures";
 import { BURNED_NODE_ID, CLUSTER_LABELS, type ClusterKind, entityNodeId, flowShares, startedBy, type GraphEdge, type GraphNode, type GraphRanking, type WalletGraph as Graph } from "@/lib/graph/build";
-import { classifyLayout, hashId, layoutGraph, majorEdges, nodeRadius, type Point, type Spacing, SPACINGS, type ZoomTier, zoomTier } from "@/lib/graph/layout";
+import { classifyLayout, hashId, type LayoutRole, layoutGraph, majorEdges, nodeRadius, type Point, type Spacing, SPACINGS, type ZoomTier, zoomTier } from "@/lib/graph/layout";
 import type { Names } from "@/lib/labels/labels";
 import { AssetIcon } from "../asset-icon";
+import { readPalette, sizeCanvas } from "../canvas";
 import { categoryLabel, kindLabel } from "../filter-panel";
 
 /** Remembers the chosen graph spacing in this browser. */
 const SPACING_KEY = "fraudwatch:graph-spacing";
 
-type Palette = Record<"fg" | "muted" | "border" | "card" | "bg" | "program" | "send" | "receive" | "lookalike" | "burn", string>;
+const PALETTE = {
+  fg: "--foreground",
+  muted: "--muted-foreground",
+  card: "--card",
+  bg: "--background",
+  program: "--tone-swap",
+  send: "--destructive",
+  receive: "--tone-receive",
+  lookalike: "--tone-lookalike",
+  burn: "--tone-burn",
+};
 
-function readPalette(el: HTMLElement): Palette {
-  const css = getComputedStyle(el);
-  const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
-  return {
-    fg: v("--foreground", "#eee"),
-    muted: v("--muted-foreground", "#999"),
-    border: v("--border", "#333"),
-    card: v("--card", "#1a1a1a"),
-    bg: v("--background", "#111"),
-    program: "oklch(0.7 0.14 250)",
-    send: v("--destructive", "#e5484d"),
-    receive: "oklch(0.72 0.16 155)",
-    lookalike: "oklch(0.77 0.16 70)",
-    burn: "oklch(0.72 0.17 50)",
-  };
-}
+/** A node's radius as drawn: shared counterparties (bridges) get a little more. */
+const drawnRadius = (node: GraphNode, roles: ReadonlyMap<string, LayoutRole>) => nodeRadius(node) + (roles.get(node.id) === "bridge" ? 3 : 0);
 
 type Segment = { edge: GraphEdge; from: Point; to: Point; control?: Point };
 type HoverAsset = { id: string; label: string; logo?: string };
@@ -230,12 +227,10 @@ export function WalletGraph({
   const zoomRef = useRef<ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
   const transformRef = useRef<ZoomTransform>(zoomIdentity);
   const sizeRef = useRef({ width: 800, height: 600 });
-  const frameRef = useRef<number | null>(null);
   const hoverRef = useRef<{ node?: string; edge?: string }>({});
   const dragRef = useRef<{ id: string; x: number; y: number; moved: boolean } | null>(null);
   const suppressClick = useRef(false);
   const [hoverCard, setHoverCard] = useState<HoverCard | null>(null);
-  const [legendOpen, setLegendOpen] = useState(false);
 
   // How spread out the map is; remembered in this browser. The graph only mounts client-side, so storage is there.
   const [spacing, setSpacing] = useState<Spacing>(() => {
@@ -294,7 +289,6 @@ export function WalletGraph({
   }, []);
 
   const draw = useCallback(() => {
-    frameRef.current = null;
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
@@ -303,7 +297,7 @@ export function WalletGraph({
     const { width, height } = sizeRef.current;
     const dpr = window.devicePixelRatio || 1;
     const t = transformRef.current;
-    const p = readPalette(canvas);
+    const p = readPalette(canvas, PALETTE);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
     ctx.setTransform(dpr * t.k, 0, 0, dpr * t.k, dpr * t.x, dpr * t.y);
@@ -376,7 +370,7 @@ export function WalletGraph({
           const tangent = pathTangent(segment, progress);
           const length = Math.hypot(tangent.x, tangent.y) || 1;
           const node = nodesById.get(end === "a" ? edge.a : edge.b);
-          const gap = (node ? nodeRadius(node) + (layoutRoles.get(node.id) === "bridge" ? 3 : 0) : 8) + 6 / t.k;
+          const gap = (node ? drawnRadius(node, layoutRoles) : 8) + 6 / t.k;
           const sign = end === "a" ? 1 : -1;
           const anchor = end === "a" ? from : to;
           return { x: anchor.x + (tangent.x / length) * gap * sign, y: anchor.y + (tangent.y / length) * gap * sign };
@@ -406,7 +400,7 @@ export function WalletGraph({
           const length = Math.hypot(tangent.x, tangent.y) || 1;
           const ux = tangent.x / length;
           const uy = tangent.y / length;
-          const inset = (targetNode ? nodeRadius(targetNode) + (layoutRoles.get(targetNode.id) === "bridge" ? 3 : 0) : 10) + 1 / t.k;
+          const inset = (targetNode ? drawnRadius(targetNode, layoutRoles) : 10) + 1 / t.k;
           const tipX = target.x - ux * inset;
           const tipY = target.y - uy * inset;
           const arrow = (selected ? 7 : 5.5) / t.k;
@@ -479,7 +473,7 @@ export function WalletGraph({
       const pos = positions.current.get(n.id);
       if (!pos) continue;
       const role = layoutRoles.get(n.id) ?? "peripheral";
-      const r = nodeRadius(n) + (role === "bridge" ? 3 : 0);
+      const r = drawnRadius(n, layoutRoles);
       const known = names.known(n.id);
       const label = nodeLabel(n, names);
       const infrastructure = n.kind === "program" || n.kind === "entity" || (n.kind === "counterparty" && stateOf(n.id) === "INFRASTRUCTURE");
@@ -563,10 +557,6 @@ export function WalletGraph({
     ctx.globalAlpha = 1;
   }, [segments]);
 
-  const schedule = useCallback(() => {
-    if (frameRef.current === null) frameRef.current = requestAnimationFrame(draw);
-  }, [draw]);
-
   const fit = useCallback((source: ReadonlyMap<string, Point> = positions.current) => {
     const canvas = canvasRef.current;
     if (!canvas || !zoomRef.current || source.size === 0) return;
@@ -590,7 +580,6 @@ export function WalletGraph({
     select(canvas).call(zoomRef.current.transform, t);
   }, []);
 
-  useEffect(schedule, [selectedNode, selectedEdge, names, visible, schedule]);
   // The value dots move, so the map redraws every frame while it's on screen.
   useEffect(() => {
     let animation = requestAnimationFrame(function tick() {
@@ -602,7 +591,7 @@ export function WalletGraph({
   // Entering or leaving isolation frames what's shown.
   useEffect(() => fit(), [isolated, fit]);
 
-  // Size to the container, crisp on HiDPI, and redraw on theme change.
+  // Size to the container; the frame loop picks up the new size (and any theme change).
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas?.parentElement) return;
@@ -610,23 +599,13 @@ export function WalletGraph({
       const width = canvas.parentElement?.clientWidth ?? 800;
       const height = canvas.parentElement?.clientHeight ?? 600;
       sizeRef.current = { width, height };
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.round(width * dpr);
-      canvas.height = Math.round(height * dpr);
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-      schedule();
+      sizeCanvas(canvas, width, height);
     };
     const observer = new ResizeObserver(resize);
     observer.observe(canvas.parentElement);
     resize();
-    const theme = matchMedia("(prefers-color-scheme: dark)");
-    theme.addEventListener("change", schedule);
-    return () => {
-      observer.disconnect();
-      theme.removeEventListener("change", schedule);
-    };
-  }, [fit, schedule]);
+    return () => observer.disconnect();
+  }, []);
 
   const toWorld = useCallback((event: { clientX: number; clientY: number }): Point => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -645,8 +624,7 @@ export function WalletGraph({
         const n = hitNodes[i];
         const pos = positions.current.get(n.id);
         if (!pos) continue;
-        const radius = nodeRadius(n) + (layoutRoles.get(n.id) === "bridge" ? 3 : 0);
-        if (Math.hypot(pos.x - w.x, pos.y - w.y) <= radius + 4) return { node: n.id };
+        if (Math.hypot(pos.x - w.x, pos.y - w.y) <= drawnRadius(n, layoutRoles) + 4) return { node: n.id };
       }
       let best: { id: string; d: number } | null = null;
       for (const sgm of segments()) {
@@ -677,14 +655,13 @@ export function WalletGraph({
       })
       .on("zoom", (event: { transform: ZoomTransform }) => {
         transformRef.current = event.transform;
-        schedule();
       });
     zoomRef.current = behavior;
     select(canvas).call(behavior).on("dblclick.zoom", null);
     return () => {
       select(canvas).on(".zoom", null);
     };
-  }, [hitAt, schedule]);
+  }, [hitAt]);
 
   // Pinch (or Ctrl/⌘ + wheel) zooms around the pointer; swipes and the plain wheel pan.
   useEffect(() => {
@@ -712,7 +689,6 @@ export function WalletGraph({
     if (positions.current.size === 0) {
       positions.current = new Map(layout);
       fit(layout);
-      schedule();
       return;
     }
     const from = new Map(positions.current);
@@ -734,12 +710,11 @@ export function WalletGraph({
           return [id, { x: start.x + (target.x - start.x) * eased, y: start.y + (target.y - start.y) * eased }];
         }),
       );
-      schedule();
       if (progress < 1) animation = requestAnimationFrame(step);
     };
     animation = requestAnimationFrame(step);
     return () => cancelAnimationFrame(animation);
-  }, [graph.edges, layout, fit, schedule]);
+  }, [graph.edges, layout, fit]);
 
   return (
     <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -761,7 +736,6 @@ export function WalletGraph({
             if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 4) return;
             drag.moved = true;
             positions.current.set(drag.id, toWorld(event));
-            schedule();
             return;
           }
           const hit = hitAt(event);
@@ -774,10 +748,7 @@ export function WalletGraph({
               flipX: event.clientX - rect.left > rect.width - 300,
               flipY: event.clientY - rect.top > rect.height - 180,
             });
-          if (hit.node !== hoverRef.current.node || hit.edge !== hoverRef.current.edge) {
-            hoverRef.current = hit;
-            schedule();
-          }
+          hoverRef.current = hit;
           const node = hit.node ? latest.current.graph.nodes.find((n) => n.id === hit.node) : undefined;
           const edge = hit.edge
             ? latest.current.graph.edges.find((item) => item.id === hit.edge)
@@ -869,7 +840,6 @@ export function WalletGraph({
           if (hoverRef.current.node || hoverRef.current.edge) {
             hoverRef.current = {};
             setHoverCard(null);
-            schedule();
           }
         }}
         onClick={(event) => {
@@ -1022,7 +992,6 @@ export function WalletGraph({
             onClick={() => {
               positions.current = new Map(layout);
               fit();
-              schedule();
             }}
           >
             <RotateCcwIcon />
@@ -1119,95 +1088,84 @@ export function WalletGraph({
         </div>
       )}
 
-      <div className="pointer-events-auto absolute bottom-3 left-3 flex flex-col gap-1 rounded-lg border bg-popover/90 px-2.5 py-2 text-[11px] text-muted-foreground backdrop-blur">
-        <div className="flex items-center gap-2">
+      <details className="group pointer-events-auto absolute bottom-3 left-3 rounded-lg border bg-popover/90 px-2.5 py-2 text-[11px] text-muted-foreground backdrop-blur">
+        <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
           <span className="font-medium text-foreground">
             {graph.counts.addresses.toLocaleString()} addresses · {graph.counts.connections.toLocaleString()} connections ·{" "}
             {graph.counts.transactions.toLocaleString()} transactions
           </span>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="ml-auto"
-            aria-label={legendOpen ? "Minimize graph legend" : "Expand graph legend"}
-            aria-expanded={legendOpen}
-            onClick={() => setLegendOpen((open) => !open)}
-          >
-            {legendOpen ? <ChevronDownIcon /> : <ChevronUpIcon />}
-          </Button>
+          <ChevronUpIcon className="ml-auto size-3.5 shrink-0 transition-transform group-open:rotate-180" aria-hidden />
+        </summary>
+        <div className="mt-1 flex flex-col gap-1">
+          <Legend color="bg-destructive">
+            Sent from focus <span className="font-semibold text-destructive">→</span>
+          </Legend>
+          <Legend color="bg-emerald-500">
+            <span className="font-semibold text-emerald-500">←</span> Received by focus
+          </Legend>
+          <Legend color="bg-muted-foreground">Both ways · red and green arrows · thicker line: more transactions</Legend>
+          <span>Dots flow in the direction value moved · more dots: more value, against the largest flow of the same token</span>
+          {showPrograms ? (
+            <Legend color="border-t-2 border-dotted border-tone-swap bg-transparent">Program called ({graph.counts.programConnections})</Legend>
+          ) : (
+            graph.counts.programConnections > 0 && <span>{graph.counts.programConnections.toLocaleString()} program connections hidden</span>
+          )}
+          <span className="flex items-center gap-2 pt-0.5">
+            <span className="flex w-5 items-center justify-center gap-0.5" aria-hidden>
+              <span className="size-1.5 rounded-full border border-muted-foreground" />
+              <span className="size-3 rounded-full border border-muted-foreground" />
+            </span>
+            Bigger node · more transactions
+          </span>
+          <span className="flex items-center gap-2">
+            <span className="flex w-5 justify-center" aria-hidden>
+              <span className="size-2.5 rounded-full bg-foreground" />
+            </span>
+            Primary wallet
+          </span>
+          <span className="flex items-center gap-2">
+            <span className="flex w-5 justify-center" aria-hidden>
+              <span className="flex size-3 items-center justify-center rounded-full border border-foreground">
+                <span className="size-1 rounded-full bg-foreground" />
+              </span>
+            </span>
+            Mapped wallet
+          </span>
+          <span className="flex items-center gap-2">
+            <span className="flex w-5 justify-center" aria-hidden>
+              <span className="size-3 rounded-full border border-muted-foreground" />
+            </span>
+            Counterparty · bright ring: shared by mapped wallets
+          </span>
+          <span className="flex items-center gap-2">
+            <span className="flex w-5 justify-center" aria-hidden>
+              <span className="size-2.5 rounded-[2px] border border-muted-foreground" />
+            </span>
+            Square: program or infrastructure · blue: a service standing for several of its addresses, select it to show them
+          </span>
+          <span className="flex items-center gap-2">
+            <span className="flex w-5 justify-center" aria-hidden>
+              <span className="size-3 rounded-full border border-dashed border-tone-lookalike" />
+            </span>
+            Look-alike · starts and ends like another address · hover to see its twin
+          </span>
+          <span className="flex items-center gap-2">
+            <span className="flex w-5 justify-center" aria-hidden>
+              <span className="size-3 rounded-full border border-dashed border-destructive" />
+            </span>
+            Likely decoy · only moves dust while its look-alike moves real value
+          </span>
+          <span className="flex items-center gap-2">
+            <span className="flex w-5 justify-center" aria-hidden>
+              <span className="size-2 rotate-45 bg-foreground" />
+            </span>
+            Diamond at a line&apos;s end: that side approved (signed) the transactions · hollow in the middle: someone else did
+          </span>
+          <span>Hover a line for its details · click a node or line to inspect · select a node, then Isolate</span>
+          <span>Zoomed out, only wallets, services, flagged addresses and the busiest lines are drawn; zoom in for the rest</span>
+          {graph.omittedNodes > 0 && <span>Dashed boxes collapse {graph.omittedNodes.toLocaleString()} lower-ranked addresses by kind · click one to show its addresses</span>}
         </div>
-        {legendOpen && (
-          <>
-            <Legend color="bg-destructive">
-              Sent from focus <span className="font-semibold text-destructive">→</span>
-            </Legend>
-            <Legend color="bg-emerald-500">
-              <span className="font-semibold text-emerald-500">←</span> Received by focus
-            </Legend>
-            <Legend color="bg-muted-foreground">Both ways · red and green arrows · thicker line: more transactions</Legend>
-            <span>Dots flow in the direction value moved · more dots: more value, against the largest flow of the same token</span>
-            {showPrograms ? (
-              <Legend color="border-t-2 border-dotted border-[oklch(0.7_0.14_250)] bg-transparent">Program called ({graph.counts.programConnections})</Legend>
-            ) : (
-              graph.counts.programConnections > 0 && <span>{graph.counts.programConnections.toLocaleString()} program connections hidden</span>
-            )}
-            <span className="flex items-center gap-2 pt-0.5">
-              <span className="flex w-5 items-center justify-center gap-0.5" aria-hidden>
-                <span className="size-1.5 rounded-full border border-muted-foreground" />
-                <span className="size-3 rounded-full border border-muted-foreground" />
-              </span>
-              Bigger node · more transactions
-            </span>
-            <span className="flex items-center gap-2">
-              <span className="flex w-5 justify-center" aria-hidden>
-                <span className="size-2.5 rounded-full bg-foreground" />
-              </span>
-              Primary wallet
-            </span>
-            <span className="flex items-center gap-2">
-              <span className="flex w-5 justify-center" aria-hidden>
-                <span className="flex size-3 items-center justify-center rounded-full border border-foreground">
-                  <span className="size-1 rounded-full bg-foreground" />
-                </span>
-              </span>
-              Mapped wallet
-            </span>
-            <span className="flex items-center gap-2">
-              <span className="flex w-5 justify-center" aria-hidden>
-                <span className="size-3 rounded-full border border-muted-foreground" />
-              </span>
-              Counterparty · bright ring: shared by mapped wallets
-            </span>
-            <span className="flex items-center gap-2">
-              <span className="flex w-5 justify-center" aria-hidden>
-                <span className="size-2.5 rounded-[2px] border border-muted-foreground" />
-              </span>
-              Square: program or infrastructure · blue: a service standing for several of its addresses, select it to show them
-            </span>
-            <span className="flex items-center gap-2">
-              <span className="flex w-5 justify-center" aria-hidden>
-                <span className="size-3 rounded-full border border-dashed border-[oklch(0.77_0.16_70)]" />
-              </span>
-              Look-alike · starts and ends like another address · hover to see its twin
-            </span>
-            <span className="flex items-center gap-2">
-              <span className="flex w-5 justify-center" aria-hidden>
-                <span className="size-3 rounded-full border border-dashed border-destructive" />
-              </span>
-              Likely decoy · only moves dust while its look-alike moves real value
-            </span>
-            <span className="flex items-center gap-2">
-              <span className="flex w-5 justify-center" aria-hidden>
-                <span className="size-2 rotate-45 bg-foreground" />
-              </span>
-              Diamond at a line&apos;s end: that side approved (signed) the transactions · hollow in the middle: someone else did
-            </span>
-            <span>Hover a line for its details · click a node or line to inspect · select a node, then Isolate</span>
-            <span>Zoomed out, only wallets, services, flagged addresses and the busiest lines are drawn; zoom in for the rest</span>
-            {graph.omittedNodes > 0 && <span>Dashed boxes collapse {graph.omittedNodes.toLocaleString()} lower-ranked addresses by kind · click one to show its addresses</span>}
-          </>
-        )}
-      </div>
+      </details>
     </div>
   );
 }

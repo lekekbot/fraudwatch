@@ -1,8 +1,8 @@
 import { type JsonRpcOptions, rpcCall } from "./json-rpc";
 
 /**
- * Standard Solana JSON-RPC only. Provider-specific ("enhanced") history APIs
- * get their own adapter; nothing here may depend on them.
+ * Standard Solana JSON-RPC, plus Helius's indexed history call when the URL is
+ * a Helius endpoint (every standard method stays available as a fallback).
  *
  * Request params are fixed so recorded fixtures replay exactly:
  * finalized commitment, jsonParsed encoding, v0 transactions allowed.
@@ -16,15 +16,6 @@ export type SignatureInfo = {
   slot: number;
   blockTime: number | null;
   err: unknown;
-};
-
-export type TokenAccountInfo = {
-  address: string;
-  mint: string;
-  owner: string;
-  programId: string;
-  amount: string;
-  decimals: number;
 };
 
 /** `getTransaction` with `encoding: "jsonParsed"`; only the fields FraudWatch reads are typed. */
@@ -71,14 +62,10 @@ export type RawInstruction = {
 };
 
 export type SolanaRpcAdapter = {
-  kind: "generic" | "helius";
   getSignaturesForAddress(address: string, opts: { before?: string }, signal: AbortSignal): Promise<SignatureInfo[]>;
   getTransaction(signature: string, signal: AbortSignal): Promise<RawParsedTransaction | null>;
-  getTokenAccountsByOwner(owner: string, programId: string, signal: AbortSignal): Promise<TokenAccountInfo[]>;
+  getTokenAccountsByOwner(owner: string, programId: string, signal: AbortSignal): Promise<string[]>;
   getAccountInfo(address: string, signal: AbortSignal): Promise<{ lamports: number; owner: string; data: unknown } | null>;
-  getBalance(address: string, signal: AbortSignal): Promise<number>;
-  getTokenAccountBalance(address: string, signal: AbortSignal): Promise<{ amount: string; decimals: number }>;
-  getLatestBlockhash(signal: AbortSignal): Promise<{ blockhash: string; slot: number }>;
   /** Provider fast path: full wallet history, including owned token accounts. */
   getTransactionsForAddress?(
     address: string,
@@ -94,24 +81,20 @@ export type SolanaRpcAdapter = {
   getAsset(id: string, signal: AbortSignal): Promise<{ name: string | null; symbol: string | null } | null>;
 };
 
-type ParsedTokenAccount = {
-  pubkey: string;
-  account: {
-    data: {
-      program?: string;
-      parsed?: { info?: { mint?: string; owner?: string; tokenAmount?: { amount?: string; decimals?: number } } };
-    };
-  };
-};
+function isHeliusRpcUrl(url: string): boolean {
+  try {
+    return new URL(url).hostname.endsWith(".helius-rpc.com");
+  } catch {
+    return false;
+  }
+}
 
-export function createGenericAdapter(url: string, options: JsonRpcOptions = {}): SolanaRpcAdapter {
+export function createRpcAdapter(url: string, options: JsonRpcOptions = {}): SolanaRpcAdapter {
   const opts: JsonRpcOptions = { maxRetries: 4, ...options, rateLimit: options.rateLimit ?? { until: 0 } };
   const call = <T>(method: string, params: unknown[] | Record<string, unknown>, signal: AbortSignal) =>
     rpcCall<T>(url, method, params, signal, opts);
 
-  return {
-    kind: "generic",
-
+  const adapter: SolanaRpcAdapter = {
     async getAsset(id, signal) {
       try {
         const asset = await call<{ content?: { metadata?: { name?: string; symbol?: string } } } | null>("getAsset", { id }, signal);
@@ -138,22 +121,12 @@ export function createGenericAdapter(url: string, options: JsonRpcOptions = {}):
     },
 
     async getTokenAccountsByOwner(owner, programId, signal) {
-      const result = await call<{ value: ParsedTokenAccount[] }>(
+      const result = await call<{ value: Array<{ pubkey: string }> }>(
         "getTokenAccountsByOwner",
         [owner, { programId }, { encoding: "jsonParsed", commitment: COMMITMENT }],
         signal,
       );
-      return result.value.map(({ pubkey, account }) => {
-        const info = account.data.parsed?.info;
-        return {
-          address: pubkey,
-          mint: info?.mint ?? "",
-          owner: info?.owner ?? owner,
-          programId,
-          amount: info?.tokenAmount?.amount ?? "0",
-          decimals: info?.tokenAmount?.decimals ?? 0,
-        };
-      });
+      return result.value.map((a) => a.pubkey);
     },
 
     async getAccountInfo(address, signal) {
@@ -164,28 +137,25 @@ export function createGenericAdapter(url: string, options: JsonRpcOptions = {}):
       );
       return result.value;
     },
-
-    async getBalance(address, signal) {
-      const result = await call<{ value: number }>("getBalance", [address, { commitment: COMMITMENT }], signal);
-      return result.value;
-    },
-
-    async getTokenAccountBalance(address, signal) {
-      const result = await call<{ value: { amount: string; decimals: number } }>(
-        "getTokenAccountBalance",
-        [address, { commitment: COMMITMENT }],
-        signal,
-      );
-      return { amount: result.value.amount, decimals: result.value.decimals };
-    },
-
-    async getLatestBlockhash(signal) {
-      const result = await call<{ context: { slot: number }; value: { blockhash: string } }>(
-        "getLatestBlockhash",
-        [{ commitment: COMMITMENT }],
-        signal,
-      );
-      return { blockhash: result.value.blockhash, slot: result.context.slot };
-    },
   };
+  if (!isHeliusRpcUrl(url)) return adapter;
+
+  adapter.getTransactionsForAddress = (address, range, paginationToken, signal) =>
+    call<{ data: RawParsedTransaction[]; paginationToken?: string | null }>(
+      "getTransactionsForAddress",
+      [
+        address,
+        {
+          transactionDetails: "full",
+          encoding: "jsonParsed",
+          maxSupportedTransactionVersion: 0,
+          sortOrder: "desc",
+          limit: 1000,
+          filters: { blockTime: { gte: range.start, lt: range.end }, tokenAccounts: "all" },
+          ...(paginationToken ? { paginationToken } : {}),
+        },
+      ],
+      signal,
+    );
+  return adapter;
 }

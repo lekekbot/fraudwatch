@@ -8,7 +8,7 @@ import type { FraudWatchDB } from "./db";
  * rebuilt on demand. Raw transactions are never in this list.
  *
  * Protocol annotations keyed to the registry version register here in Sprint 06.
- * Semantic events (`SEMANTIC_VERSION` plus each interpreter's version) are computed on read and not stored; a
+ * Semantic events (`SEMANTIC_VERSION`) are computed on read and not stored; a
  * table for them registers here with that version.
  */
 export type DerivedCache = {
@@ -26,12 +26,9 @@ export const DERIVED_CACHES: DerivedCache[] = [
 const metaKey = (name: string) => `derived:${name}`;
 
 /** Clear every derived cache whose recorded version is stale. Returns the names cleared. */
-export async function invalidateStaleDerivedCaches(
-  db: FraudWatchDB,
-  caches: DerivedCache[] = DERIVED_CACHES,
-): Promise<string[]> {
+export async function invalidateStaleDerivedCaches(db: FraudWatchDB): Promise<string[]> {
   const cleared: string[] = [];
-  for (const cache of caches) {
+  for (const cache of DERIVED_CACHES) {
     const recorded = await db.meta.get(metaKey(cache.name));
     if (recorded?.value === cache.version) continue;
     if (recorded !== undefined) {

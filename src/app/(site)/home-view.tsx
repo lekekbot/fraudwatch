@@ -76,7 +76,7 @@ export function HomeView() {
                   {renaming === c.id ? (
                     // While renaming, the row isn't a link: a click in the field mustn't open the case.
                     <span className="flex min-w-0 flex-1 flex-col gap-1 px-3 py-2">
-                      <CaseNameInput id={c.id} name={c.name} onDone={() => setRenaming(null)} className="h-8" />
+                      <CaseNameInput id={c.id} name={c.name} onDone={() => setRenaming(null)} className="h-8" confirmButtons />
                       <span className="font-mono text-xs text-muted-foreground">
                         {shortenAddress(c.primaryWallet, 6)} · {formatRange(c.range)}
                       </span>
@@ -92,17 +92,21 @@ export function HomeView() {
                       <FolderOpenIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
                     </Link>
                   )}
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="text-muted-foreground"
-                    aria-label={`Rename ${c.name}`}
-                    title="Rename case"
-                    onClick={() => setRenaming(c.id)}
-                  >
-                    <PencilIcon />
-                  </Button>
-                  <DeleteCaseButton id={c.id} name={c.name} compact />
+                  {renaming !== c.id && (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-muted-foreground"
+                        aria-label={`Rename ${c.name}`}
+                        title="Rename case"
+                        onClick={() => setRenaming(c.id)}
+                      >
+                        <PencilIcon />
+                      </Button>
+                      <DeleteCaseButton id={c.id} name={c.name} compact />
+                    </>
+                  )}
                 </li>
               ))}
             </ul>

@@ -63,7 +63,6 @@ const JUPITER_ROUTES = new Map([
 /** A Jupiter route: one swap for the wallet that authorised it, however many pools it hopped through. */
 export const jupiterSwap: Interpreter = {
   id: "jupiter-swap",
-  version: 1,
   interpret: (ctx) => {
     const routes = decoded(ctx, JUPITER_V6, JUPITER_ROUTES);
     const route = routes[0];
@@ -93,7 +92,6 @@ const MARINADE_OPS = new Map<string, { category: EventCategory; action: string; 
 /** A top-level Marinade call: SOL in for mSOL, or mSOL back for SOL. Routed through Marinade by an aggregator, it's that swap. */
 export const marinadeStake: Interpreter = {
   id: "marinade-liquid-stake",
-  version: 1,
   interpret: (ctx) => {
     const [call] = decoded(ctx, MARINADE, MARINADE_OPS, true);
     const actor = call && ((call.op.actor !== null ? call.ix.accounts[call.op.actor] : null) ?? ctx.feePayer);
@@ -131,7 +129,6 @@ const PAYS_IN = new Set(["DEPOSIT", "SUPPLY_COLLATERAL", "REPAY"]);
  */
 export const kaminoLending: Interpreter = {
   id: "kamino-lending",
-  version: 1,
   interpret: (ctx) => {
     const calls = decoded(ctx, KAMINO, KAMINO_OPS, true);
     const actor = movingSigner(ctx);
@@ -264,6 +261,5 @@ function cctpIn(ctx: TransactionContext): Interpretation | null {
 /** CCTP burns (out) and mints (in): the Solana side of a USDC bridge, with what could find the other side. */
 export const cctpBridge: Interpreter = {
   id: "cctp-bridge",
-  version: 1,
   interpret: (ctx) => cctpOut(ctx) ?? cctpIn(ctx),
 };

@@ -18,15 +18,15 @@ import { PanelSection, ShowMoreList } from "./panel";
 
 export const KINDS: { kind: EffectKind; label: string; dot: string }[] = [
   { kind: "SEND", label: "Send", dot: "bg-destructive" },
-  { kind: "RECEIVE", label: "Receive", dot: "bg-[oklch(0.72_0.16_155)]" },
-  { kind: "SWAP", label: "Swap", dot: "bg-[oklch(0.7_0.14_250)]" },
-  { kind: "NFT_BUY", label: "NFT buy", dot: "bg-[oklch(0.72_0.16_310)]" },
-  { kind: "NFT_SELL", label: "NFT sale", dot: "bg-[oklch(0.72_0.16_310)]" },
-  { kind: "NFT_MINT", label: "NFT mint", dot: "bg-[oklch(0.72_0.16_310)]" },
-  { kind: "NFT_SWAP", label: "NFT swap", dot: "bg-[oklch(0.72_0.16_310)]" },
-  { kind: "NFT_TRANSFER", label: "NFT transfer", dot: "bg-[oklch(0.72_0.16_310)]" },
-  { kind: "BURN", label: "Burn", dot: "bg-[oklch(0.72_0.17_50)]" },
-  { kind: "APPROVAL", label: "Approval", dot: "bg-[oklch(0.8_0.15_80)]" },
+  { kind: "RECEIVE", label: "Receive", dot: "bg-tone-receive" },
+  { kind: "SWAP", label: "Swap", dot: "bg-tone-swap" },
+  { kind: "NFT_BUY", label: "NFT buy", dot: "bg-tone-nft" },
+  { kind: "NFT_SELL", label: "NFT sale", dot: "bg-tone-nft" },
+  { kind: "NFT_MINT", label: "NFT mint", dot: "bg-tone-nft" },
+  { kind: "NFT_SWAP", label: "NFT swap", dot: "bg-tone-nft" },
+  { kind: "NFT_TRANSFER", label: "NFT transfer", dot: "bg-tone-nft" },
+  { kind: "BURN", label: "Burn", dot: "bg-tone-burn" },
+  { kind: "APPROVAL", label: "Approval", dot: "bg-tone-approval" },
   { kind: "STAKE", label: "Stake", dot: "bg-muted-foreground" },
   { kind: "ACCOUNT", label: "Account setup", dot: "bg-muted-foreground" },
   { kind: "PROGRAM", label: "Program call", dot: "bg-muted-foreground" },
@@ -36,17 +36,17 @@ export const KINDS: { kind: EffectKind; label: string; dot: string }[] = [
 /** Semantic event categories, in the order they're offered, with the timeline card colours. */
 export const CATEGORIES: { category: EventCategory; label: string; dot: string }[] = [
   { category: "TRANSFER", label: "Transfer", dot: "bg-destructive" },
-  { category: "SWAP", label: "Swap", dot: "bg-[oklch(0.7_0.14_250)]" },
-  { category: "NFT_TRADE", label: "NFT trade", dot: "bg-[oklch(0.72_0.16_310)]" },
-  { category: "NFT_MINT", label: "NFT mint", dot: "bg-[oklch(0.72_0.16_310)]" },
-  { category: "NFT_TRANSFER", label: "NFT transfer", dot: "bg-[oklch(0.72_0.16_310)]" },
-  { category: "STAKE", label: "Stake", dot: "bg-[oklch(0.74_0.12_195)]" },
-  { category: "UNSTAKE", label: "Unstake", dot: "bg-[oklch(0.74_0.12_195)]" },
-  { category: "LENDING", label: "Lending", dot: "bg-[oklch(0.74_0.12_195)]" },
-  { category: "LIQUIDITY", label: "Liquidity", dot: "bg-[oklch(0.74_0.12_195)]" },
-  { category: "BRIDGE", label: "Bridge", dot: "bg-[oklch(0.7_0.15_285)]" },
-  { category: "BURN", label: "Burn", dot: "bg-[oklch(0.72_0.17_50)]" },
-  { category: "APPROVAL", label: "Approval", dot: "bg-[oklch(0.8_0.15_80)]" },
+  { category: "SWAP", label: "Swap", dot: "bg-tone-swap" },
+  { category: "NFT_TRADE", label: "NFT trade", dot: "bg-tone-nft" },
+  { category: "NFT_MINT", label: "NFT mint", dot: "bg-tone-nft" },
+  { category: "NFT_TRANSFER", label: "NFT transfer", dot: "bg-tone-nft" },
+  { category: "STAKE", label: "Stake", dot: "bg-tone-defi" },
+  { category: "UNSTAKE", label: "Unstake", dot: "bg-tone-defi" },
+  { category: "LENDING", label: "Lending", dot: "bg-tone-defi" },
+  { category: "LIQUIDITY", label: "Liquidity", dot: "bg-tone-defi" },
+  { category: "BRIDGE", label: "Bridge", dot: "bg-tone-bridge" },
+  { category: "BURN", label: "Burn", dot: "bg-tone-burn" },
+  { category: "APPROVAL", label: "Approval", dot: "bg-tone-approval" },
   { category: "ACCOUNT", label: "Account setup", dot: "bg-muted-foreground" },
   { category: "PROGRAM_INTERACTION", label: "Program call", dot: "bg-muted-foreground" },
   { category: "UNKNOWN", label: "Unknown", dot: "bg-muted-foreground" },
@@ -56,7 +56,8 @@ export const CATEGORIES: { category: EventCategory; label: string; dot: string }
 /** How a semantic event category reads anywhere in the interface. */
 export const categoryLabel = (category: EventCategory) => CATEGORIES.find((c) => c.category === category)?.label ?? category;
 
-function Toggle({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+/** A filter list row. `strike`: an "all but these" list, struck through when off; otherwise an "only these" list, highlighted when on. */
+function Toggle({ on, strike = false, onClick, children }: { on: boolean; strike?: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       type="button"
@@ -64,7 +65,7 @@ function Toggle({ on, onClick, children }: { on: boolean; onClick: () => void; c
       onClick={onClick}
       className={cn(
         "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs",
-        on ? "hover:bg-muted/50" : "text-muted-foreground line-through opacity-60 hover:bg-muted/50",
+        strike ? (on ? "hover:bg-muted/50" : "text-muted-foreground line-through opacity-60 hover:bg-muted/50") : on ? "bg-muted font-medium" : "hover:bg-muted/50",
       )}
     >
       {children}
@@ -105,11 +106,11 @@ export const protocolName = (id: string) => registry.protocols.get(id)?.name ?? 
 const DAY = 86_400_000;
 const SHOWN_ASSETS = 8;
 const dateInput = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-const tabClass =
+export const tabClass =
   "flex-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none data-active:bg-secondary data-active:text-foreground";
 
 /** Left-panel section: choose which transactions appear on the map and in the table. */
-export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter, shown, onChange, hide, decoyCount = 0, hidden }: {
+export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter, shown, onChange, hide, decoyCount, hidden }: {
   /** Every transaction the views could show, one per wallet side: hidden ones are already left out, so counts match the map. */
   rows: FilterableTx[];
   assets: Assets;
@@ -121,11 +122,11 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
   shown: number;
   onChange: (filter: TxFilter) => void;
   /** Hide what the filters show, or what they take out of view (once per transaction each); filters are then cleared. */
-  hide?: { shown: { count: number; run: () => void }; filteredOut: { count: number; run: () => void } };
+  hide: { shown: { count: number; run: () => void }; filteredOut: { count: number; run: () => void } };
   /** Likely dust decoys (address-poisoning look-alikes) in the case; offers a filter to leave them out. */
-  decoyCount?: number;
+  decoyCount: number;
   /** Transactions hidden by hand or by rule, which the filters never see; `onShow` points to where they're managed. */
-  hidden?: { count: number; onShow: () => void };
+  hidden: { count: number; onShow: () => void };
 }) {
   const categoryCounts = new Map<EventCategory, number>();
   let lowConfidence = 0;
@@ -139,7 +140,7 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
     kindCounts.set(row.summary.kind, (kindCounts.get(row.summary.kind) ?? 0) + 1);
     for (const a of movedAssets(row.summary)) assetCounts.set(a, (assetCounts.get(a) ?? 0) + 1);
     for (const p of row.protocols) protocolCounts.set(p, (protocolCounts.get(p) ?? 0) + 1);
-    const tags = new Set(row.addresses.flatMap((a) => names.label(a)?.tags ?? []));
+    const tags = new Set(row.addresses.flatMap((a) => names.tags(a)));
     for (const t of tags) tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1);
   }
   const assetRows = [...assetCounts].sort((a, b) => b[1] - a[1]);
@@ -157,11 +158,18 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
     else if (amount !== null) onChange({ ...filter, minAmount: { assetId, amount } });
   };
   const minInvalid = minText.trim() !== "" && parseUnits(minText, decimalsOf(minAsset)) === null;
+  // Event and wallet-effect rows: a coloured dot, a label and a count, struck through when unticked.
+  const dotToggle = (key: string, label: string, dot: string, count: number | undefined, on: boolean, onClick: () => void) => (
+    <Toggle key={key} strike on={on} onClick={onClick}>
+      <span className={cn("size-2 shrink-0 rounded-full", dot)} aria-hidden />
+      <span className="flex-1">{label}</span>
+      <span className="tabular-nums">{count}</span>
+    </Toggle>
+  );
 
   return (
     <PanelSection
       title="Filters"
-      collapsible
       action={
         isFilterActive(filter) && (
           <Button
@@ -179,7 +187,7 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
     >
       <p className="text-xs text-muted-foreground" aria-live="polite">
         Showing {shown.toLocaleString()} of {new Set(rows.map((row) => row.signature)).size.toLocaleString()} transactions
-        {hidden && hidden.count > 0 && (
+        {hidden.count > 0 && (
           <>
             {" · "}
             <button type="button" className="underline-offset-4 hover:text-foreground hover:underline" title="Hidden by hand or by rule: they never reach the filters. Manage them below." onClick={hidden.onShow}>
@@ -213,17 +221,9 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
 
       <FilterGroup title="Event" active={filter.hiddenCategories.size + (filter.hideLowConfidence ? 1 : 0)} open>
         <div className="-mx-1 flex flex-col" role="group" aria-label="Event type">
-          {CATEGORIES.filter(({ category }) => categoryCounts.has(category)).map(({ category, label, dot }) => (
-            <Toggle
-              key={category}
-              on={!filter.hiddenCategories.has(category)}
-              onClick={() => onChange({ ...filter, hiddenCategories: toggled(filter.hiddenCategories, category) })}
-            >
-              <span className={cn("size-2 shrink-0 rounded-full", dot)} aria-hidden />
-              <span className="flex-1">{label}</span>
-              <span className="tabular-nums">{categoryCounts.get(category)}</span>
-            </Toggle>
-          ))}
+          {CATEGORIES.filter(({ category }) => categoryCounts.has(category)).map(({ category, label, dot }) =>
+            dotToggle(category, label, dot, categoryCounts.get(category), !filter.hiddenCategories.has(category), () => onChange({ ...filter, hiddenCategories: toggled(filter.hiddenCategories, category) })),
+          )}
         </div>
         {lowConfidence > 0 && (
           <label className="flex items-center gap-2 text-xs" title="Readings from a balance pattern or program call with nothing definitive behind it">
@@ -236,13 +236,9 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
 
       <FilterGroup title="Wallet effect" active={filter.hiddenKinds.size}>
         <div className="-mx-1 flex flex-col" role="group" aria-label="Wallet effect">
-          {KINDS.filter(({ kind }) => kindCounts.has(kind)).map(({ kind, label, dot }) => (
-            <Toggle key={kind} on={!filter.hiddenKinds.has(kind)} onClick={() => onChange({ ...filter, hiddenKinds: toggled(filter.hiddenKinds, kind) })}>
-              <span className={cn("size-2 shrink-0 rounded-full", dot)} aria-hidden />
-              <span className="flex-1">{label}</span>
-              <span className="tabular-nums">{kindCounts.get(kind)}</span>
-            </Toggle>
-          ))}
+          {KINDS.filter(({ kind }) => kindCounts.has(kind)).map(({ kind, label, dot }) =>
+            dotToggle(kind, label, dot, kindCounts.get(kind), !filter.hiddenKinds.has(kind), () => onChange({ ...filter, hiddenKinds: toggled(filter.hiddenKinds, kind) })),
+          )}
         </div>
       </FilterGroup>
 
@@ -309,6 +305,7 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
                         {visible.map(([assetId, count]) => (
                           <Toggle
                             key={assetId}
+                            strike
                             on={!filter.hiddenAssets.has(assetId)}
                             onClick={() => onChange({ ...filter, hiddenAssets: toggled(filter.hiddenAssets, assetId) })}
                           >
@@ -328,14 +325,14 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
               protocolRows.length > 0 ? (
                 <div className="-mx-1 flex flex-col" role="group" aria-label="Protocols">
                   {protocolRows.map(([id, count]) => (
-                    <OnlyToggle
+                    <Toggle
                       key={id}
                       on={filter.protocols.has(id)}
                       onClick={() => onChange({ ...filter, protocols: toggled(filter.protocols, id) })}
                     >
                       <span className="flex-1 truncate">{protocolName(id)}</span>
                       <span className="tabular-nums">{count}</span>
-                    </OnlyToggle>
+                    </Toggle>
                   ))}
                 </div>
               ) : null;
@@ -369,10 +366,10 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
         <FilterGroup title={`Tags${filter.tags.size > 0 ? " · only selected" : ""}`} active={filter.tags.size}>
           <div className="-mx-1 flex flex-col" role="group" aria-label="Tags">
             {tagRows.map(([tag, count]) => (
-              <OnlyToggle key={tag} on={filter.tags.has(tag)} onClick={() => onChange({ ...filter, tags: toggled(filter.tags, tag) })}>
+              <Toggle key={tag} on={filter.tags.has(tag)} onClick={() => onChange({ ...filter, tags: toggled(filter.tags, tag) })}>
                 <span className="flex-1 truncate">{tag}</span>
                 <span className="tabular-nums">{count}</span>
-              </OnlyToggle>
+              </Toggle>
             ))}
           </div>
         </FilterGroup>
@@ -423,7 +420,7 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
         </div>
       </FilterGroup>
 
-      {hide && isFilterActive(filter) && (() => {
+      {isFilterActive(filter) && (() => {
         // Unticking a type or asset takes noise out of view, so that's what to hide; the other filters zoom in on it.
         const excluding = filter.hiddenKinds.size > 0 || filter.hiddenAssets.size > 0 || filter.hideDecoys;
         const options = [
@@ -452,19 +449,5 @@ export function FilterPanel({ rows, assets, names, decimalsOf, caseRange, filter
         );
       })()}
     </PanelSection>
-  );
-}
-
-/** A toggle for "only these" lists: highlighted when selected, never struck through. */
-function OnlyToggle({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      aria-pressed={on}
-      onClick={onClick}
-      className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs", on ? "bg-muted font-medium" : "hover:bg-muted/50")}
-    >
-      {children}
-    </button>
   );
 }

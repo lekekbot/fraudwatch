@@ -80,7 +80,7 @@ export async function readCachedIngestion(
         transactionCount: cached.size,
         warnings,
       },
-      stats: { cachedTransactions: cached.size, fetchedTransactions: 0, rangesFetched: [] },
+      stats: { cachedTransactions: cached.size, fetchedTransactions: 0 },
       error: gaps.length > 0 ? previous?.error : undefined,
     });
   }

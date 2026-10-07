@@ -43,12 +43,11 @@ export function HidingSection({ c, rows, assets, names, decimalsOf, dialog, onDi
   onPickInTable?: () => void;
   onSave: (next: FraudWatchCase) => void;
 }) {
-  const tagsOf = (address: string) => names.label(address)?.tags ?? [];
   const manual = c.hiddenSignatures?.length ?? 0;
   // A transaction counts once however many lanes it's on.
   const byRules = new Set(
     rows.filter((row) => {
-      const why = hiddenBy(c, row, tagsOf);
+      const why = hiddenBy(c, row, names.tags);
       return why !== null && why !== "manual";
     }).map((row) => row.signature),
   ).size;
@@ -56,7 +55,7 @@ export function HidingSection({ c, rows, assets, names, decimalsOf, dialog, onDi
   const newRule = (): HideRule => ({ id: crypto.randomUUID(), name: `Rule ${rules.length + 1}`, enabled: true });
 
   return (
-    <PanelSection title="Hidden transactions" collapsible>
+    <PanelSection title="Hidden transactions">
       {manual === 0 && byRules === 0 ? (
         <p className="text-xs text-muted-foreground">Hide noise from the map: filter to it and hide it, tick rows in the table, or add a rule.</p>
       ) : (
@@ -120,9 +119,8 @@ function RulesDialog({ c, rows, assets, names, decimalsOf, initial, newRule, onS
   onClose: () => void;
 }) {
   const [editing, setEditing] = useState<HideRule | null>(initial);
-  const tagsOf = (address: string) => names.label(address)?.tags ?? [];
   const rules = c.hideRules ?? [];
-  const matches = (rule: HideRule) => new Set(rows.filter((row) => ruleMatches(rule, row, tagsOf)).map((row) => row.signature)).size;
+  const matches = (rule: HideRule) => new Set(rows.filter((row) => ruleMatches(rule, row, names.tags)).map((row) => row.signature)).size;
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -236,7 +234,7 @@ function RuleEditor({ rule, isNew, rows, assets, names, decimalsOf, matches, onC
   };
 
   const kindsSeen = new Set(seen<EffectKind>(rows, (row) => [row.summary.kind]));
-  const tagChoices = seen(rows, (row) => row.addresses.flatMap((a) => names.label(a)?.tags ?? []));
+  const tagChoices = seen(rows, (row) => row.addresses.flatMap(names.tags));
   const protocolChoices = seen(rows, (row) => row.protocols);
 
   return (

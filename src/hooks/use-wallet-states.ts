@@ -4,11 +4,11 @@ import { useEffect, useState } from "react";
 import { type AssetMetadata, fetchAssetMetadata, fetchCompressedAssetMetadata, nftCandidates } from "@/lib/assets/assets";
 import { cnftMoves } from "@/lib/solana/bubblegum";
 import type { CaseRange } from "@/lib/case/range";
-import { getDb } from "@/lib/db/db";
-import { getAssetMetadata, getWalletState, saveAssetMetadata } from "@/lib/db/wallet-states";
+import { tryGetDb } from "@/lib/db/db";
+import { getAssetMetadata, getWalletState } from "@/lib/db/wallet-states";
 import type { IngestionResult } from "@/lib/ingest/ingest";
 import { mapPool } from "@/lib/ingest/pool";
-import { createGenericAdapter } from "@/lib/rpc/generic-adapter";
+import { createRpcAdapter } from "@/lib/rpc/generic-adapter";
 import { reconstructWalletState, type WalletState } from "@/lib/state/reconstruct";
 
 export type WalletStates = { states: WalletState[]; assets: Map<string, AssetMetadata> };
@@ -38,12 +38,7 @@ export function useWalletStates(
     const controller = new AbortController();
 
     (async () => {
-      let db: ReturnType<typeof getDb> | null = null;
-      try {
-        db = getDb();
-      } catch {
-        db = null;
-      }
+      const db = tryGetDb();
 
       const states: WalletState[] = [];
       for (const w of result.wallets) {
@@ -73,7 +68,7 @@ export function useWalletStates(
       setValue({ states, assets: new Map(known), source: result });
 
       if (!db || !rpcUrl || toFetch.length === 0) return;
-      const adapter = createGenericAdapter(rpcUrl);
+      const adapter = createRpcAdapter(rpcUrl);
       const fetched: AssetMetadata[] = [];
       await mapPool(toFetch, 2, async (mint) => {
         try {
@@ -86,7 +81,7 @@ export function useWalletStates(
           // Leave it unnamed; it's retried next time.
         }
       }).catch(() => {});
-      if (fetched.length > 0) await saveAssetMetadata(db, fetched).catch(() => {});
+      if (fetched.length > 0) await db.token_metadata.bulkPut(fetched).catch(() => {});
       if (active && fetched.length > 0) {
         setValue({ states, assets: new Map([...known, ...fetched.map((m) => [m.id, m] as const)]), source: result });
       }

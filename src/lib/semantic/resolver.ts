@@ -1,9 +1,5 @@
-import { communityLabel } from "@/lib/labels/community";
-import type { AddressLabel } from "@/lib/labels/labels";
 import {
-  type AddressRole,
   enrichTransaction,
-  type ProtocolCategory,
   type ProtocolRegistry,
   protocolsUsed,
   type RegistryEntry,
@@ -12,16 +8,6 @@ import {
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import type { Infrastructure, InfrastructureRole, ProtocolRef } from "./events";
 
-/**
- * Who says what an address is. Only the registry is verified; community
- * names and the user's own labels are shown with their source and never
- * decide what a transaction did.
- */
-export type Attribution =
-  | { source: "registry"; verified: true; name: string; protocolId: string; category: ProtocolCategory; role: AddressRole }
-  | { source: "community"; verified: false; name: string }
-  | { source: "user"; verified: false; name: string };
-
 /** Everything known about the addresses in one transaction, resolved once for every interpreter. */
 export type ProtocolResolution = {
   registryVersion: number;
@@ -29,14 +15,10 @@ export type ProtocolResolution = {
   matches: RegistryEntry[];
   /** Verified non-core protocols and services taking part, first seen first. */
   protocols: ProtocolRef[];
-  /** Programs invoked that the registry doesn't list. */
-  unknownPrograms: string[];
   /** Programs, token accounts and verified pools, vaults, authorities and fee accounts. */
   infrastructure: Infrastructure[];
   /** The verified entry for an address, the only lookup that may shape an interpretation. */
   verified: (address: string) => RegistryEntry | undefined;
-  /** Every attribution for an address, verified first. */
-  attributions: (address: string) => Attribution[];
 };
 
 function infrastructureRole(entry: RegistryEntry): InfrastructureRole | null {
@@ -60,7 +42,7 @@ function infrastructureRole(entry: RegistryEntry): InfrastructureRole | null {
 
 export function resolveProtocols(
   tx: CanonicalTransaction,
-  options: { registry?: ProtocolRegistry; labels?: ReadonlyMap<string, AddressLabel> } = {},
+  options: { registry?: ProtocolRegistry } = {},
 ): ProtocolResolution {
   const reg = options.registry ?? registry;
   const enrichment = enrichTransaction(tx, reg);
@@ -84,18 +66,7 @@ export function resolveProtocols(
     registryVersion: enrichment.protocolRegistryVersion,
     matches: enrichment.matches,
     protocols: protocolsUsed(enrichment),
-    unknownPrograms: enrichment.unknownPrograms,
     infrastructure: [...infrastructure.values()],
     verified: (address) => known.get(address) ?? reg.lookup(address),
-    attributions: (address) => {
-      const out: Attribution[] = [];
-      const entry = known.get(address) ?? reg.lookup(address);
-      if (entry) out.push({ source: "registry", verified: true, name: entry.label, protocolId: entry.protocolId, category: entry.category, role: entry.role });
-      const community = communityLabel(address);
-      if (community) out.push({ source: "community", verified: false, name: community });
-      const user = options.labels?.get(address)?.name;
-      if (user) out.push({ source: "user", verified: false, name: user });
-      return out;
-    },
   };
 }
