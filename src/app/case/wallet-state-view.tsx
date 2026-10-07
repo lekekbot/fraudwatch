@@ -12,24 +12,21 @@ import { formatLamports } from "@/lib/solana/amount";
 import { shortenAddress } from "@/lib/solana/address";
 import { type AssetChange, type AssetState, netChange, type WalletState, type WalletTransactionEffect } from "@/lib/state/reconstruct";
 import type { EffectKind, EffectSummary } from "@/lib/state/summarize";
-import { type Assets, assetLabel, assetLogo, formatAssetAmount, formatUtc } from "./asset-format";
+import { type Assets, assetLabel, assetLogo, deltaClass, formatAssetAmount, formatUtc } from "./asset-format";
 import { cn } from "cn";
 import { AssetIcon } from "./asset-icon";
 import { ShowMoreList } from "./panel";
-import { kindLabel } from "./filter-panel";
+import { kindLabel, tabClass } from "./filter-panel";
 
 /** Rows per table page, pickable in the table's footer. */
 const PAGE_SIZES = [25, 50, 100, 200, 500];
 /** Assets listed per state card before "Show more". */
 const SHOWN = 6;
 
-const amount = formatAssetAmount;
-const time = formatUtc;
-
 function TransactionCell({ e, kind, wallet }: { e: WalletTransactionEffect; kind: EffectKind | undefined; wallet?: string }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span>{time(e.timestamp)}</span>
+      <span>{formatUtc(e.timestamp)}</span>
       {wallet && <span className="text-xs font-medium">{wallet}</span>}
       <a
         href={`https://solscan.io/tx/${e.signature}`}
@@ -46,12 +43,16 @@ function TransactionCell({ e, kind, wallet }: { e: WalletTransactionEffect; kind
   );
 }
 
-function AssetName({ assetId, assets }: { assetId: string; assets: Assets }) {
+/** An asset's icon and name; `children` go under the name. */
+function AssetName({ assetId, assets, children }: { assetId: string; assets: Assets; children?: React.ReactNode }) {
   const label = assetLabel(assetId, assets);
   return (
     <span className="flex items-center gap-2" title={assetId}>
       <AssetIcon label={label} logo={assetLogo(assetId, assets)} />
-      <span>{label}</span>
+      <span>
+        {label}
+        {children}
+      </span>
     </span>
   );
 }
@@ -81,7 +82,7 @@ function StateTable({ title, rows, status, state, assets }: {
                   <dt className="text-muted-foreground">
                     <AssetName assetId={r.assetId} assets={assets} />
                   </dt>
-                  <dd className="tabular-nums">{amount(r.amount, r.assetId, state, assets)}</dd>
+                  <dd className="tabular-nums">{formatAssetAmount(r.amount, r.assetId, state, assets)}</dd>
                 </div>
               ))}
             </dl>
@@ -107,7 +108,7 @@ export function WalletStateSummary({ state, assets }: { state: WalletState; asse
               {state.mismatches.map((m) => (
                 <li key={`${m.account}:${m.beforeSignature}`} className="font-mono break-all">
                   {assetLabel(m.assetId, assets)} in {shortenAddress(m.account, 4)}: expected{" "}
-                  {amount(m.expected, m.assetId, state, assets)}, observed {amount(m.observed, m.assetId, state, assets)}{" "}
+                  {formatAssetAmount(m.expected, m.assetId, state, assets)}, observed {formatAssetAmount(m.observed, m.assetId, state, assets)}{" "}
                   (after {shortenAddress(m.afterSignature, 4)}, before {shortenAddress(m.beforeSignature, 4)})
                 </li>
               ))}
@@ -119,11 +120,7 @@ export function WalletStateSummary({ state, assets }: { state: WalletState; asse
       <Tabs.Root defaultValue="opening" className="flex flex-col gap-2">
         <Tabs.List className="flex rounded-lg border p-0.5" aria-label="Wallet state">
           {(["opening", "closing", "net"] as const).map((tab) => (
-            <Tabs.Tab
-              key={tab}
-              value={tab}
-              className="flex-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none data-active:bg-secondary data-active:text-foreground"
-            >
+            <Tabs.Tab key={tab} value={tab} className={tabClass}>
               {tab === "opening" ? "Opening" : tab === "closing" ? "Closing" : "Net change"}
             </Tabs.Tab>
           ))}
@@ -160,9 +157,9 @@ export type TableNav = { index: number; count: number; previous: () => void; nex
 export type TableLane = {
   wallet: string;
   state: WalletState;
-  summaries?: readonly EffectSummary[];
+  summaries: readonly EffectSummary[];
   /** Why each of `state.effects` is hidden from the map, or null; hidden ones show only with "Show hidden". */
-  hidden?: readonly HiddenReason[];
+  hidden: readonly HiddenReason[];
 };
 
 /** One displayed line: a wallet's change of one asset in a transaction, or its "nothing moved" row. */
@@ -173,7 +170,6 @@ const sideKey = (side: TableSide) => `${side.wallet}|${side.signature}`;
 type SortKey = "time" | "asset" | "before" | "change" | "after";
 
 const SORT_LABEL: Record<SortKey, string> = { time: "Time (UTC)", asset: "Asset", before: "Before", change: "Change", after: "After" };
-/** Numeric columns open on their most useful direction first. */
 /** Time starts newest first and assets A–Z; amounts start largest first. */
 const firstDirection = (key: SortKey): 1 | -1 => (key === "asset" ? 1 : -1);
 
@@ -193,17 +189,17 @@ export function WalletStateTable({ lanes, assets, hiddenAssets, walletName, sele
   lanes: readonly TableLane[];
   assets: Assets;
   /** Assets the filters hide: their rows leave the table, as their movements leave the graph. */
-  hiddenAssets?: ReadonlySet<string>;
-  walletName?: (wallet: string) => string;
+  hiddenAssets: ReadonlySet<string>;
+  walletName: (wallet: string) => string;
   /** The transaction side open in the inspector; its rows are highlighted. */
-  selected?: TableSide | null;
+  selected: TableSide | null;
   /** Opens a transaction side in the inspector, or closes it with null. */
-  onSelect?: (side: TableSide | null) => void;
+  onSelect: (side: TableSide | null) => void;
   /** The inspector beside the table, told where the open transaction sits in the table's current order. */
-  renderPanel?: (nav: TableNav | null) => React.ReactNode;
-  /** Hide or bring back a batch of transactions; enables row selection. */
-  onHide?: (signatures: string[]) => void;
-  onUnhide?: (signatures: string[]) => void;
+  renderPanel: (nav: TableNav | null) => React.ReactNode;
+  /** Hide or bring back a batch of transactions, selected in the table. */
+  onHide: (signatures: string[]) => void;
+  onUnhide: (signatures: string[]) => void;
 }) {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "time", dir: -1 });
   const [page, setPage] = useState(0);
@@ -213,19 +209,18 @@ export function WalletStateTable({ lanes, assets, hiddenAssets, walletName, sele
   const [anchor, setAnchor] = useState<string | null>(null);
   // A how-to until the first hide from the table; the table only mounts in the browser, so storage is there.
   const [hinted, setHinted] = useState(() => localStorage.getItem(HIDE_HINT_KEY) === "1");
-  const selectable = Boolean(onHide && onUnhide);
-  const hiddenCount = new Set(lanes.flatMap((lane) => lane.state.effects.filter((_, i) => (lane.hidden?.[i] ?? null) !== null).map((e) => e.signature))).size;
+  const hiddenCount = new Set(lanes.flatMap((lane) => lane.state.effects.filter((_, i) => lane.hidden[i] !== null).map((e) => e.signature))).size;
   const many = lanes.length > 1;
 
   // Every row from the whole history, not just the first page: sort sees it all.
   const allRows: TableRow[] = lanes.flatMap((lane) =>
     lane.state.effects.flatMap((e, i): TableRow[] => {
-      const why = lane.hidden?.[i] ?? null;
+      const why = lane.hidden[i] ?? null;
       if (why !== null && !showHidden) return [];
-      const kind = lane.summaries?.[i]?.kind;
+      const kind = lane.summaries[i]?.kind;
       const base = { effect: e, wallet: lane.wallet, state: lane.state, kind, hidden: why };
       // Unchanged balances stay in the data but add nothing to the table; nor do filtered-out assets.
-      const rows = e.assetChanges.filter((c) => (c.delta !== "0" || (c.assetId === "SOL" && e.feeLamports !== "0")) && !hiddenAssets?.has(c.assetId));
+      const rows = e.assetChanges.filter((c) => (c.delta !== "0" || (c.assetId === "SOL" && e.feeLamports !== "0")) && !hiddenAssets.has(c.assetId));
       if (rows.length === 0) return [{ ...base, change: null }];
       return rows.map((change) => ({ ...base, change }));
     }),
@@ -235,9 +230,12 @@ export function WalletStateTable({ lanes, assets, hiddenAssets, walletName, sele
     let byKey = 0;
     if (sort.key === "time") byKey = timeOf(a) - timeOf(b);
     else if (sort.key === "asset") byKey = assetLabel(a.change?.assetId ?? "", assets).localeCompare(assetLabel(b.change?.assetId ?? "", assets));
-    else if (sort.key === "before") byKey = asNumber(a.change?.before, a.change?.assetId ?? null, assets) - asNumber(b.change?.before, b.change?.assetId ?? null, assets);
-    else if (sort.key === "after") byKey = asNumber(a.change?.after, a.change?.assetId ?? null, assets) - asNumber(b.change?.after, b.change?.assetId ?? null, assets);
-    else byKey = Math.abs(asNumber(a.change?.delta, a.change?.assetId ?? null, assets)) - Math.abs(asNumber(b.change?.delta, b.change?.assetId ?? null, assets));
+    else {
+      // Amounts compare as decimals; changes by size, whichever way they went.
+      const field = sort.key === "change" ? "delta" : sort.key;
+      const value = (row: TableRow) => asNumber(row.change?.[field], row.change?.assetId ?? null, assets);
+      byKey = field === "delta" ? Math.abs(value(a)) - Math.abs(value(b)) : value(a) - value(b);
+    }
     // Time, then signature and wallet, keep the order stable when the key ties.
     return (
       byKey * sort.dir ||
@@ -262,7 +260,7 @@ export function WalletStateTable({ lanes, assets, hiddenAssets, walletName, sele
   const order = [...sides.values()];
   const at = selected ? order.findIndex((side) => sideKey(side) === sideKey(selected)) : -1;
   const open = (side: TableSide | undefined) => {
-    if (!side || !onSelect) return;
+    if (!side) return;
     setPage(Math.floor(sorted.findIndex((row) => row.effect.signature === side.signature && row.wallet === side.wallet) / pageSize));
     onSelect(side);
   };
@@ -377,7 +375,7 @@ export function WalletStateTable({ lanes, assets, hiddenAssets, walletName, sele
           ) : (
             <>
               <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                {selectable && hiddenCount > 0 && (
+                {hiddenCount > 0 && (
                   <label className="flex items-center gap-1.5">
                     <Checkbox checked={showHidden} onCheckedChange={setShowHidden} />
                     Show hidden ({hiddenCount.toLocaleString()})
@@ -395,12 +393,12 @@ export function WalletStateTable({ lanes, assets, hiddenAssets, walletName, sele
                       </Button>
                     )}
                     {pickedShown.length > 0 && (
-                      <Button size="xs" onClick={() => act(onHide!, pickedShown)}>
+                      <Button size="xs" onClick={() => act(onHide, pickedShown)}>
                         Hide {pickedShown.length.toLocaleString()} from map
                       </Button>
                     )}
                     {pickedHidden.length > 0 && (
-                      <Button size="xs" variant="outline" onClick={() => act(onUnhide!, pickedHidden)}>
+                      <Button size="xs" variant="outline" onClick={() => act(onUnhide, pickedHidden)}>
                         Unhide {pickedHidden.length.toLocaleString()}
                       </Button>
                     )}
@@ -410,7 +408,7 @@ export function WalletStateTable({ lanes, assets, hiddenAssets, walletName, sele
                   </span>
                 ) : (
                   <span className="ml-auto tabular-nums" aria-live="polite">
-                    {selectable && !hinted && <span className="pr-3 text-muted-foreground/80">Double-click a row to select it · Shift-click selects a range ·</span>}
+                    {!hinted && <span className="pr-3 text-muted-foreground/80">Double-click a row to select it · Shift-click selects a range ·</span>}
                     {transactionCount.toLocaleString()} transactions
                   </span>
                 )}
@@ -423,21 +421,19 @@ export function WalletStateTable({ lanes, assets, hiddenAssets, walletName, sele
                   <table className="w-full text-sm">
                     <thead className="text-left text-xs text-muted-foreground">
                       <tr>
-                        {selectable && (
-                          <th className="w-8 px-1 py-2 align-middle">
-                            <Checkbox
-                              className="mx-auto"
-                              aria-label="Select this page"
-                              checked={pageAll}
-                              indeterminate={!pageAll && pageSigs.some((sig) => checked.has(sig))}
-                              onCheckedChange={() => {
-                                const next = new Set(checked);
-                                for (const sig of pageSigs) if (pageAll) next.delete(sig); else next.add(sig);
-                                setChecked(next);
-                              }}
-                            />
-                          </th>
-                        )}
+                        <th className="w-8 px-1 py-2 align-middle">
+                          <Checkbox
+                            className="mx-auto"
+                            aria-label="Select this page"
+                            checked={pageAll}
+                            indeterminate={!pageAll && pageSigs.some((sig) => checked.has(sig))}
+                            onCheckedChange={() => {
+                              const next = new Set(checked);
+                              for (const sig of pageSigs) if (pageAll) next.delete(sig); else next.add(sig);
+                              setChecked(next);
+                            }}
+                          />
+                        </th>
                         {header("time")}
                         {header("asset")}
                         {header("before")}
@@ -454,78 +450,59 @@ export function WalletStateTable({ lanes, assets, hiddenAssets, walletName, sele
                         const groupStart = i === 0 || shown[i - 1].effect.signature !== e.signature || shown[i - 1].wallet !== wallet;
                         // Every row of a transaction opens it; Enter does too, for keyboard users.
                         // A double-click selects the transaction for bulk hiding, on top of opening it.
-                        const rowProps = onSelect && {
+                        const rowProps = {
                           tabIndex: 0,
                           "aria-selected": isSelected,
                           onClick: () => onSelect(side),
                           onDoubleClick: (event: React.MouseEvent) => {
-                            if (!selectable) return;
                             event.stopPropagation();
                             check(e.signature, event.shiftKey);
                           },
                           onKeyDown: (event: React.KeyboardEvent) => event.key === "Enter" && onSelect(side),
                         };
                         const rowClass = cn(
-                          onSelect && "cursor-pointer hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none",
+                          "cursor-pointer hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none",
                           isSelected && "bg-muted/60 hover:bg-muted/60",
                           row.hidden !== null && "text-muted-foreground opacity-60",
                         );
-                        // One checkbox per transaction, on the first of its rows; it selects without opening the row.
-                        const selectCell = selectable && (
-                          <td className="w-8 px-1 py-1.5 align-middle" onClick={(event) => event.stopPropagation()}>
-                            {groupStart && (
-                              <Checkbox
-                                className="mx-auto"
-                                aria-label={`Select ${e.signature}`}
-                                checked={checked.has(e.signature)}
-                                // The native event rides along, so shift-click still selects a range.
-                                onCheckedChange={(_checked, details) => check(e.signature, Boolean((details.event as { shiftKey?: boolean } | undefined)?.shiftKey))}
-                              />
-                            )}
-                          </td>
-                        );
-                        const hiddenNote = groupStart && row.hidden !== null && (
-                          <span className="block text-[10px] tracking-wide uppercase">{row.hidden === "manual" ? "Hidden" : `Hidden · ${row.hidden.name}`}</span>
-                        );
-                        if (!c) {
-                          return (
-                            <tr key={`${wallet}:${e.signature}:none`} className={cn(groupStart && "border-t", rowClass)} {...rowProps}>
-                              {selectCell}
-                              <td className="py-1.5 pr-4 align-top whitespace-nowrap tabular-nums">
-                                {groupStart && <TransactionCell e={e} kind={kind} wallet={many ? walletName?.(wallet) : undefined} />}
-                                {hiddenNote}
-                              </td>
+                        return (
+                          <tr key={`${wallet}:${e.signature}:${c?.assetId ?? "none"}`} className={cn(groupStart && "border-t", rowClass)} {...rowProps}>
+                            {/* One checkbox per transaction, on the first of its rows; it selects without opening the row. */}
+                            <td className="w-8 px-1 py-1.5 align-middle" onClick={(event) => event.stopPropagation()}>
+                              {groupStart && (
+                                <Checkbox
+                                  className="mx-auto"
+                                  aria-label={`Select ${e.signature}`}
+                                  checked={checked.has(e.signature)}
+                                  // The native event rides along, so shift-click still selects a range.
+                                  onCheckedChange={(_checked, details) => check(e.signature, Boolean((details.event as { shiftKey?: boolean } | undefined)?.shiftKey))}
+                                />
+                              )}
+                            </td>
+                            <td className="py-1.5 pr-4 align-top whitespace-nowrap tabular-nums">
+                              {groupStart && <TransactionCell e={e} kind={kind} wallet={many ? walletName(wallet) : undefined} />}
+                              {groupStart && row.hidden !== null && (
+                                <span className="block text-[10px] tracking-wide uppercase">{row.hidden === "manual" ? "Hidden" : `Hidden · ${row.hidden.name}`}</span>
+                              )}
+                            </td>
+                            {c ? (
+                              <>
+                                <td className="py-1.5 pr-4">
+                                  <AssetName assetId={c.assetId} assets={assets}>
+                                    {c.assetId === "SOL" && e.feeLamports !== "0" && (
+                                      <span className="block text-xs text-muted-foreground">incl. {formatLamports(e.feeLamports)} fee</span>
+                                    )}
+                                  </AssetName>
+                                </td>
+                                <td className="py-1.5 pr-4 text-right tabular-nums">{c.before && formatAssetAmount(c.before, c.assetId, state, assets)}</td>
+                                <td className={`py-1.5 pr-4 text-right tabular-nums ${deltaClass(c.delta)}`}>{formatAssetAmount(c.delta, c.assetId, state, assets, true)}</td>
+                                <td className="py-1.5 pr-0 text-right tabular-nums">{c.after && formatAssetAmount(c.after, c.assetId, state, assets)}</td>
+                              </>
+                            ) : (
                               <td colSpan={4} className="py-1.5 text-muted-foreground">
                                 No balance change for this wallet
                               </td>
-                            </tr>
-                          );
-                        }
-                        return (
-                          <tr key={`${wallet}:${e.signature}:${c.assetId}`} className={cn(groupStart && "border-t", rowClass)} {...rowProps}>
-                            {selectCell}
-                            <td className="py-1.5 pr-4 align-top whitespace-nowrap tabular-nums">
-                              {groupStart && <TransactionCell e={e} kind={kind} wallet={many ? walletName?.(wallet) : undefined} />}
-                              {hiddenNote}
-                            </td>
-                            <td className="py-1.5 pr-4">
-                              <div className="flex items-start gap-2">
-                                <AssetIcon label={assetLabel(c.assetId, assets)} logo={assetLogo(c.assetId, assets)} className="mt-0.5" />
-                                <div title={c.assetId}>
-                                  {assetLabel(c.assetId, assets)}
-                                  {c.assetId === "SOL" && e.feeLamports !== "0" && (
-                                    <span className="block text-xs text-muted-foreground">incl. {formatLamports(e.feeLamports)} fee</span>
-                                  )}
-                                </div>
-                              </div>
-                            </td>
-                            <td className="py-1.5 pr-4 text-right tabular-nums">{c.before && amount(c.before, c.assetId, state, assets)}</td>
-                            <td
-                              className={`py-1.5 pr-4 text-right tabular-nums ${c.delta.startsWith("-") ? "text-destructive" : c.delta !== "0" ? "text-emerald-500" : "text-muted-foreground"}`}
-                            >
-                              {amount(c.delta, c.assetId, state, assets, true)}
-                            </td>
-                            <td className="py-1.5 pr-0 text-right tabular-nums">{c.after && amount(c.after, c.assetId, state, assets)}</td>
+                            )}
                           </tr>
                         );
                       })}
@@ -538,7 +515,7 @@ export function WalletStateTable({ lanes, assets, hiddenAssets, walletName, sele
           )}
         </div>
       </div>
-      {renderPanel?.(nav)}
+      {renderPanel(nav)}
     </>
   );
 }
@@ -564,8 +541,8 @@ function NetChange({ state, assets }: { state: WalletState; assets: Assets }) {
                   <dt className="text-muted-foreground">
                     <AssetName assetId={c.assetId} assets={assets} />
                   </dt>
-                  <dd className={`tabular-nums ${c.delta.startsWith("-") ? "text-destructive" : "text-emerald-500"}`}>
-                    {amount(c.delta, c.assetId, state, assets, true)}
+                  <dd className={`tabular-nums ${deltaClass(c.delta)}`}>
+                    {formatAssetAmount(c.delta, c.assetId, state, assets, true)}
                   </dd>
                 </div>
               ))}

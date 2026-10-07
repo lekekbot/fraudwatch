@@ -42,17 +42,14 @@ export type ProtocolRegistry = {
   lookup: (address: string) => RegistryEntry | undefined;
   /** Protocols and services by id: name and category. */
   protocols: ReadonlyMap<string, { name: string; category: ProtocolCategory }>;
-  size: number;
 };
-
-export class RegistryError extends Error {}
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** Validates registry JSON against the rules in `protocols/schema.json` and indexes it by address. */
 export function parseRegistry(json: unknown): ProtocolRegistry {
   const fail = (path: string, problem: string): never => {
-    throw new RegistryError(`Protocol registry: ${path} ${problem}`);
+    throw new Error(`Protocol registry: ${path} ${problem}`);
   };
   if (!isObject(json)) fail("root", "must be an object");
   const root = json as Record<string, unknown>;
@@ -91,7 +88,7 @@ export function parseRegistry(json: unknown): ProtocolRegistry {
       });
     }
   }
-  return { version: version as number, lookup: (address) => byAddress.get(address), protocols, size: byAddress.size };
+  return { version: version as number, lookup: (address) => byAddress.get(address), protocols };
 }
 
 /** The bundled registry. Centralized wallets stay in their own maintainable source file. */

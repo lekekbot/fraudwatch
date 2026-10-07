@@ -6,14 +6,6 @@ export async function listRecentCases(db: FraudWatchDB, limit = 20): Promise<Fra
   return db.cases.orderBy("updatedAt").reverse().limit(limit).toArray();
 }
 
-export async function getCase(db: FraudWatchDB, id: string): Promise<FraudWatchCase | undefined> {
-  return db.cases.get(id);
-}
-
-export async function saveCase(db: FraudWatchDB, fwCase: FraudWatchCase): Promise<void> {
-  await db.cases.put(fwCase);
-}
-
 /**
  * Rename a case. The name is trimmed and must be 1–MAX_CASE_NAME_LENGTH
  * characters; returns the saved name, or throws with a message to show.

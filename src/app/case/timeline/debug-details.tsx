@@ -1,5 +1,4 @@
 import { CopyIcon } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import type { BehaviorObservation } from "@/lib/behavior/observations";
 import type { SemanticEvent } from "@/lib/semantic/events";
@@ -7,6 +6,7 @@ import { analysisFingerprint, analysisVersions } from "@/lib/semantic/versions";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import type { WalletTransactionEffect } from "@/lib/state/reconstruct";
 import type { EffectSummary } from "@/lib/state/summarize";
+import { copy } from "./inspector-ui";
 
 /** JSON that survives bigints. */
 const json = (value: unknown) => JSON.stringify(value, (_, v) => (typeof v === "bigint" ? v.toString() : v), 2);
@@ -64,7 +64,7 @@ export function DebugDetails({
             {event.trace.map((t) => (
               <li key={t.id} className="flex justify-between gap-2 font-mono">
                 <span>
-                  {t.id}@{t.version}
+                  {t.id}
                 </span>
                 <span className={t.outcome === "matched" ? "text-emerald-500" : t.outcome === "failed" ? "text-destructive" : "text-muted-foreground"}>{t.outcome.replace("_", " ")}</span>
               </li>
@@ -93,7 +93,7 @@ export function DebugDetails({
         <Button
           variant="outline"
           size="sm"
-          onClick={() => navigator.clipboard.writeText(json(bundle)).then(() => toast.success("Debug bundle copied."), () => toast.error("Couldn't copy."))}
+          onClick={() => copy(json(bundle), "Debug bundle")}
         >
           <CopyIcon /> Copy debug bundle
         </Button>

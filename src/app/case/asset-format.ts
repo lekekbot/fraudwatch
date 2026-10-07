@@ -31,9 +31,17 @@ export function formatAssetAmount(value: string, assetId: string, state: WalletS
   return signed && !value.startsWith("-") && value !== "0" ? `+${text}` : text;
 }
 
+/** Text colour for a signed change: red out, green in, muted for none. */
+export const deltaClass = (delta: string) => (delta.startsWith("-") ? "text-destructive" : delta !== "0" ? "text-emerald-500" : "text-muted-foreground");
+
 export function formatUtc(timestamp: string | number | null): string {
   if (timestamp === null) return "—";
   return new Date(timestamp).toISOString().slice(0, 19).replace("T", " ");
+}
+
+/** "YYYY-MM-DD HH:MM", for times where seconds are noise. */
+export function formatUtcMinute(timestamp: string | number): string {
+  return new Date(timestamp).toISOString().slice(0, 16).replace("T", " ");
 }
 
 /** One NFT's name, or "3 NFTs" for a bundle. */

@@ -2,11 +2,11 @@
 
 import { scaleUtc } from "d3-scale";
 import { select } from "d3-selection";
-import { type ZoomBehavior, type ZoomTransform, zoom, zoomIdentity } from "d3-zoom";
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { wheelAction } from "@/lib/gestures";
+import { type ZoomBehavior, type ZoomTransform, zoomIdentity } from "d3-zoom";
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { Names } from "@/lib/labels/labels";
 import { binEvents, type Relationship } from "@/lib/timeline/relationships";
+import { horizontalZoom, readPalette, sizeCanvas } from "../canvas";
 
 /** Rows drawn: the busiest relationships. */
 const MAX_ROWS = 15;
@@ -35,16 +35,14 @@ const utcRange = (start: number, end: number) => {
  * fell in each slice of time; above the line is what the mapped wallet sent,
  * below what it received.
  */
-export const RelationshipChart = forwardRef<
-  RelationshipChartHandle,
-  {
-    relationships: Relationship[];
-    range: { start: number; end: number };
-    names: Names;
-    /** Opens a transaction, seen from `wallet`'s lane. */
-    onPick: (signature: string, wallet: string) => void;
-  }
->(function RelationshipChart({ relationships, range, names, onPick }, ref) {
+export function RelationshipChart({ ref, relationships, range, names, onPick }: {
+  ref?: React.Ref<RelationshipChartHandle>;
+  relationships: Relationship[];
+  range: { start: number; end: number };
+  names: Names;
+  /** Opens a transaction, seen from `wallet`'s lane. */
+  onPick: (signature: string, wallet: string) => void;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const transformRef = useRef<ZoomTransform>(zoomIdentity);
   const zoomRef = useRef<ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
@@ -73,14 +71,7 @@ export const RelationshipChart = forwardRef<
     const { width, height } = sizeRef.current;
     const dpr = window.devicePixelRatio || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const css = getComputedStyle(canvas);
-    const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
-    const fg = v("--foreground", "#eee");
-    const muted = v("--muted-foreground", "#999");
-    const border = v("--border", "#333");
-    const bg = v("--background", "#111");
-    const send = v("--destructive", "#e5484d");
-    const receive = "oklch(0.72 0.16 155)";
+    const { fg, muted, border, bg, send, receive } = readPalette(canvas, { fg: "--foreground", muted: "--muted-foreground", border: "--border", bg: "--background", send: "--destructive", receive: "--tone-receive" });
     ctx.clearRect(0, 0, width, height);
     const x = scale();
     const left = GUTTER + PAD;
@@ -178,11 +169,7 @@ export const RelationshipChart = forwardRef<
       const row = Math.max(ROW_MIN, Math.min(ROW_MAX, Math.floor((view - TOP - AXIS - 8) / count)));
       const height = Math.max(view, TOP + count * row + AXIS + 8);
       sizeRef.current = { width, height, view, row };
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.round(width * dpr);
-      canvas.height = Math.round(height * dpr);
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
+      sizeCanvas(canvas, width, height);
       zoomRef.current?.extent([[0, 0], [width, height]]);
       schedule();
     };
@@ -196,30 +183,12 @@ export const RelationshipChart = forwardRef<
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const behavior = zoom<HTMLCanvasElement, unknown>()
-      .scaleExtent([1, 5000])
-      .filter((event: MouseEvent) => event.type !== "wheel" && !event.button)
-      .on("zoom", (event: { transform: ZoomTransform }) => {
-        transformRef.current = zoomIdentity.translate(event.transform.x, 0).scale(event.transform.k);
-        schedule();
-      });
+    const { behavior, dispose } = horizontalZoom(canvas, 5000, () => sizeRef.current.height > sizeRef.current.view + 1, (t) => {
+      transformRef.current = t;
+      schedule();
+    });
     zoomRef.current = behavior;
-    select(canvas).call(behavior).on("dblclick.zoom", null);
-    const onWheel = (event: WheelEvent) => {
-      const { height, view } = sizeRef.current;
-      const action = wheelAction(event, height > view + 1);
-      if (action.type === "scroll") return;
-      event.preventDefault();
-      if (action.type === "zoom") {
-        const rect = canvas.getBoundingClientRect();
-        select(canvas).call(behavior.scaleBy, action.factor, [event.clientX - rect.left, 0]);
-      } else select(canvas).call(behavior.translateBy, -action.dx / transformRef.current.k, 0);
-    };
-    canvas.addEventListener("wheel", onWheel, { passive: false });
-    return () => {
-      select(canvas).on(".zoom", null);
-      canvas.removeEventListener("wheel", onWheel);
-    };
+    return dispose;
   }, [schedule]);
 
   useEffect(() => schedule(), [rows, range, names, schedule]);
@@ -272,8 +241,8 @@ export const RelationshipChart = forwardRef<
           setTip(
             hit
               ? {
-                  x: px,
-                  y: py,
+                  x: Math.min(px + 12, sizeRef.current.width - 260),
+                  y: py + 12,
                   lines: [
                     `${names.of(hit.rel.a)} ↔ ${names.of(hit.rel.b)}`,
                     `${hit.bin.sent.toLocaleString()} sent · ${hit.bin.received.toLocaleString()} received`,
@@ -298,7 +267,7 @@ export const RelationshipChart = forwardRef<
       {tip && (
         <div
           className="pointer-events-none absolute z-10 rounded-md border bg-popover px-2 py-1.5 text-xs shadow-md"
-          style={{ left: Math.min(tip.x + 12, sizeRef.current.width - 260), top: tip.y + 12 }}
+          style={{ left: tip.x, top: tip.y }}
         >
           {tip.lines.map((line, i) => (
             <div key={i} className={i === 0 ? "font-medium" : "text-muted-foreground"}>
@@ -309,4 +278,4 @@ export const RelationshipChart = forwardRef<
       )}
     </div>
   );
-});
+}

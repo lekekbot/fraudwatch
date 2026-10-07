@@ -82,7 +82,6 @@ type Move = {
   counterparty: string;
 };
 
-const ZERO = BigInt(0);
 const isBridge = (counterparty: string) => counterparty.startsWith("bridge:");
 /** Wrapped SOL is SOL moved through a token account; the rules treat them as one asset. */
 const assetKey = (assetId: string) => (assetId === WRAPPED_SOL_MINT ? NATIVE_SOL : assetId);
@@ -96,7 +95,7 @@ function movesOf(wallet: string, sequence: readonly { event: SemanticEvent; time
   const floor = (assetId: string) => {
     if (assetId === NATIVE_SOL) return BigInt(t.dust.minLamports);
     const decimals = decimalsOf(assetId);
-    return decimals === undefined ? BigInt(1) : BigInt(Math.max(1, Math.round(10 ** decimals * t.dust.minTokenFraction)));
+    return decimals === undefined ? 1n : BigInt(Math.max(1, Math.round(10 ** decimals * t.dust.minTokenFraction)));
   };
   const moves: Move[] = [];
   for (const { event, time } of sequence) {
@@ -127,7 +126,7 @@ function movesOf(wallet: string, sequence: readonly { event: SemanticEvent; time
 }
 
 const seconds = (from: number, to: number) => Math.round((to - from) / 1000);
-const percent = (part: bigint, whole: bigint) => (whole === ZERO ? 0 : Number((part * BigInt(10_000)) / whole) / 100);
+const percent = (part: bigint, whole: bigint) => (whole === 0n ? 0 : Number((part * 10_000n) / whole) / 100);
 const asEvent = (m: Move, role: ObservationEvent["role"]): ObservationEvent => ({
   eventId: m.event.id,
   signature: m.event.signature,
@@ -156,14 +155,14 @@ function rapidForwarding(wallet: string, moves: Move[], t: BehaviorThresholds["r
     const used = new Set<Move>();
     for (const incoming of list.filter((m) => m.direction === "in")) {
       const onward: Move[] = [];
-      let sent = ZERO;
+      let sent = 0n;
       for (const m of list) {
         if (sent >= incoming.amount) break;
         // Sent back to whoever sent it is a round trip, not forwarding.
         if (m.direction !== "out" || used.has(m) || m.time <= incoming.time || m.counterparty === incoming.counterparty) continue;
         if (m.time - incoming.time > t.windowSeconds * 1000) break;
         // Far more than came in is the wallet's own balance moving, not this receipt passed on.
-        if ((sent + m.amount) * BigInt(100) > incoming.amount * BigInt(Math.round(t.maxOutgoingRatio * 100))) continue;
+        if ((sent + m.amount) * 100n > incoming.amount * BigInt(Math.round(t.maxOutgoingRatio * 100))) continue;
         onward.push(m);
         sent += m.amount;
       }
@@ -201,11 +200,11 @@ function fan(
         i++;
         continue;
       }
-      const total = window.reduce((sum, m) => sum + m.amount, ZERO);
+      const total = window.reduce((sum, m) => sum + m.amount, 0n);
       // A split often follows a receipt: the latest one shortly before, of about the split's size, is its source.
       const comparable = (m: Move) =>
-        total * BigInt(100) >= m.amount * BigInt(Math.round((t.sourceMinCoverage ?? 0) * 100)) &&
-        total * BigInt(100) <= m.amount * BigInt(Math.round((t.sourceMaxRatio ?? Infinity) * 100));
+        total * 100n >= m.amount * BigInt(Math.round((t.sourceMinCoverage ?? 0) * 100)) &&
+        total * 100n <= m.amount * BigInt(Math.round((t.sourceMaxRatio ?? Infinity) * 100));
       const source =
         direction === "out"
           ? [...list].reverse().find((m) => m.direction === "in" && m.time <= window[0].time && window[0].time - m.time <= t.windowSeconds * 1000 && comparable(m))
@@ -273,7 +272,7 @@ function circularMovement(wallet: string, moves: Move[], t: BehaviorThresholds["
         m.assetId === first.assetId &&
         m.time > first.time &&
         m.time - first.time <= t.windowSeconds * 1000 &&
-        m.amount * BigInt(100) >= first.amount * BigInt(Math.round(t.minReturnRatio * 100)),
+        m.amount * 100n >= first.amount * BigInt(Math.round(t.minReturnRatio * 100)),
     );
     if (!back) continue;
     used.add(first);
@@ -343,7 +342,7 @@ function exchangeDeposits(wallet: string, moves: Move[], exchangeOf: (address: s
           deposits: run.length,
           depositAddresses: new Set(run.map((m) => m.counterparty)).size,
           ...(run.length === 1 ? { depositAddress: run[0].counterparty } : {}),
-          depositedAmount: run.reduce((sum, m) => sum + m.amount, ZERO).toString(),
+          depositedAmount: run.reduce((sum, m) => sum + m.amount, 0n).toString(),
           ...(run.length > 1 ? { spanSeconds: seconds(run[0].time, run[run.length - 1].time) } : {}),
         },
       });
@@ -359,9 +358,9 @@ function exchangeDeposits(wallet: string, moves: Move[], exchangeOf: (address: s
 export function observeWallet(
   wallet: string,
   sequence: readonly { event: SemanticEvent; time: number }[],
-  options: { exchangeOf?: (address: string) => string | undefined; decimalsOf?: (assetId: string) => number | undefined; thresholds?: BehaviorThresholds } = {},
+  options: { exchangeOf?: (address: string) => string | undefined; decimalsOf?: (assetId: string) => number | undefined } = {},
 ): BehaviorObservation[] {
-  const t = options.thresholds ?? BEHAVIOR_THRESHOLDS;
+  const t = BEHAVIOR_THRESHOLDS;
   const moves = movesOf(wallet, sequence, t, options.decimalsOf ?? (() => undefined));
   return [
     ...rapidForwarding(wallet, moves, t.rapidForwarding),

@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FraudWatchCase } from "@/lib/case/model";
 import { walletRanges } from "@/lib/case/wallet-range";
-import { getDb } from "@/lib/db/db";
+import { getDb, tryGetDb } from "@/lib/db/db";
 import { readCachedIngestion, saveIngestionJob } from "@/lib/db/ingestion-jobs";
 import { recordRpcResult } from "@/lib/db/rpc-settings";
 import { createDbIngestionCache } from "@/lib/db/transaction-cache";
 import { type IngestionProgress, type IngestionResult, ingestWallets } from "@/lib/ingest/ingest";
-import { createIngestionAdapter } from "@/lib/rpc/helius-adapter";
+import { createRpcAdapter } from "@/lib/rpc/generic-adapter";
 
 export type IngestionState =
   | { status: "idle" }
@@ -65,12 +65,7 @@ export function useIngestion(c: FraudWatchCase) {
       generation.current++;
       setState({ status: "running", progress: null });
 
-      let db: ReturnType<typeof getDb> | null = null;
-      try {
-        db = getDb();
-      } catch {
-        db = null;
-      }
+      const db = tryGetDb();
 
       // With every wallet paused, nothing asks the RPC, so the load says nothing about it.
       const usesRpc = config.mappedWallets.some((w) => !w.paused);
@@ -79,7 +74,7 @@ export function useIngestion(c: FraudWatchCase) {
       const retries = { total: 0, rateLimited: 0 };
       try {
         const result = await ingestWallets({
-          adapter: createIngestionAdapter(rpcUrl, {
+          adapter: createRpcAdapter(rpcUrl, {
             onRetry: (err) => {
               retries.total++;
               if (err.status === 429) retries.rateLimited++;

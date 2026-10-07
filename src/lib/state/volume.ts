@@ -1,4 +1,5 @@
 import { NATIVE_SOL } from "@/lib/assets/assets";
+import { abs } from "@/lib/solana/amount";
 import type { EffectSummary, NftCatalog } from "./summarize";
 
 /** One wallet's side of a transaction, as the views already show it. */
@@ -26,9 +27,6 @@ export type TransactedOverview = {
   sharedSides: number;
 };
 
-const ZERO = BigInt(0);
-const abs = (v: bigint) => (v < ZERO ? -v : v);
-
 /**
  * Per-asset totals over the given transaction sides, following the same
  * filters the views do. A signature shared by several mapped wallets counts
@@ -53,7 +51,7 @@ export function transactedOverview(rows: readonly TransactedRow[], nfts: NftCata
         nftsMoved[incoming ? "in" : "out"] += Number(abs(BigInt(change.delta)));
         return;
       }
-      const asset = assets.get(change.assetId) ?? { in: ZERO, out: ZERO, count: 0 };
+      const asset = assets.get(change.assetId) ?? { in: 0n, out: 0n, count: 0 };
       if (incoming) asset.in += BigInt(change.delta);
       else asset.out += abs(BigInt(change.delta));
       assets.set(change.assetId, asset);

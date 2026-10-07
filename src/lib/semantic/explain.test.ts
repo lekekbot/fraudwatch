@@ -14,7 +14,7 @@ describe("explaining an event", () => {
     const e = only(interpretTransaction(canonicalize(sale.response), { nfts: { isNft: (m) => m === sale.mint, royaltyRecipients: () => [] } }));
     const s = explainEvent(e, o);
     expect(by(s, "derived")).toEqual([
-      "✓ Read as NFT_TRADE · BUY by the marketplace-nft-trade interpreter (v1).",
+      "✓ Read as NFT_TRADE · BUY by the marketplace-nft-trade interpreter.",
       "? No instruction was decoded: the reading rests on balance changes.",
       "✓ The NFT parser names EQKU as buyer and 6awn as seller.",
     ]);
@@ -49,7 +49,7 @@ describe("explaining an event", () => {
     const labelOf = (a: string) => (a === "A" ? ({ source: "user", text: "Suspect" } as const) : a === "B" ? ({ source: "community", text: "Exchange 9" } as const) : undefined);
     const s = explainEvent(only(interpretTransaction(tx)), { ...o, labelOf });
     expect(by(s, "user_label")).toEqual(['✓ You labelled A "Suspect". Not used to interpret.']);
-    expect(by(s, "community_label")).toEqual(['✓ Community labels call B…B "Exchange 9" (unverified). Not used to interpret.']);
+    expect(by(s, "community_label")).toEqual(['✓ Community labels call B "Exchange 9" (unverified). Not used to interpret.']);
     expect(by(s, "verified")).toEqual([]);
   });
 

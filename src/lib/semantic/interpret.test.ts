@@ -16,10 +16,9 @@ const swapThrough = (program: string) =>
     instructions: [ix(program, null)],
   });
 
-const always = (id: string): Interpreter => ({ id, version: 1, interpret: () => ({ category: "PROGRAM_INTERACTION", action: id.toUpperCase(), confidence: "LOW" }) });
+const always = (id: string): Interpreter => ({ id, interpret: () => ({ category: "PROGRAM_INTERACTION", action: id.toUpperCase(), confidence: "LOW" }) });
 const throwing: Interpreter = {
   id: "broken",
-  version: 1,
   interpret: () => {
     throw new Error("decoder exploded");
   },
@@ -30,15 +29,12 @@ describe("resolveProtocols", () => {
     const r = resolveProtocols(swapThrough(JUPITER));
     expect(r.protocols).toEqual([{ id: "jupiter", name: "Jupiter", category: "dex_aggregator" }]);
     expect(r.infrastructure).toContainEqual({ address: JUPITER, role: "ROUTER", label: "Jupiter Aggregator v6" });
-    expect(r.attributions(JUPITER)[0]).toMatchObject({ source: "registry", verified: true, protocolId: "jupiter", role: "program" });
   });
 
   it("keeps unknown programs unknown", () => {
     const r = resolveProtocols(swapThrough("Prog1111"));
-    expect(r.unknownPrograms).toEqual(["Prog1111"]);
     expect(r.protocols).toEqual([]);
     expect(r.infrastructure).toContainEqual({ address: "Prog1111", role: "PROGRAM", label: null });
-    expect(r.attributions("Prog1111")).toEqual([]);
   });
 
   it("classifies pools, vaults, authorities and fee accounts as infrastructure, and exchange wallets as not", () => {
@@ -70,10 +66,8 @@ describe("resolveProtocols", () => {
     expect(roles).toEqual({ [POOL]: "POOL", [VAULT]: "VAULT", [AUTH]: "PDA", [FEES]: "FEE_ACCOUNT", ataA: "TOKEN_ACCOUNT" });
   });
 
-  it("keeps community and user attribution separate from verified attribution", () => {
-    const r = resolveProtocols(makeTx({ native: { A: [SOL, SOL - FEE] } }), { labels: new Map([["A", { address: "A", caseId: "c", name: "Suspect", tags: [] }]]) });
-    expect(r.attributions(COMMUNITY_ONLY)).toEqual([{ source: "community", verified: false, name: "c29r3" }]);
-    expect(r.attributions("A")).toEqual([{ source: "user", verified: false, name: "Suspect" }]);
+  it("never verifies a community-labelled address", () => {
+    const r = resolveProtocols(makeTx({ native: { A: [SOL, SOL - FEE] } }));
     expect(r.verified(COMMUNITY_ONLY)).toBeUndefined();
   });
 });
@@ -139,10 +133,9 @@ describe("interpreter pipeline", () => {
     expect([e.interpreter.id, e.category, e.confidence, e.protocol]).toEqual(["unknown", "UNKNOWN", "LOW", null]);
   });
 
-  it("doesn't let a community or user label give a call meaning", () => {
+  it("doesn't let a community label give a call meaning", () => {
     const tx = makeTx({ native: { A: [SOL, SOL - FEE] }, instructions: [ix(COMMUNITY_ONLY, "deposit")] });
-    const labels = new Map([[COMMUNITY_ONLY, { address: COMMUNITY_ONLY, caseId: "c", name: "My lending pool", tags: [] }]]);
-    const e = only(interpretTransaction(tx, { labels }));
+    const e = only(interpretTransaction(tx));
     expect([e.interpreter.id, e.category, e.action, e.confidence, e.protocol]).toEqual(["generic-program", "PROGRAM_INTERACTION", "DEPOSIT", "LOW", null]);
     expect(e.evidence.some((x) => x.kind === "KNOWN_ADDRESS")).toBe(false);
   });

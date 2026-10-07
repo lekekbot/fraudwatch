@@ -47,16 +47,14 @@ export type MapWalletInput = {
   addedFromWallet?: string;
 };
 
-export class MappingError extends Error {}
-
 /** Adds a mapped wallet. Only the given address is added: nothing expands recursively. */
 export function mapWallet(c: FraudWatchCase, input: MapWalletInput, now = new Date()): FraudWatchCase {
-  if (c.mappedWallets.some((w) => w.address === input.address)) throw new MappingError("This wallet is already mapped.");
+  if (c.mappedWallets.some((w) => w.address === input.address)) throw new Error("This wallet is already mapped.");
   let customStart: string | undefined;
   if (input.rangeMode !== "case") {
-    if (!input.start || Number.isNaN(Date.parse(input.start))) throw new MappingError("Choose a start for this wallet's history.");
+    if (!input.start || Number.isNaN(Date.parse(input.start))) throw new Error("Choose a start for this wallet's history.");
     const start = Date.parse(input.start);
-    if (start >= Date.parse(c.range.end)) throw new MappingError("The start must be before the case end.");
+    if (start >= Date.parse(c.range.end)) throw new Error("The start must be before the case end.");
     // Never load before the case itself starts.
     customStart = new Date(Math.max(start, Date.parse(c.range.start))).toISOString();
   }
@@ -72,8 +70,8 @@ export function mapWallet(c: FraudWatchCase, input: MapWalletInput, now = new Da
 /** Removes a mapped wallet. Labels and cached chain data are untouched; the primary wallet can't be removed. */
 export function unmapWallet(c: FraudWatchCase, address: string, now = new Date()): FraudWatchCase {
   const target = c.mappedWallets.find((w) => w.address === address);
-  if (!target) throw new MappingError("This wallet isn't mapped.");
-  if (address === c.primaryWallet) throw new MappingError("The primary wallet can't be removed from the case.");
+  if (!target) throw new Error("This wallet isn't mapped.");
+  if (address === c.primaryWallet) throw new Error("The primary wallet can't be removed from the case.");
   return { ...c, mappedWallets: c.mappedWallets.filter((w) => w.address !== address), updatedAt: now.toISOString() };
 }
 

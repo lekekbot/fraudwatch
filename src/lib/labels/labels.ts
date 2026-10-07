@@ -65,6 +65,8 @@ export type Names = {
   /** Where the displayed name comes from, for attribution. */
   source: (address: string) => NameSource;
   label: (address: string) => AddressLabel | undefined;
+  /** The user's tags for an address, empty if none. */
+  tags: (address: string) => string[];
   /** Other addresses in the case whose short form matches this one's: possible address poisoning. */
   lookalikes: (address: string) => readonly string[];
   /** For a look-alike: whether it's likely the dusting decoy, the real account, or unclear. */
@@ -96,6 +98,7 @@ export function createNames(
       return name.source === "address" ? undefined : name.text;
     },
     label: (address) => labels.get(address),
+    tags: (address) => labels.get(address)?.tags ?? [],
     source: (address) => resolve(address).source,
     lookalikes: (address) => lookalikes.get(address) ?? [],
     verdict: (address) => verdicts.get(address),

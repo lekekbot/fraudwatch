@@ -1,6 +1,7 @@
 import { NATIVE_SOL } from "@/lib/assets/assets";
 import { registry } from "@/lib/protocols/registry";
 import { shortenAddress } from "@/lib/solana/address";
+import { abs } from "@/lib/solana/amount";
 import { cnftMoves } from "@/lib/solana/bubblegum";
 import type { CanonicalInstruction, CanonicalTransaction } from "@/lib/solana/canonical";
 import {
@@ -103,9 +104,6 @@ export type EffectSummary = {
   nft?: NftTrade;
 };
 
-const ZERO = BigInt(0);
-const abs = (v: bigint) => (v < ZERO ? -v : v);
-
 function valueChanges(effect: WalletTransactionEffect): ValueChange[] {
   const fee = BigInt(effect.feeLamports);
   return effect.assetChanges
@@ -114,7 +112,7 @@ function valueChanges(effect: WalletTransactionEffect): ValueChange[] {
       const delta = c.assetId === NATIVE_SOL ? BigInt(c.delta) + fee : BigInt(c.delta);
       return { assetId: c.assetId, delta };
     })
-    .filter((c) => c.delta !== ZERO)
+    .filter((c) => c.delta !== 0n)
     .map((c) => ({ assetId: c.assetId, delta: c.delta.toString() }));
 }
 
@@ -166,7 +164,7 @@ const toAction = (ix: CanonicalInstruction): TxAction => ({ programId: ix.progra
 /** A parsed SPL burn that consumed tokens owned by this wallet. */
 function burnInstruction(wallet: string, tx: CanonicalTransaction | undefined): CanonicalInstruction | null {
   if (!tx) return null;
-  const burned = tx.tokenChanges.filter((change) => change.owner === wallet && BigInt(change.delta) < ZERO);
+  const burned = tx.tokenChanges.filter((change) => change.owner === wallet && BigInt(change.delta) < 0n);
   if (burned.length === 0) return null;
   return (
     [...tx.instructions, ...tx.innerInstructions].find((ix) => {
@@ -209,12 +207,12 @@ function recipients(tx: CanonicalTransaction, assetId: string): { address: strin
   if (assetId === NATIVE_SOL) {
     const tokenAccounts = new Set(tx.tokenChanges.map((t) => t.account));
     for (const n of tx.nativeChanges) {
-      if (!tokenAccounts.has(n.account) && BigInt(n.delta) > ZERO) out.set(n.account, BigInt(n.delta));
+      if (!tokenAccounts.has(n.account) && BigInt(n.delta) > 0n) out.set(n.account, BigInt(n.delta));
     }
   } else {
     for (const t of tx.tokenChanges) {
       const owner = t.owner ?? t.account;
-      if (t.mint === assetId && BigInt(t.delta) > ZERO) out.set(owner, (out.get(owner) ?? ZERO) + BigInt(t.delta));
+      if (t.mint === assetId && BigInt(t.delta) > 0n) out.set(owner, (out.get(owner) ?? 0n) + BigInt(t.delta));
     }
   }
   return [...out].map(([address, amount]) => ({ address, amount })).sort((a, b) => (b.amount > a.amount ? 1 : b.amount < a.amount ? -1 : 0));

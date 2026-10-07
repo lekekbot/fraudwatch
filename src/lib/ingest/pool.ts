@@ -5,8 +5,6 @@ export type WorkQueue<T> = {
   drain(): Promise<void>;
   readonly pending: number;
   readonly active: number;
-  /** Most workers that were ever running at once. */
-  readonly peak: number;
 };
 
 /**
@@ -18,7 +16,6 @@ export function createWorkQueue<T>(concurrency: number, worker: (item: T) => Pro
   let items: T[] = [];
   let head = 0;
   let active = 0;
-  let peak = 0;
   let failure: { error: unknown } | null = null;
   let waiters: Array<() => void> = [];
 
@@ -26,7 +23,6 @@ export function createWorkQueue<T>(concurrency: number, worker: (item: T) => Pro
     while (failure === null && active < limit && head < items.length) {
       const item = items[head++];
       active++;
-      peak = Math.max(peak, active);
       worker(item)
         .catch((error: unknown) => {
           failure ??= { error };
@@ -61,9 +57,6 @@ export function createWorkQueue<T>(concurrency: number, worker: (item: T) => Pro
     },
     get active() {
       return active;
-    },
-    get peak() {
-      return peak;
     },
   };
 }

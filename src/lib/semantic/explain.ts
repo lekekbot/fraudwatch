@@ -1,3 +1,4 @@
+import { shortenAddress } from "@/lib/solana/address";
 import type { FlowRole, SemanticEvent, SemanticFlow } from "./events";
 
 /**
@@ -43,7 +44,7 @@ export function explainEvent(event: SemanticEvent, o: ExplainOptions): Statement
   const decodedReading = event.confidence === "HIGH" && event.category !== "FAILED" && event.category !== "UNKNOWN";
 
   // Derived: the reading itself, and whether an instruction backs it.
-  add("derived", "met", `Read as ${event.category} · ${event.action} by the ${event.interpreter.id} interpreter (v${event.interpreter.version}).`);
+  add("derived", "met", `Read as ${event.category} · ${event.action} by the ${event.interpreter.id} interpreter.`);
   if (decodedReading) add("derived", "met", "A known program's instruction was decoded and matches the balance changes.");
   else if (event.category === "UNKNOWN") add("derived", "missing", "Nothing recognisable: no interpreter could read this transaction.");
   else if (event.category !== "FAILED") add("derived", "missing", "No instruction was decoded: the reading rests on balance changes.");
@@ -91,7 +92,7 @@ export function explainEvent(event: SemanticEvent, o: ExplainOptions): Statement
   for (const address of people) {
     const label = o.labelOf?.(address);
     if (label?.source === "user") add("user_label", "met", `You labelled ${o.name(address)} "${label.text}". Not used to interpret.`);
-    if (label?.source === "community") add("community_label", "met", `Community labels call ${address.slice(0, 4)}…${address.slice(-4)} "${label.text}" (unverified). Not used to interpret.`);
+    if (label?.source === "community") add("community_label", "met", `Community labels call ${shortenAddress(address)} "${label.text}" (unverified). Not used to interpret.`);
   }
   return out;
 }

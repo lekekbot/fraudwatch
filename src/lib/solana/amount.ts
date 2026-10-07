@@ -28,3 +28,5 @@ export function parseUnits(text: string, decimals: number): string | null {
   if (fraction.length > decimals) return null;
   return BigInt(`${whole || "0"}${fraction.padEnd(decimals, "0")}`).toString();
 }
+
+export const abs = (v: bigint) => (v < 0n ? -v : v);

@@ -1,15 +1,14 @@
-import type { FilterableTx, TxFilter } from "@/lib/timeline/filter";
+import { abs } from "@/lib/solana/amount";
+import { type FilterableTx, movedAssets, type TxFilter } from "@/lib/timeline/filter";
 import type { FraudWatchCase, HideRule } from "./model";
 
 type Hiding = Pick<FraudWatchCase, "hiddenSignatures" | "shownSignatures" | "hideRules">;
-
-const abs = (v: bigint) => (v < BigInt(0) ? -v : v);
 
 /** Whether a rule's conditions all hold for a transaction; a rule without conditions never matches. */
 export function ruleMatches(rule: HideRule, tx: FilterableTx, tagsOf: (address: string) => readonly string[] = () => []): boolean {
   const { summary } = tx;
   const changes = [...summary.inflows, ...summary.outflows];
-  const moved = [...new Set(changes.map((c) => c.assetId))];
+  const moved = movedAssets(summary);
   const checks: boolean[] = [];
   if (rule.kinds?.length) checks.push(rule.kinds.includes(summary.kind));
   if (rule.onlyAssets?.length) checks.push(moved.length > 0 && moved.every((a) => rule.onlyAssets!.includes(a)));

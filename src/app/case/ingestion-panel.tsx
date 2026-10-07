@@ -8,6 +8,7 @@ import type { useIngestion } from "@/hooks/use-ingestion";
 import type { IngestionProgress, WalletIngestion } from "@/lib/ingest/ingest";
 import type { Names } from "@/lib/labels/labels";
 import type { RpcSettings } from "@/lib/rpc/settings";
+import { formatUtcMinute } from "./asset-format";
 import { PanelSection } from "./panel";
 
 function ProgressLines({ progress, names }: { progress: IngestionProgress | null; names: Names }) {
@@ -69,7 +70,7 @@ function WalletCoverage({ w, names }: { w: WalletIngestion; names: Names }) {
           {coverage.oldestLoaded && coverage.newestLoaded && (
             <>
               {" "}
-              · {coverage.oldestLoaded.slice(0, 16).replace("T", " ")} → {coverage.newestLoaded.slice(0, 16).replace("T", " ")} UTC
+              · {formatUtcMinute(coverage.oldestLoaded)} → {formatUtcMinute(coverage.newestLoaded)} UTC
             </>
           )}
         </span>
@@ -105,7 +106,7 @@ export function IngestionPanel({
   const running = state.status === "running";
 
   return (
-    <PanelSection title="History" collapsible defaultCollapsed>
+    <PanelSection title="History" defaultCollapsed>
       <p className="text-xs text-muted-foreground">
         Loads each mapped wallet&apos;s history for the case range from your RPC, including its token accounts. Cached
         in this browser; later loads only fetch what&apos;s missing.
@@ -135,7 +136,7 @@ export function IngestionPanel({
       {state.status === "done" && state.lastLoadedAt && (
         <span className="text-xs text-muted-foreground">
           {state.source === "cache" ? "From local cache · " : ""}last loaded{" "}
-          {state.lastLoadedAt.slice(0, 16).replace("T", " ")} UTC
+          {formatUtcMinute(state.lastLoadedAt)} UTC
         </span>
       )}
       {state.status === "running" && <ProgressLines progress={state.progress} names={names} />}

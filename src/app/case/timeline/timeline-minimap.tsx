@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { histogram } from "@/lib/timeline/layout";
+import { readPalette } from "../canvas";
 
 const HEIGHT = 44;
 /** A drag shorter than this (px) is a click. */
@@ -47,9 +48,7 @@ export function TimelineMinimap({
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, HEIGHT);
-      const css = getComputedStyle(canvas);
-      const muted = css.getPropertyValue("--muted-foreground").trim() || "#888";
-      const fg = css.getPropertyValue("--foreground").trim() || "#eee";
+      const { muted, fg } = readPalette(canvas, { muted: "--muted-foreground", fg: "--foreground" });
 
       const bins = histogram(times, range.start, range.end, Math.max(1, Math.floor(width / 4)));
       const max = Math.max(1, ...bins);

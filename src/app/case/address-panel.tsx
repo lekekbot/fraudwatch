@@ -15,6 +15,7 @@ import { COMMUNITY_SOURCE } from "@/lib/labels/community";
 import type { LookalikeVerdict } from "@/lib/labels/lookalikes";
 import type { RegistryEntry } from "@/lib/protocols/registry";
 import { LookalikeBadge, LookalikeComparison } from "./lookalike";
+import { copy } from "./timeline/inspector-ui";
 import { PanelSection } from "./panel";
 
 const STATE_TEXT: Record<AddressState, string> = {
@@ -23,15 +24,6 @@ const STATE_TEXT: Record<AddressState, string> = {
   OBSERVED: "Observed counterparty. Only the transactions it shares with mapped wallets are shown; its own history isn't loaded.",
   INFRASTRUCTURE: "Program or protocol address. It's never mapped as a wallet.",
 };
-
-async function copy(text: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-    toast.success("Address copied.");
-  } catch {
-    toast.error("Clipboard unavailable.");
-  }
-}
 
 /**
  * Inspector for one address: what the case knows about it, and the user's own
@@ -104,7 +96,6 @@ export function AddressPanel({
     <>
       <PanelSection
         title={state === "OBSERVED" ? "Observed address" : state === "INFRASTRUCTURE" ? "Infrastructure" : "Wallet"}
-        collapsible
         action={
           <span className="flex">
             {bookmark && (
@@ -116,10 +107,10 @@ export function AddressPanel({
                 title={bookmark.on ? "Remove bookmark" : "Bookmark address"}
                 onClick={bookmark.toggle}
               >
-                <StarIcon className={bookmark.on ? "fill-current text-[oklch(0.8_0.15_80)]" : undefined} />
+                <StarIcon className={bookmark.on ? "fill-current text-tone-approval" : undefined} />
               </Button>
             )}
-            <Button variant="ghost" size="icon-xs" aria-label="Copy address" title="Copy address" onClick={() => copy(address)}>
+            <Button variant="ghost" size="icon-xs" aria-label="Copy address" title="Copy address" onClick={() => copy(address, "Address")}>
               <CopyIcon />
             </Button>
             <a
