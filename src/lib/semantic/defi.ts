@@ -1,6 +1,7 @@
 import { NATIVE_SOL } from "@/lib/assets/assets";
 import { bytesOf, discriminator, hex, reader } from "@/lib/solana/anchor";
 import type { CanonicalInstruction } from "@/lib/solana/canonical";
+import { MEMO_PROGRAMS } from "@/lib/solana/programs";
 import type { BridgeEnvelope, EventCategory, EvidenceRef } from "./events";
 import type { Interpretation, Interpreter, TransactionContext } from "./interpret";
 import { actorFlows, moved, protocolOf } from "./reading";
@@ -262,4 +263,47 @@ function cctpIn(ctx: TransactionContext): Interpretation | null {
 export const cctpBridge: Interpreter = {
   id: "cctp-bridge",
   interpret: (ctx) => cctpOut(ctx) ?? cctpIn(ctx),
+};
+
+// Relay Depository v2. Both take (amount: u64, id: [u8; 32]); accounts: relayer config, sender, depositor, vault, mint (token only).
+const RELAY_DEPOSITORY = "99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2";
+const RELAY_DEPOSITS = new Map([
+  ["11,156,96,218,39,163,180,19", "token"], // deposit_token
+  ["13,158,13,223,95,213,28,6", "native"], // deposit_native
+]);
+
+/**
+ * A Relay deposit: value handed to Relay's solver to deliver on another
+ * chain. Often the tail of a Jupiter route in the same transaction, so the
+ * depositor spends one asset and Relay receives another. The destination
+ * chain and recipient live off-chain, keyed by the memo's request id.
+ */
+export const relayBridge: Interpreter = {
+  id: "relay-bridge",
+  interpret: (ctx) => {
+    const [deposit] = decoded(ctx, RELAY_DEPOSITORY, RELAY_DEPOSITS);
+    if (!deposit) return null;
+    const r = reader(deposit.bytes);
+    const actor = deposit.ix.accounts[2];
+    const amount = r.u64(8);
+    const id = r.slice(16, 32);
+    if (!actor || amount === null || !id) return null;
+    const assetId = deposit.op === "native" ? NATIVE_SOL : (deposit.ix.accounts[4] ?? null);
+    const memo = ctx.tx.instructions.find((ix) => (MEMO_PROGRAMS as readonly string[]).includes(ix.programId) && typeof ix.info === "string" && /^0x[0-9a-f]{64}$/i.test(ix.info));
+    const bridge: BridgeEnvelope = {
+      direction: "OUT",
+      sourceChain: "solana",
+      destinationChain: "unknown",
+      asset: assetId ? { assetId, amount: amount.toString() } : null,
+      remoteAddress: null,
+      identifiers: { protocol: "relay", depositId: `0x${hex(id)}`, ...(memo ? { requestId: memo.info as string } : {}) },
+    };
+    const result = reading(
+      ctx,
+      { category: "BRIDGE", action: "BRIDGE_OUT", programId: RELAY_DEPOSITORY, actor, evidence: [deposit.ref] },
+      spentAny(ctx, actor),
+      "The depositor's balances didn't go down in this transaction.",
+    );
+    return { ...result, bridge };
+  },
 };

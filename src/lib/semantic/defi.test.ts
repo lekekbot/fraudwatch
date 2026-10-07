@@ -155,6 +155,35 @@ describe("CCTP bridge envelopes", () => {
   });
 });
 
+describe("Relay deposits", () => {
+  it("reads a Jupiter route ending in a Relay deposit as a bridge out, not a swap the wallet never received", () => {
+    const { tx, e } = event("relay-swap-deposit-token");
+    const depositor = "653pnn5fzF51FfotBwxua55Es4QXxTdaXJLbPczVmswp";
+    expect([e.category, e.action, e.interpreter.id, e.confidence, e.protocol?.id]).toEqual(["BRIDGE", "BRIDGE_OUT", "relay-bridge", "HIGH", "relay"]);
+    expect(e.bridge).toEqual({
+      direction: "OUT",
+      sourceChain: "solana",
+      destinationChain: "unknown",
+      asset: { assetId: REAL_USDC, amount: "474680191660" },
+      remoteAddress: null,
+      identifiers: {
+        protocol: "relay",
+        depositId: "0x2692947b35fc611904c40a194667b63003920682c76864292d894ec863216f76",
+        requestId: "0x0dc3fde8b23245a83b7778ab1702e6a2d412e4b22fd0ea2ad56526c2dd1d079f",
+      },
+    });
+    expect(main(e)).toEqual([["spent", NATIVE_SOL, "6000000000000", depositor, null]]);
+    reconciles(e, tx);
+  });
+
+  it("reads a native SOL deposit", () => {
+    const { e } = event("relay-deposit-native");
+    expect([e.category, e.confidence]).toEqual(["BRIDGE", "HIGH"]);
+    expect(e.bridge).toMatchObject({ asset: { assetId: NATIVE_SOL }, identifiers: { protocol: "relay" } });
+    expect(main(e).map(([role, , , from]) => [role, from])).toEqual([["spent", "BUqrCx6cyERnMyEj1y22CFSDo7bRi1KYMVK6cn5L7e8u"]]);
+  });
+});
+
 describe("unsupported protocols", () => {
   it("still reads a bridge program the code can't decode as plain activity, never a bridge", () => {
     const WORMHOLE_TOKEN_BRIDGE = "wormDTUJ6AWPNvk59vGQbDvGJmqbDTdgWgAqcLBCgUb";
