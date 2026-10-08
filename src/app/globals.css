@@ -74,6 +74,10 @@
   --tone-approval: oklch(0.8 0.15 80);
   --tone-behavior: oklch(0.83 0.16 92);
   --tone-lookalike: oklch(0.77 0.16 70);
+  /* The busiest repeated counterparties on the timeline. Three: past that, scattered marks can't stay apart for colour-blind readers. */
+  --party-1: #2a78d6;
+  --party-2: #eb6834;
+  --party-3: #1baf7a;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -96,6 +100,9 @@
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.556 0 0);
+    --party-1: #3987e5;
+    --party-2: #d95926;
+    --party-3: #199e70;
   }
 }
 

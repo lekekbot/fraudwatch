@@ -46,6 +46,7 @@ describe("timeline cards from semantic events", () => {
     expect([c.tone, c.label, c.flow]).toEqual(["swap", "Swap", "none"]);
     expect(c.lines[2]).toMatch(/→ 50\.290869 USDC$/);
     expect(c.lines[3]).toBe("Jupiter");
+    expect(c.party).toBe("Jupiter");
   });
 
   it("shows a CCTP burn as a bridge out, with where it went", () => {
@@ -58,6 +59,8 @@ describe("timeline cards from semantic events", () => {
     const c = card(read("defi/native-stake-sale.json"), "HwtbQBNnLERakdUDuCCLWmUs2oETLFQZeHUWeQdPads");
     expect([c.label, c.flow]).toEqual(["Stake sale", "in"]);
     expect(c.lines.slice(1)).toEqual(["STAKE SALE", "20,000.00228288 SOL → 19,599.999954342 SOL", "→ 5Px…Hkk"]);
+    // The counterparty is the full address the card abbreviates, so the same buyer matches across cards.
+    expect(c.party).toMatch(/^5Px\w+Hkk$/);
   });
 
   it("shows a Sanctum instant unstake as the stake account given up for the SOL paid", () => {

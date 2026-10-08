@@ -3,13 +3,11 @@
 import { scaleUtc } from "d3-scale";
 import { select } from "d3-selection";
 import { type ZoomBehavior, type ZoomTransform, zoomIdentity } from "d3-zoom";
-import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { Names } from "@/lib/labels/labels";
 import { binEvents, type Relationship } from "@/lib/timeline/relationships";
 import { horizontalZoom, readPalette, sizeCanvas } from "../canvas";
 
-/** Rows drawn: the busiest relationships. */
-const MAX_ROWS = 15;
 /** Row height range: rows shrink to fit the view, down to the minimum, then the chart scrolls. */
 const ROW_MAX = 52;
 const ROW_MIN = 36;
@@ -46,10 +44,10 @@ export function RelationshipChart({ ref, relationships, range, names, onPick }: 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const transformRef = useRef<ZoomTransform>(zoomIdentity);
   const zoomRef = useRef<ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
-  const sizeRef = useRef({ width: 800, height: 400, view: 400, row: ROW_MAX });
+  const sizeRef = useRef({ width: 800, height: 400, view: 400, top: 0, row: ROW_MAX });
   const frameRef = useRef<number | null>(null);
   const [tip, setTip] = useState<{ x: number; y: number; lines: string[] } | null>(null);
-  const rows = useMemo(() => relationships.slice(0, MAX_ROWS), [relationships]);
+  const rows = relationships;
   const latest = useRef({ rows, range, names });
   useEffect(() => {
     latest.current = { rows, range, names };
@@ -68,7 +66,9 @@ export function RelationshipChart({ ref, relationships, range, names, onPick }: 
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
     const { rows, names } = latest.current;
-    const { width, height } = sizeRef.current;
+    const { width, height, view, top } = sizeRef.current;
+    // The axis stays at the bottom of what's visible, even when the rows scroll.
+    const base = top + view - AXIS;
     const dpr = window.devicePixelRatio || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const { fg, muted, border, bg, send, receive } = readPalette(canvas, { fg: "--foreground", muted: "--muted-foreground", border: "--border", bg: "--background", send: "--destructive", receive: "--tone-receive" });
@@ -84,7 +84,7 @@ export function RelationshipChart({ ref, relationships, range, names, onPick }: 
 
     ctx.save();
     ctx.beginPath();
-    ctx.rect(GUTTER, 0, width - GUTTER, height - AXIS);
+    ctx.rect(GUTTER, 0, width - GUTTER, base);
     ctx.clip();
     rows.forEach((rel, r) => {
       const y = rowY(r);
@@ -116,7 +116,7 @@ export function RelationshipChart({ ref, relationships, range, names, onPick }: 
     ctx.strokeStyle = border;
     ctx.beginPath();
     ctx.moveTo(GUTTER - 0.5, 0);
-    ctx.lineTo(GUTTER - 0.5, height - AXIS);
+    ctx.lineTo(GUTTER - 0.5, base);
     ctx.stroke();
     ctx.textBaseline = "middle";
     ctx.textAlign = "left";
@@ -134,12 +134,14 @@ export function RelationshipChart({ ref, relationships, range, names, onPick }: 
       ctx.textAlign = "left";
     });
 
-    // Time axis along the bottom.
-    const axisY = height - AXIS + 12;
+    // Time axis along the bottom, over any rows scrolled beneath it.
+    const axisY = base + 12;
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, base, width, AXIS);
     ctx.strokeStyle = border;
     ctx.beginPath();
-    ctx.moveTo(GUTTER, height - AXIS);
-    ctx.lineTo(width, height - AXIS);
+    ctx.moveTo(GUTTER, base);
+    ctx.lineTo(width, base);
     ctx.stroke();
     ctx.fillStyle = muted;
     ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
@@ -168,15 +170,23 @@ export function RelationshipChart({ ref, relationships, range, names, onPick }: 
       const count = Math.max(1, latest.current.rows.length);
       const row = Math.max(ROW_MIN, Math.min(ROW_MAX, Math.floor((view - TOP - AXIS - 8) / count)));
       const height = Math.max(view, TOP + count * row + AXIS + 8);
-      sizeRef.current = { width, height, view, row };
+      sizeRef.current = { width, height, view, top: scroller.scrollTop, row };
       sizeCanvas(canvas, width, height);
       zoomRef.current?.extent([[0, 0], [width, height]]);
+      schedule();
+    };
+    const onScroll = () => {
+      sizeRef.current = { ...sizeRef.current, top: scroller.scrollTop };
       schedule();
     };
     resize();
     const observer = new ResizeObserver(resize);
     observer.observe(scroller);
-    return () => observer.disconnect();
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      observer.disconnect();
+      scroller.removeEventListener("scroll", onScroll);
+    };
   }, [schedule, rows.length]);
 
   // Drag pans time; pinch or a vertical swipe zooms; a sideways swipe pans.
@@ -206,7 +216,8 @@ export function RelationshipChart({ ref, relationships, range, names, onPick }: 
 
   /** The relationship row and activity slice under a point, if any. */
   const hitAt = (px: number, py: number) => {
-    if (px < GUTTER) return null;
+    const { top, view } = sizeRef.current;
+    if (px < GUTTER || py > top + view - AXIS) return null;
     const r = Math.floor((py - TOP) / sizeRef.current.row);
     const rel = rows[r];
     if (!rel) return null;
@@ -259,11 +270,6 @@ export function RelationshipChart({ ref, relationships, range, names, onPick }: 
           if (hit) onPick(hit.bin.first.signature, hit.rel.a);
         }}
       />
-      {relationships.length > MAX_ROWS && (
-        <p className="pointer-events-none absolute bottom-3 left-3 text-[11px] text-muted-foreground">
-          Top {MAX_ROWS} of {relationships.length.toLocaleString()} by activity
-        </p>
-      )}
       {tip && (
         <div
           className="pointer-events-none absolute z-10 rounded-md border bg-popover px-2 py-1.5 text-xs shadow-md"

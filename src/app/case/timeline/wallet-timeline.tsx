@@ -156,8 +156,8 @@ export function WalletTimeline({
           const event = semanticEvents.get(ev.signature);
           // Every loaded transaction has an event; one that somehow doesn't still shows, as unknown.
           if (!event) return { lane, tone: "neutral" as const, label: "Unknown", flow: "none" as const, lines: ["", "UNKNOWN", "", ""] };
-          const { tone, label, flow, lines } = eventCard(event, wallet, ev.time, state, summaries[effectIndex], assets, names);
-          return { lane, tone, label, flow, lines };
+          const { tone, label, flow, lines, party } = eventCard(event, wallet, ev.time, state, summaries[effectIndex], assets, names);
+          return { lane, tone, label, flow, lines, party };
         }),
       })),
     [events, lanes, semanticEvents, assets, names],

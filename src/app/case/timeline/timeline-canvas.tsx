@@ -4,7 +4,7 @@ import { type ScaleLinear, type ScaleTime, scaleLinear, scaleUtc } from "d3-scal
 import { select } from "d3-selection";
 import { type ZoomBehavior, type ZoomTransform, zoomIdentity } from "d3-zoom";
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react";
-import { connectors, type Flow, mergeConnectors } from "@/lib/timeline/lanes";
+import { connectors, type Flow, mergeConnectors, type Trunk } from "@/lib/timeline/lanes";
 import { horizontalZoom, readPalette, sizeCanvas } from "../canvas";
 import type { Tone } from "./event-card";
 import {
@@ -28,6 +28,8 @@ export type LaneEntry = {
   lines: string[];
   /** Which way value moved for this lane's wallet; orients connectors between lanes. */
   flow: Flow;
+  /** Who or what the card's last line names; the same one seen again gets a chip. */
+  party?: string;
 };
 
 /** One transaction, drawn once at one x, with an entry on every lane it touches. */
@@ -87,7 +89,7 @@ const CARD_H = 64;
 const CARD_GAP = 22;
 const DOT_GAP = 12;
 /** Connectors closer than this (px) between the same lanes merge into one arrow with a count. */
-const CONNECTOR_MERGE = 24;
+const CONNECTOR_MERGE = 40;
 const PILL_GAP = 6;
 /** Narrowest bucket a dense period is split into, in px; fits a two-line pill. */
 const BUCKET_MIN = 84;
@@ -102,7 +104,7 @@ type Hit =
   | { type: "lane"; x0: number; y0: number; x1: number; y1: number; lane: number }
   | { type: "observation"; x0: number; y0: number; x1: number; y1: number; keys: string[]; start: number; end: number; label: string };
 
-const PALETTE: Record<"fg" | "muted" | "border" | "card" | "bg" | "behavior" | Tone, string> = {
+const PALETTE: Record<"fg" | "muted" | "border" | "card" | "bg" | "behavior" | "party1" | "party2" | "party3" | Tone, string> = {
   fg: "--foreground",
   muted: "--muted-foreground",
   border: "--border",
@@ -119,6 +121,9 @@ const PALETTE: Record<"fg" | "muted" | "border" | "card" | "bg" | "behavior" | T
   approval: "--tone-approval",
   neutral: "--muted-foreground",
   failed: "--destructive",
+  party1: "--party-1",
+  party2: "--party-2",
+  party3: "--party-3",
 };
 
 const formatUtc = (options: Intl.DateTimeFormatOptions) => {
@@ -256,6 +261,12 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
       for (const e of item.entries) laneIndex[e.lane]?.push(i);
     });
     const entryOf = (i: number, lane: number) => items[i].entries.find((e) => e.lane === lane)!;
+    // Counterparties on more than one card, busiest first: the top three get a colour, the rest a ring.
+    const partyCount = new Map<string, number>();
+    for (const item of items) for (const e of item.entries) if (e.party) partyCount.set(e.party, (partyCount.get(e.party) ?? 0) + 1);
+    const repeated = [...partyCount].filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+    const partyRank = new Map(repeated.map(([party], i) => [party, i]));
+    const partyColors = [p.party1, p.party2, p.party3];
     const hits: Hit[] = [];
 
     // Lanes with OPEN and CLOSE bookends, and a branch where a lane was mapped from another.
@@ -265,7 +276,8 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
     };
     const openXOf = (lane: TimelineLane) => (mode === "time" ? scale(lane.start) : scale(firstAtOrAfter(lane.start) - 0.5));
     const closeX = mode === "time" ? undefined : scale(items.length - 0.5);
-    const lifecycle: { text: string; x: number; y: number; align: CanvasTextAlign }[] = [];
+    // `edge` is where the lane starts or ends: a bar across the lane marks it exactly, the label names it.
+    const lifecycle: { text: string; x: number; y: number; align: CanvasTextAlign; edge: number; laneY: number }[] = [];
     lanes.forEach((lane, l) => {
       const y = laneY(l);
       const openX = openXOf(lane);
@@ -279,10 +291,10 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
       // Above where a pill would sit, and painted after the events, so a pill at the lane's end can't hide it.
       const labelY = y - (multi ? PILL_H / 2 + 4 : 22);
       // A lane too short for both labels inside it puts them outside its ends instead of on top of each other.
-      ctx.font = "600 11px ui-sans-serif, system-ui, sans-serif";
+      ctx.font = "600 10px ui-sans-serif, system-ui, sans-serif";
       const outward = endX - openX < ctx.measureText("OPEN").width + ctx.measureText("CLOSE").width + 16;
-      if (openX >= -40 && openX <= width) lifecycle.push({ text: "OPEN", x: outward ? openX - 4 : openX + 4, y: labelY, align: outward ? "right" : "left" });
-      if (endX >= 0 && endX <= width + 40) lifecycle.push({ text: "CLOSE", x: outward ? endX + 4 : endX - 4, y: labelY, align: outward ? "left" : "right" });
+      if (openX >= -40 && openX <= width) lifecycle.push({ text: "OPEN", x: outward ? openX - 4 : openX + 4, y: labelY, align: outward ? "right" : "left", edge: openX, laneY: y });
+      if (endX >= 0 && endX <= width + 40) lifecycle.push({ text: "CLOSE", x: outward ? endX + 4 : endX - 4, y: labelY, align: outward ? "left" : "right", edge: endX, laneY: y });
       if (lane.fork && lanes[lane.fork.fromLane]) {
         const x0 = mode === "time" ? scale(lane.fork.time) : scale(firstAtOrAfter(lane.fork.time));
         const y0 = laneY(lane.fork.fromLane);
@@ -320,55 +332,63 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
     });
 
     // Shared transactions: one x, joined across the lanes involved, arrowed the way value moved.
-    // Nearby ones between the same lanes merge into one arrow with a count, so zoomed out they don't comb the view;
+    // Nearby ones merge into one trunk with a count, whichever lanes they join, so zoomed out they don't comb the view;
     // the selected transaction always keeps its own, highlighted.
     const selectedSignature = selected ? items[selected.index]?.signature : undefined;
-    const links: { x: number; from: number; to: number; directed: boolean }[] = [];
-    const selectedLinks: typeof links = [];
+    const links: { x: number; connectors: ReturnType<typeof connectors> }[] = [];
+    let selectedLink: (typeof links)[number] | null = null;
     items.forEach((item, i) => {
       if (item.entries.length < 2) return;
       const x = xs[i];
       if (x < -20 || x > width + 20) return;
-      for (const c of connectors(item.entries)) (item.signature === selectedSignature ? selectedLinks : links).push({ x, ...c });
+      const link = { x, connectors: connectors(item.entries) };
+      if (item.signature === selectedSignature) selectedLink = link;
+      else links.push(link);
     });
-    const drawConnector = (c: { x: number; from: number; to: number; directed: boolean }, count: number, on: boolean) => {
-      const y0 = laneY(c.from);
-      const y1 = laneY(c.to);
-      const dir = Math.sign(y1 - y0);
-      const tipY = y1 - dir * 9;
+    const drawTrunk = (t: Trunk, on: boolean) => {
+      const top = laneY(t.lanes[0]);
+      const bottom = laneY(t.lanes[t.lanes.length - 1]);
+      const tipY = t.direction === 1 ? bottom - 9 : top + 9;
       ctx.strokeStyle = on ? p.fg : p.muted;
       ctx.fillStyle = on ? p.fg : p.muted;
       // Heavier with more transactions behind it, within reason.
-      ctx.lineWidth = on ? 2 : Math.min(3.5, 1.25 + Math.log2(count) * 0.5);
+      ctx.lineWidth = on ? 2 : Math.min(3.5, 1.25 + Math.log2(t.count) * 0.5);
       ctx.beginPath();
-      ctx.moveTo(c.x, y0 + dir * 7);
-      ctx.lineTo(c.x, c.directed ? tipY : y1 - dir * 7);
+      ctx.moveTo(t.x, t.direction === -1 ? tipY : top + 7);
+      ctx.lineTo(t.x, t.direction === 1 ? tipY : bottom - 7);
       ctx.stroke();
-      if (c.directed) {
+      if (t.direction) {
+        const d = t.direction;
         ctx.beginPath();
-        ctx.moveTo(c.x, tipY + dir * 2);
-        ctx.lineTo(c.x - 4, tipY - dir * 5);
-        ctx.lineTo(c.x + 4, tipY - dir * 5);
+        ctx.moveTo(t.x, tipY + d * 2);
+        ctx.lineTo(t.x - 4, tipY - d * 5);
+        ctx.lineTo(t.x + 4, tipY - d * 5);
         ctx.closePath();
         ctx.fill();
       }
-      if (count > 1) {
-        // The count sits beside the line, a third of the way along, clear of the lane cards at either end.
-        const label = `×${count.toLocaleString()}`;
+      // Lanes it passes through mid-way get a small dot, so a crossing reads apart from a stop.
+      for (const l of t.lanes.slice(1, -1)) {
+        ctx.beginPath();
+        ctx.arc(t.x, laneY(l), 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      if (t.count > 1) {
+        // The count sits beside the line, a third of the way along its first span, clear of the lane cards at either end.
+        const label = `×${t.count.toLocaleString()}`;
         ctx.font = "600 10px ui-sans-serif, system-ui, sans-serif";
         const w = ctx.measureText(label).width + 8;
-        const y = y0 + (y1 - y0) / 3;
+        const y = top + (laneY(t.lanes[1]) - top) / 3;
         ctx.fillStyle = p.bg;
-        ctx.fillRect(c.x + 4, y - 7, w, 14);
+        ctx.fillRect(t.x + 4, y - 7, w, 14);
         ctx.fillStyle = p.muted;
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        ctx.fillText(label, c.x + 8, y + 0.5);
+        ctx.fillText(label, t.x + 8, y + 0.5);
         ctx.textBaseline = "alphabetic";
       }
     };
-    for (const m of mergeConnectors(links, CONNECTOR_MERGE)) drawConnector(m, m.count, false);
-    for (const c of selectedLinks) drawConnector(c, 1, true);
+    for (const t of mergeConnectors(links, CONNECTOR_MERGE)) drawTrunk(t, false);
+    if (selectedLink) for (const t of mergeConnectors([selectedLink], 0)) drawTrunk(t, true);
 
     // Events per lane: natural clusters first, then dense runs split into calendar buckets that fit a pill.
     const DAY = 86_400_000;
@@ -504,12 +524,28 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
             "11px ui-monospace, monospace",
           ];
           const colors = [p.muted, color, p.fg, p.muted];
+          const rank = entry.party === undefined ? undefined : partyRank.get(entry.party);
           entry.lines.slice(0, 4).forEach((line, li) => {
+            // The counterparty line makes room for its chip.
+            const chip = li === 3 && rank !== undefined && line ? 10 : 0;
+            if (chip) {
+              const cy = top + 16 + li * 14 - 3.5;
+              ctx.beginPath();
+              ctx.arc(left + 13, cy, 3, 0, Math.PI * 2);
+              if (rank !== undefined && rank < partyColors.length) {
+                ctx.fillStyle = partyColors[rank];
+                ctx.fill();
+              } else {
+                ctx.strokeStyle = p.muted;
+                ctx.lineWidth = 1;
+                ctx.stroke();
+              }
+            }
             ctx.fillStyle = colors[li];
-            const text = fitText(ctx, fonts[li], line, CARD_W - 18);
+            const text = fitText(ctx, fonts[li], line, CARD_W - 18 - chip);
             // fitText only sets the font when it has to measure.
             ctx.font = fonts[li];
-            ctx.fillText(text, left + 10, top + 16 + li * 14);
+            ctx.fillText(text, left + 10 + chip, top + 16 + li * 14);
           });
           hits.push({ type: "event", x0: left, y0: top, x1: left + CARD_W, y1: top + CARD_H, first, last: first, lane: l });
         }
@@ -616,8 +652,17 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
       }
     }
 
-    // OPEN and CLOSE on top of the events, each on a background so it reads over lines and pill edges.
-    ctx.font = "600 11px ui-sans-serif, system-ui, sans-serif";
+    // OPEN and CLOSE on top of the events: a bar across the lane at the exact edge, and a small label
+    // on a background so it reads over lines and pill edges.
+    for (const mark of lifecycle) {
+      ctx.strokeStyle = p.fg;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(mark.edge, mark.laneY - 12);
+      ctx.lineTo(mark.edge, mark.laneY + 12);
+      ctx.stroke();
+    }
+    ctx.font = "600 10px ui-sans-serif, system-ui, sans-serif";
     ctx.textBaseline = "alphabetic";
     const cards = hits.filter((h) => h.type === "event" && h.x1 - h.x0 === CARD_W);
     for (const mark of lifecycle) {
