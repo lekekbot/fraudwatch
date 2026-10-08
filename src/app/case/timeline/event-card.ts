@@ -1,6 +1,6 @@
 import { NATIVE_SOL } from "@/lib/assets/assets";
 import type { Names } from "@/lib/labels/labels";
-import type { EventCategory, FlowRole, SemanticEvent, SemanticFlow } from "@/lib/semantic/events";
+import type { EventCategory, FlowRole, SemanticEvent } from "@/lib/semantic/events";
 import { projectEvent } from "@/lib/semantic/projection";
 import type { WalletState } from "@/lib/state/reconstruct";
 import { describeAction, type EffectSummary } from "@/lib/state/summarize";
@@ -81,7 +81,14 @@ const cardDate = (ms: number) => {
   return `${d.toLocaleDateString("en-GB", options)} · ${d.toISOString().slice(11, 16)}`;
 };
 
-export type EventCard = { tone: Tone; label: string; lines: string[]; flow: Flow };
+export type EventCard = {
+  tone: Tone;
+  label: string;
+  lines: string[];
+  flow: Flow;
+  /** Who or what the detail line names (an address, or a protocol's name), to spot the same counterparty across cards. */
+  party?: string;
+};
 
 /**
  * One lane's card for an event: date, what happened, the main amount, and
@@ -98,18 +105,21 @@ export function eventCard(event: SemanticEvent, wallet: string, time: number, st
   // The actor's own spent and received flows: a swap, stake, loan or bridge, whoever's lane this is.
   const role = (r: FlowRole) => event.flows.find((f) => f.role === r);
   const nftName = event.nft ? nftLabel(event.nft.assets, assets) : "";
-  const other = (f: SemanticFlow | undefined, side: "from" | "to") => (f?.[side] ? names.of(f[side]!, 3) : "");
 
   let type = label.toUpperCase();
   let main = "";
   let detail = protocol;
+  let party: string | undefined = protocol || undefined;
   switch (event.category) {
     case "TRANSFER": {
       const sent = label === "Send";
       const flow = sent ? out[0] : into[0];
       main = flow ? amount(flow) : "";
-      const party = sent ? other(flow, "to") : other(flow, "from");
-      detail = party ? `${sent ? "→" : "←"} ${party}` : protocol;
+      const address = sent ? flow?.to : flow?.from;
+      if (address) {
+        detail = `${sent ? "→" : "←"} ${names.of(address, 3)}`;
+        party = address ?? undefined;
+      }
       break;
     }
     case "NFT_TRADE":
@@ -122,7 +132,9 @@ export function eventCard(event: SemanticEvent, wallet: string, time: number, st
       main = !swap && price ? amount(price) : nftName;
       if (!protocol) {
         const nft = event.flows.find((f) => f.role === "nft" && (f.from === wallet || f.to === wallet));
-        detail = nft ? (nft.to === wallet ? (nft.from ? `← ${names.of(nft.from, 3)}` : "") : nft.to ? `→ ${names.of(nft.to, 3)}` : "") : "";
+        const address = nft ? (nft.to === wallet ? nft.from : nft.to) : undefined;
+        detail = address ? `${nft?.to === wallet ? "←" : "→"} ${names.of(address, 3)}` : "";
+        party = address ?? undefined;
       }
       break;
     }
@@ -136,7 +148,10 @@ export function eventCard(event: SemanticEvent, wallet: string, time: number, st
       // A stake account handed over for what came back (a sale, an instant unstake) is what was given up.
       const spent = role("spent") ?? (event.stake?.newOwner && received ? staked : undefined);
       main = spent && received ? `${amount(spent)} → ${amount(received)}` : spent ? amount(spent) : received ? amount(received) : staked ? amount(staked) : "";
-      if (event.stake?.newOwner && !protocol) detail = `→ ${names.of(event.stake.newOwner, 3)}`;
+      if (event.stake?.newOwner && !protocol) {
+        detail = `→ ${names.of(event.stake.newOwner, 3)}`;
+        party = event.stake.newOwner;
+      }
       break;
     }
     case "LENDING": {
@@ -160,6 +175,7 @@ export function eventCard(event: SemanticEvent, wallet: string, time: number, st
     default:
       main = describeAction(summary.action, summary.action ? names.known(summary.action.programId) : undefined);
       detail = protocol || (summary.actor ? `by ${names.of(summary.actor, 3)}` : "");
+      party = protocol || summary.actor || undefined;
   }
 
   const tone: Tone = event.category === "TRANSFER" ? (label === "Send" ? "send" : "receive") : (TONE[event.category] ?? "neutral");
@@ -177,5 +193,5 @@ export function eventCard(event: SemanticEvent, wallet: string, time: number, st
         : into.length > 0 && out.length === 0
           ? "in"
           : "none";
-  return { tone, label, lines: [cardDate(time), type, main, detail], flow };
+  return { tone, label, lines: [cardDate(time), type, main, detail], flow, party };
 }
