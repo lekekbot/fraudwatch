@@ -1,3 +1,4 @@
+import { NATIVE_SOL } from "@/lib/assets/assets";
 import type { Names } from "@/lib/labels/labels";
 import type { EventCategory, FlowRole, SemanticEvent, SemanticFlow } from "@/lib/semantic/events";
 import { projectEvent } from "@/lib/semantic/projection";
@@ -32,7 +33,7 @@ export function eventLabel(event: SemanticEvent, wallet?: string): string {
     case "STAKE":
       return action === "LIQUID_STAKE" ? "Liquid stake" : "Stake";
     case "UNSTAKE":
-      return action === "LIQUID_UNSTAKE" ? "Liquid unstake" : "Unstake";
+      return action === "LIQUID_UNSTAKE" ? "Liquid unstake" : action === "STAKE_SALE" ? "Stake sale" : "Unstake";
     case "LENDING":
       return action.split("+").map(titleCase).join(" + ");
     case "BRIDGE":
@@ -129,8 +130,13 @@ export function eventCard(event: SemanticEvent, wallet: string, time: number, st
     case "STAKE":
     case "UNSTAKE":
     case "LIQUIDITY": {
-      const [spent, received] = [role("spent"), role("received")];
-      main = spent && received ? `${amount(spent)} → ${amount(received)}` : spent ? amount(spent) : received ? amount(received) : "";
+      // A stake account's SOL isn't the wallet's balance: shown on its own, or as what an unstake gave up.
+      const staked = event.stake && { amount: event.stake.lamports, assetId: NATIVE_SOL };
+      const received = role("received");
+      // A stake account handed over for what came back (a sale, an instant unstake) is what was given up.
+      const spent = role("spent") ?? (event.stake?.newOwner && received ? staked : undefined);
+      main = spent && received ? `${amount(spent)} → ${amount(received)}` : spent ? amount(spent) : received ? amount(received) : staked ? amount(staked) : "";
+      if (event.stake?.newOwner && !protocol) detail = `→ ${names.of(event.stake.newOwner, 3)}`;
       break;
     }
     case "LENDING": {

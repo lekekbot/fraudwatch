@@ -1,3 +1,4 @@
+import { NATIVE_SOL } from "@/lib/assets/assets";
 import { Fragment } from "react";
 import { Badge } from "@/components/ui/badge";
 import type { Names } from "@/lib/labels/labels";
@@ -72,6 +73,9 @@ function sentence({ event, state, assets, names }: Omit<Props, "onSelectAddress"
       return `${who(actor)} swapped ${amount(flow("spent")) || "assets"} for ${amount(flow("received")) || "assets"}${via}.`;
     case "STAKE":
     case "UNSTAKE":
+      if (event.action === "STAKE_SALE" && event.stake) {
+        return `${who(actor)} handed a stake account holding ${amount({ amount: event.stake.lamports, assetId: NATIVE_SOL })} to ${who(event.stake.newOwner)} and was paid ${amount(flow("received")) || "in the same transaction"}.`;
+      }
       return `${who(actor)} ${event.category === "STAKE" ? "staked" : "unstaked"} ${amount(flow("spent")) || "a stake account"}${flow("received") ? ` for ${amount(flow("received"))}` : ""}${via}.`;
     case "LENDING":
       return `${who(actor)}: ${eventLabel(event).toLowerCase()} ${amount(flow("spent") ?? flow("received"))}${event.protocol ? ` on ${event.protocol.name}` : ""}.`;

@@ -3,7 +3,7 @@
  * are computed on read from canonical transactions and never stored, so nothing
  * stale can be reused yet; a store for them must check it (see `DERIVED_CACHES`).
  */
-export const SEMANTIC_VERSION = 8;
+export const SEMANTIC_VERSION = 9;
 
 /**
  * Broad kinds of meaningful action. `action` carries the finer meaning (BUY,
@@ -141,6 +141,15 @@ export type BridgeEnvelope = {
   identifiers: Record<string, string>;
 };
 
+/** The stake account a native stake event acted on. */
+export type StakeDetail = {
+  account: string;
+  /** Lamports the account held after the transaction; for a withdrawal, the lamports withdrawn. */
+  lamports: string;
+  /** Who controls the account now, when the wallet handed its withdraw authority to someone else. */
+  newOwner: string | null;
+};
+
 export type ProtocolRef = { id: string; name: string; category: string };
 
 export type SemanticEvent = {
@@ -173,6 +182,8 @@ export type SemanticEvent = {
   nft: NftDetail | null;
   /** Set for BRIDGE events: the Solana side only. */
   bridge: BridgeEnvelope | null;
+  /** Set for STAKE and UNSTAKE events read from the native stake program. */
+  stake: StakeDetail | null;
   /** The interpretation is read from the fee payer's side; their fee is not a flow. */
   metadata: { feePayer: string | null; feeLamports: string };
 };

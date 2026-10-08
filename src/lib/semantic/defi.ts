@@ -4,7 +4,7 @@ import type { CanonicalInstruction } from "@/lib/solana/canonical";
 import { MEMO_PROGRAMS } from "@/lib/solana/programs";
 import type { BridgeEnvelope, EventCategory, EvidenceRef } from "./events";
 import type { Interpretation, Interpreter, TransactionContext } from "./interpret";
-import { actorFlows, moved, protocolOf } from "./reading";
+import { actorFlows, moved, protocolOf, receivedAny, spentAny, stakeAccount } from "./reading";
 
 /**
  * Protocol decoders: a known program, a decoded instruction (Anchor
@@ -26,9 +26,6 @@ function decoded<T>(ctx: TransactionContext, programId: string, ops: ReadonlyMap
   }
   return out;
 }
-
-const spentAny = (ctx: TransactionContext, wallet: string, assetId?: string) => ctx.summaryOf(wallet).outflows.some((c) => !assetId || c.assetId === assetId);
-const receivedAny = (ctx: TransactionContext, wallet: string, assetId?: string) => ctx.summaryOf(wallet).inflows.some((c) => !assetId || c.assetId === assetId);
 
 /** The first signer whose balances moved, else the fee payer: who a lending call was for. */
 const movingSigner = (ctx: TransactionContext) => ctx.signers.find((s) => moved(ctx, s)) ?? ctx.feePayer;
@@ -122,12 +119,13 @@ export const sanctumUnstake: Interpreter = {
     const [call] = decoded(ctx, SANCTUM_UNSTAKE, SANCTUM_UNSTAKES, true);
     const actor = call?.ix.accounts[0];
     if (!call || !actor) return null;
-    return reading(
+    const result = reading(
       ctx,
       { category: "UNSTAKE", action: "INSTANT_UNSTAKE", programId: SANCTUM_UNSTAKE, actor, evidence: [call.ref] },
       receivedAny(ctx, actor),
       "The unstaker wasn't paid in this transaction.",
     );
+    return { ...result, stake: stakeAccount(ctx, call.ix.accounts[1], call.ix.accounts[3]) };
   },
 };
 

@@ -32,6 +32,7 @@ const RECORDED: [file: string, category: string, action: string, interpreter: st
   ["defi/cctp-v2-burn.json", "BRIDGE", "BRIDGE_OUT", "cctp-bridge", "HIGH"],
   ["defi/cctp-v2-burn-with-hook.json", "BRIDGE", "BRIDGE_OUT", "cctp-bridge", "HIGH"],
   ["defi/cctp-v2-receive.json", "BRIDGE", "BRIDGE_IN", "cctp-bridge", "HIGH"],
+  ["defi/native-stake-sale.json", "UNSTAKE", "STAKE_SALE", "native-stake", "MEDIUM"],
   ["defi/sanctum-unstake.json", "UNSTAKE", "INSTANT_UNSTAKE", "sanctum-unstake", "HIGH"],
   ["defi/spl-stake-pool-deposit-sol.json", "STAKE", "LIQUID_STAKE", "spl-stake-pool", "HIGH"],
   ["defi/sanctum-router-deposit.json", "STAKE", "LIQUID_STAKE", "spl-stake-pool", "HIGH"],

@@ -54,6 +54,17 @@ describe("timeline cards from semantic events", () => {
     expect(c.lines.slice(1)).toEqual(["BRIDGE OUT", "1,005 USDC", "→ Ethereum · Circle CCTP"]);
   });
 
+  it("shows a stake account sold for SOL as a stake sale: what was handed over, what came back, and to whom", () => {
+    const c = card(read("defi/native-stake-sale.json"), "HwtbQBNnLERakdUDuCCLWmUs2oETLFQZeHUWeQdPads");
+    expect([c.label, c.flow]).toEqual(["Stake sale", "in"]);
+    expect(c.lines.slice(1)).toEqual(["STAKE SALE", "20,000.00228288 SOL → 19,599.999954342 SOL", "→ 5Px…Hkk"]);
+  });
+
+  it("shows a Sanctum instant unstake as the stake account given up for the SOL paid", () => {
+    const c = card(read("defi/sanctum-unstake.json"), "HwtbQBNnLERakdUDuCCLWmUs2oETLFQZeHUWeQdPads");
+    expect(c.lines.slice(1)).toEqual(["UNSTAKE", "8,384.743735284 SOL → 8,202.442684876 SOL", "Sanctum Unstake"]);
+  });
+
   it("shows a liquid stake rather than a send and a receive", () => {
     const c = card(read("defi/marinade-deposit.json"), "8R4crYWNvunksmeM1MprWXgooexQSYZhR1gNUjhePqDZ");
     expect([c.tone, c.label, c.lines[3]]).toEqual(["defi", "Liquid stake", "Marinade"]);

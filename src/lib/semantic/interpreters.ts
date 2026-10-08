@@ -9,7 +9,7 @@ import {
 import { cctpBridge, jupiterSwap, kaminoLending, marginfiLending, marinadeStake, relayBridge, sanctumUnstake, splStakePool } from "./defi";
 import type { Interpreter } from "./interpret";
 import { readNft } from "./nft";
-import { actionName, actorFlows, kindIs, knownProgram, protocolOf, refsWhere, summaryRef } from "./reading";
+import { actionName, actorFlows, kindIs, knownProgram, protocolOf, receivedAny, refsWhere, stakeAccount, summaryRef } from "./reading";
 
 const failed: Interpreter = {
   id: "failed",
@@ -47,24 +47,44 @@ const knownDexSwap: Interpreter = {
 
 const UNSTAKE = new Set(["deactivate", "deactivateDelinquent", "withdraw"]);
 
-/** A top-level call to the native stake program; the RPC decodes its instructions. */
+type StakeInfo = { stakeAccount?: string; newSplitAccount?: string; lamports?: number; authority?: string; authorityType?: string; newAuthority?: string };
+
+/**
+ * A top-level call to the native stake program; the RPC decodes its
+ * instructions. Handing a stake account's withdraw authority to someone else
+ * gives the account away: paid for in the same transaction, it's a sale.
+ */
 const nativeStake: Interpreter = {
   id: "native-stake",
   interpret: (ctx) => {
-    // Only top-level calls: a protocol invoking the stake program inside its own instruction is that protocol's action.
+    // Only top-level calls make the action: a protocol invoking the stake program inside its own instruction is that protocol's.
     const calls = ctx.tx.instructions.filter((ix) => ix.programId === STAKE_PROGRAM);
-    const last = calls.at(-1);
-    if (!last) {
+    // The stake account comes from the calls that ran, top-level or not.
+    const ran = calls.length > 0 ? calls : ctx.tx.innerInstructions.filter((ix) => ix.programId === STAKE_PROGRAM);
+    const info = (ix: (typeof calls)[number]) => (ix.info ?? {}) as StakeInfo;
+    const handover = ran.map(info).find((i) => i.authorityType === "Withdrawer" && i.newAuthority && i.authority && i.newAuthority !== i.authority);
+    const last = ran.at(-1);
+    const target = handover ?? (last ? info(last) : {});
+    const withdrawn = last?.type === "withdraw" && target.lamports !== undefined ? String(target.lamports) : null;
+    const held = stakeAccount(ctx, last?.type === "split" && !handover ? target.newSplitAccount : target.stakeAccount, handover?.newAuthority ?? null);
+    const stake = held && withdrawn ? { ...held, lamports: withdrawn } : held;
+
+    if (calls.length === 0) {
       if (!kindIs(ctx, "STAKE")) return null;
       // No value moved and a stake instruction ran inside another program's call.
-      return { category: "STAKE", action: actionName(ctx.summary.action?.instruction), confidence: "LOW", evidence: summaryRef(ctx) };
+      return { category: "STAKE", action: actionName(ctx.summary.action?.instruction), confidence: "LOW", evidence: summaryRef(ctx), stake };
     }
-    const decoded = calls.every((ix) => ix.type !== null);
+    const evidence = refsWhere(ctx, (ix) => ix.programId === STAKE_PROGRAM);
+    if (handover?.authority && receivedAny(ctx, handover.authority)) {
+      // That the payment is for the account is read from it arriving in the same transaction.
+      return { category: "UNSTAKE", action: "STAKE_SALE", confidence: "MEDIUM", actor: handover.authority, evidence, stake, ...actorFlows(ctx, handover.authority) };
+    }
     return {
-      category: UNSTAKE.has(last.type ?? "") ? "UNSTAKE" : "STAKE",
-      action: actionName(last.type),
-      confidence: decoded ? "HIGH" : "MEDIUM",
-      evidence: refsWhere(ctx, (ix) => ix.programId === STAKE_PROGRAM),
+      category: UNSTAKE.has(calls.at(-1)!.type ?? "") ? "UNSTAKE" : "STAKE",
+      action: actionName(calls.at(-1)!.type),
+      confidence: calls.every((ix) => ix.type !== null) ? "HIGH" : "MEDIUM",
+      evidence,
+      stake,
     };
   },
 };

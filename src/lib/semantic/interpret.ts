@@ -9,6 +9,7 @@ import {
   type EventConfidence,
   eventId,
   type BridgeEnvelope,
+  type StakeDetail,
   type EvidenceRef,
   type FlowRole,
   type Infrastructure,
@@ -71,6 +72,7 @@ export type Interpretation = {
   actor?: string;
   nft?: NftDetail;
   bridge?: BridgeEnvelope;
+  stake?: StakeDetail;
 };
 
 /**
@@ -256,6 +258,7 @@ export function interpretTransaction(
         warnings: [`Couldn't read the transaction: ${message(error)}`],
         nft: null,
         bridge: null,
+        stake: null,
         metadata,
       },
     ];
@@ -316,6 +319,7 @@ export function interpretTransaction(
       warnings,
       nft: reading.nft ?? null,
       bridge: reading.bridge ?? null,
+      stake: reading.stake ?? null,
       metadata,
     },
   ];

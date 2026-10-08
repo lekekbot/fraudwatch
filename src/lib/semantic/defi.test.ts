@@ -155,6 +155,19 @@ describe("CCTP bridge envelopes", () => {
   });
 });
 
+describe("native stake", () => {
+  it("reads a stake account's authorities handed over for SOL in the same transaction as a stake sale", () => {
+    const { tx, e } = event("native-stake-sale");
+    const seller = "HwtbQBNnLERakdUDuCCLWmUs2oETLFQZeHUWeQdPads";
+    const buyer = "5PxxoU93A4KLr23rXvYrYMFZDAw5DY8XZiyX6NsW7Hkk";
+    expect([e.category, e.action, e.interpreter.id, e.confidence]).toEqual(["UNSTAKE", "STAKE_SALE", "native-stake", "MEDIUM"]);
+    expect(e.stake).toEqual({ account: "35EUDUHNi3tRc6b8hsZNMzXvHYZdAzgTK7p368LiVFsu", lamports: "20000002282880", newOwner: buyer });
+    expect(main(e)).toEqual([["received", NATIVE_SOL, "19599999954342", null, seller]]);
+    expect(e.participants.map((p) => p.address)).toContain(seller);
+    reconciles(e, tx);
+  });
+});
+
 describe("Sanctum instant unstake", () => {
   it("reads the reserves paying the wallet as an unstake, with the pool's accounts as infrastructure", () => {
     const { tx, e } = event("sanctum-unstake");

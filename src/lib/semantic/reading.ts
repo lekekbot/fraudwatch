@@ -1,7 +1,7 @@
 import type { ProtocolCategory } from "@/lib/protocols/registry";
 import type { CanonicalInstruction } from "@/lib/solana/canonical";
 import type { EffectKind } from "@/lib/state/summarize";
-import type { EvidenceRef, ProtocolRef, SemanticFlow } from "./events";
+import type { EvidenceRef, ProtocolRef, SemanticFlow, StakeDetail } from "./events";
 import { withSettlement } from "./flows";
 import type { TransactionContext } from "./interpret";
 
@@ -58,3 +58,13 @@ export const moved = (ctx: TransactionContext, wallet: string) => {
   const s = ctx.summaryOf(wallet);
   return s.outflows.length > 0 || s.inflows.length > 0;
 };
+
+/** Whether a wallet gave up (spentAny) or got (receivedAny) any asset, or `assetId`, in the transaction. */
+export const spentAny = (ctx: TransactionContext, wallet: string, assetId?: string) => ctx.summaryOf(wallet).outflows.some((c) => !assetId || c.assetId === assetId);
+export const receivedAny = (ctx: TransactionContext, wallet: string, assetId?: string) => ctx.summaryOf(wallet).inflows.some((c) => !assetId || c.assetId === assetId);
+
+/** A stake account and the lamports it held after the transaction. */
+export function stakeAccount(ctx: TransactionContext, account: string | null | undefined, newOwner: string | null = null): StakeDetail | undefined {
+  const held = account ? ctx.tx.nativeChanges.find((c) => c.account === account)?.post : undefined;
+  return account && held ? { account, lamports: held, newOwner } : undefined;
+}
