@@ -1,6 +1,6 @@
 {
   "$schema": "./schema.json",
-  "version": 9,
+  "version": 10,
   "protocols": {
     "solana": {
       "name": "Solana",
@@ -151,6 +151,17 @@
       "addresses": {
         "MarBmsSgKXdrN1egZf5sqe1TMai9K1rChYNDJgjq7aD": { "role": "program", "label": "Marinade" },
         "MR2LqxoSbw831bNy68utpu5n4YqBH3AzDmddkgk9LQv": { "role": "program", "label": "Marinade Staking" }
+      }
+    },
+    "sanctum_unstake": {
+      "name": "Sanctum Unstake",
+      "category": "liquid_staking",
+      "website": "https://sanctum.so",
+      "addresses": {
+        "unpXTU2Ndrc7WWNyEhQWe4udTzSibLPi25SXv2xbCHQ": { "role": "program", "label": "Sanctum Unstake" },
+        "FypPtwbY3FUfzJUtXHSyVRokVKG2jKtH29FmK4ebxRSd": { "role": "pool", "label": "Sanctum Unstake Pool" },
+        "3rBnnH9TTgd3xwu48rnzGsaQkSr1hR64nY71DrDt6VrQ": { "role": "vault", "label": "Sanctum Unstake SOL Reserves" },
+        "EeQmNqm1RcQnee8LTyx6ccVG9FnR8TezQuw2JXq2LC1T": { "role": "fee_account", "label": "Sanctum Unstake Protocol Fees" }
       }
     },
     "metaplex": {

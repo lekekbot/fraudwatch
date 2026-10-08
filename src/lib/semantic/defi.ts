@@ -103,6 +103,34 @@ export const marinadeStake: Interpreter = {
   },
 };
 
+// Sanctum Unstake (unstake.it). Accounts: unstaker, stake account, destination, pool, pool SOL reserves, …
+const SANCTUM_UNSTAKE = "unpXTU2Ndrc7WWNyEhQWe4udTzSibLPi25SXv2xbCHQ";
+const SANCTUM_UNSTAKES = new Map([
+  ["90,95,107,42,205,124,50,225", "unstake"],
+  ["125,93,190,135,89,174,142,149", "unstake_wsol"],
+]);
+
+/**
+ * An instant unstake: the wallet hands a stake account's authorities to the
+ * pool and is paid SOL (or wSOL) from its reserves, less a fee. The stake
+ * account's balance doesn't move, so balances alone read it as the reserves
+ * sending the wallet SOL.
+ */
+export const sanctumUnstake: Interpreter = {
+  id: "sanctum-unstake",
+  interpret: (ctx) => {
+    const [call] = decoded(ctx, SANCTUM_UNSTAKE, SANCTUM_UNSTAKES, true);
+    const actor = call?.ix.accounts[0];
+    if (!call || !actor) return null;
+    return reading(
+      ctx,
+      { category: "UNSTAKE", action: "INSTANT_UNSTAKE", programId: SANCTUM_UNSTAKE, actor, evidence: [call.ref] },
+      receivedAny(ctx, actor),
+      "The unstaker wasn't paid in this transaction.",
+    );
+  },
+};
+
 // Kamino Lend (klend). Supplying and repaying take value in; withdrawing and borrowing give it back.
 const KAMINO = "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD";
 const KAMINO_OPS = new Map([

@@ -155,6 +155,20 @@ describe("CCTP bridge envelopes", () => {
   });
 });
 
+describe("Sanctum instant unstake", () => {
+  it("reads the reserves paying the wallet as an unstake, with the pool's accounts as infrastructure", () => {
+    const { tx, e } = event("sanctum-unstake");
+    const unstaker = "HwtbQBNnLERakdUDuCCLWmUs2oETLFQZeHUWeQdPads";
+    const reserves = "3rBnnH9TTgd3xwu48rnzGsaQkSr1hR64nY71DrDt6VrQ";
+    expect([e.category, e.action, e.interpreter.id, e.confidence, e.protocol?.id]).toEqual(["UNSTAKE", "INSTANT_UNSTAKE", "sanctum-unstake", "HIGH", "sanctum_unstake"]);
+    expect(main(e)).toEqual([["received", NATIVE_SOL, "8202442684876", null, unstaker]]);
+    // The reserves and fee account are the pool's, not counterparties: no flow names both sides.
+    expect(e.participants.map((p) => p.address)).toEqual([unstaker]);
+    expect(e.infrastructure.find((i) => i.address === reserves)?.role).toBe("VAULT");
+    reconciles(e, tx);
+  });
+});
+
 describe("Relay deposits", () => {
   it("reads a Jupiter route ending in a Relay deposit as a bridge out, not a swap the wallet never received", () => {
     const { tx, e } = event("relay-swap-deposit-token");
