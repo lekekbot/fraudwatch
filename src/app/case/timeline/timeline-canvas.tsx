@@ -268,6 +268,16 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
     const partyRank = new Map(repeated.map(([party], i) => [party, i]));
     const partyColors = [p.party1, p.party2, p.party3];
     const hits: Hit[] = [];
+    // Cluster pills, so marks painted after them can keep out of them.
+    const pills: { x0: number; x1: number; lane: number }[] = [];
+    const pillAt = (x: number, lane: number) => pills.find((pl) => pl.lane === lane && x > pl.x0 && x < pl.x1);
+    const clipOutPills = () => {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(-50, -50, width + 100, height + 100);
+      for (const pl of pills) ctx.roundRect(pl.x0, laneY(pl.lane) - PILL_H / 2, pl.x1 - pl.x0, PILL_H, 10);
+      ctx.clip("evenodd");
+    };
 
     // Lanes with OPEN and CLOSE bookends, and a branch where a lane was mapped from another.
     const firstAtOrAfter = (time: number) => {
@@ -491,6 +501,7 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
           ctx.textBaseline = "alphabetic";
           const label = `${count} · ${when}\n${breakdown.map(([label, { n }]) => `${n} ${label.toLowerCase()}`).join(" · ")}\nClick to open`;
           hits.push({ type: "event", x0: x, y0: y - PILL_H / 2, x1: x + w, y1: y + PILL_H / 2, first, last, lane: l, label });
+          pills.push({ x0: x, x1: x + w, lane: l });
           return;
         }
 
@@ -587,7 +598,8 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
           .map((o) => ({ o, x0: timeX(o.start), x1: Math.max(timeX(o.start), endX(o.end)) }))
           .filter((m) => m.x1 >= -20 && m.x0 <= width + 20)
           .sort((a, b) => a.x0 - b.x0);
-        // Spans are drawn one by one, thin; only the selected one stands out.
+        // Spans are drawn one by one, thin, behind the pills; only the selected one stands out.
+        clipOutPills();
         for (const m of placed) {
           const on = m.o.key === selectedObservation;
           ctx.globalAlpha = on ? 1 : 0.45;
@@ -595,6 +607,7 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
           ctx.fillRect(m.x0, y - (on ? 3 : 1), Math.max(2, m.x1 - m.x0), on ? 6 : 2);
         }
         ctx.globalAlpha = 1;
+        ctx.restore();
         // Markers merge by where they start, so a long span never swallows the ones inside it.
         const groups: (typeof placed)[] = [];
         for (const m of placed) {
@@ -605,8 +618,10 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
         groups.forEach((group, gi) => {
           const x0 = group[0].x0;
           const on = group.some((g) => g.o.key === selectedObservation);
+          // One that lands in a pill sits on its bottom edge instead, a badge rather than a mark through the label.
+          const my = pillAt(x0, l) ? y + PILL_H / 2 : y;
           ctx.save();
-          ctx.translate(x0, y);
+          ctx.translate(x0, my);
           ctx.rotate(Math.PI / 4);
           ctx.fillStyle = p.behavior;
           ctx.fillRect(-4.5, -4.5, 9, 9);
@@ -626,12 +641,12 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
           w = ctx.measureText(shown).width;
           ctx.fillStyle = p.bg;
           ctx.globalAlpha = shown ? 0.85 : 0;
-          ctx.fillRect(left - 2, y + 6, w + 6, 13);
+          ctx.fillRect(left - 2, my + 6, w + 6, 13);
           ctx.globalAlpha = 1;
           ctx.fillStyle = p.behavior;
           ctx.textAlign = "left";
           ctx.textBaseline = "alphabetic";
-          ctx.fillText(shown, left + 1, y + 16);
+          ctx.fillText(shown, left + 1, my + 16);
           const label =
             group.length === 1
               ? `${group[0].o.label}\nClick for what triggered it`
@@ -640,9 +655,9 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
           hits.push({
             type: "observation",
             x0: Math.min(x0 - 6, left - 2),
-            y0: y - 6,
+            y0: my - 6,
             x1: Math.max(x0 + 6, left + w + 4),
-            y1: y + 20,
+            y1: my + 20,
             keys: group.map((g) => g.o.key),
             start: Math.min(...group.map((g) => g.o.start)),
             end: Math.max(...group.map((g) => g.o.start)),
@@ -653,7 +668,8 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
     }
 
     // OPEN and CLOSE on top of the events: a bar across the lane at the exact edge, and a small label
-    // on a background so it reads over lines and pill edges.
+    // on a background so it reads over lines and pill edges. A bar never cuts through a pill: the label still marks it.
+    clipOutPills();
     for (const mark of lifecycle) {
       ctx.strokeStyle = p.fg;
       ctx.lineWidth = 2;
@@ -662,6 +678,7 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
       ctx.lineTo(mark.edge, mark.laneY + 12);
       ctx.stroke();
     }
+    ctx.restore();
     ctx.font = "600 10px ui-sans-serif, system-ui, sans-serif";
     ctx.textBaseline = "alphabetic";
     const cards = hits.filter((h) => h.type === "event" && h.x1 - h.x0 === CARD_W);
