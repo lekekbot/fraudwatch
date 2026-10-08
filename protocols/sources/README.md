@@ -25,6 +25,10 @@ Import caveats for Sprint 06:
 
 Snapshot checked against [Solscan's program leaderboard](https://solscan.io/leaderboard/program) on 2026-10-04. Registry v6 includes all 34 named service programs in the top 40 by interaction volume. Five unlabeled programs and one dedicated arbitrage bot were excluded. Leaderboard labels identify active programs; they are not ownership proof.
 
+## Orb programs
+
+`orb-programs.json` is the full [Orb (Helius) program list](https://orbmarkets.io/programs) as shown on 2026-10-08: 250 programs with Orb's name and category. Registry v11 adds the 152 named service programs it didn't already have, grouped by brand under existing or new protocols. Orb's 31 "Arbitrage or Sandwich Bot" entries are left out (they aren't protocols), and where Orb and the registry disagree on an existing entry, the registry wins. Like the Solscan leaderboard, Orb's labels identify programs; they are not ownership proof.
+
 ## Solscan popular tokens
 
 Snapshot checked against [Solscan's token leaderboard](https://solscan.io/leaderboard/token) on 2026-10-04. The built-in asset registry includes the top 10 tokens in each displayed category: DeFi, Liquid Stake, Stablecoin, Meme, and Stocks (50 mints total). Each mint account and its decimals were verified against Solana mainnet; leaderboard labels are display metadata, not an endorsement.

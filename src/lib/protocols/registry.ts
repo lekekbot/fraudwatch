@@ -22,6 +22,16 @@ export const CATEGORIES = [
   "exchange",
   "bridge",
   "launchpad",
+  "staking",
+  "oracle",
+  "governance",
+  "defi",
+  "infrastructure",
+  "airdrop",
+  "depin",
+  "payments",
+  "gaming",
+  "privacy",
 ] as const;
 export const ROLES = ["program", "pool", "vault", "authority", "fee_account", "market", "wallet"] as const;
 

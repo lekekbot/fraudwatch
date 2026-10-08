@@ -35,7 +35,17 @@
             "name_service",
             "exchange",
             "bridge",
-            "launchpad"
+            "launchpad",
+            "staking",
+            "oracle",
+            "governance",
+            "defi",
+            "infrastructure",
+            "airdrop",
+            "depin",
+            "payments",
+            "gaming",
+            "privacy"
           ]
         },
         "website": { "type": "string" },
