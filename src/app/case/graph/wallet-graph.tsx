@@ -1018,6 +1018,35 @@ export function WalletGraph({
               Show {nodesById.get(selectedNode)!.entity!.addresses.length.toLocaleString()} addresses
             </Button>
           )}
+          {clusters.length > 0 && (
+            // Addresses the ranking left off the map, by group.
+            <>
+              <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
+              <span className="pl-1 text-xs text-muted-foreground">Not on the map</span>
+              {clusters.map((node) => {
+                const { kind, addresses, wallets } = node.cluster!;
+                const decoys = kind === "decoy";
+                return (
+                  <Button
+                    key={node.id}
+                    variant="ghost"
+                    size="sm"
+                    className={decoys ? "text-destructive hover:text-destructive" : undefined}
+                    title={[
+                      `${addresses.toLocaleString()} addresses · ${node.txCount.toLocaleString()} transactions`,
+                      `With ${wallets.map((id) => names.of(id)).join(", ")}`,
+                      ...(decoys ? ["Look-alikes that only moved dust: likely address poisoning."] : []),
+                      "Click to draw these addresses on the map",
+                    ].join("\n")}
+                    onClick={() => onToggleCluster(kind)}
+                  >
+                    {CLUSTER_LABELS[kind]}
+                    <span className="tabular-nums text-muted-foreground">{addresses.toLocaleString()}</span>
+                  </Button>
+                );
+              })}
+            </>
+          )}
           {[...expandedClusters].map((kind) => (
             <Button key={kind} variant="secondary" size="sm" title={`Collapse ${CLUSTER_LABELS[kind].toLowerCase()} back into one box`} onClick={() => onToggleCluster(kind)}>
               {CLUSTER_LABELS[kind]}
@@ -1056,37 +1085,6 @@ export function WalletGraph({
           )}
         </div>
       </div>
-
-      {clusters.length > 0 && (
-        // Addresses the ranking left off the map, by group: always on screen, whatever the zoom.
-        <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center px-3">
-          <div className="pointer-events-auto flex max-w-full flex-wrap items-center gap-1.5 rounded-lg border bg-popover/95 p-1.5 shadow-lg backdrop-blur" role="group" aria-label="Addresses not drawn on the map">
-            <span className="px-1 text-xs text-muted-foreground">Not on the map</span>
-            {clusters.map((node) => {
-              const { kind, addresses, wallets } = node.cluster!;
-              const decoys = kind === "decoy";
-              return (
-                <Button
-                  key={node.id}
-                  variant="outline"
-                  size="sm"
-                  className={decoys ? "border-destructive/60 text-destructive hover:text-destructive" : undefined}
-                  title={[
-                    `${addresses.toLocaleString()} addresses · ${node.txCount.toLocaleString()} transactions`,
-                    `With ${wallets.map((id) => names.of(id)).join(", ")}`,
-                    ...(decoys ? ["Look-alikes that only moved dust: likely address poisoning."] : []),
-                    "Click to draw these addresses on the map",
-                  ].join("\n")}
-                  onClick={() => onToggleCluster(kind)}
-                >
-                  {CLUSTER_LABELS[kind]}
-                  <span className="tabular-nums text-muted-foreground">{addresses.toLocaleString()}</span>
-                </Button>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       <details className="group pointer-events-auto absolute bottom-3 left-3 rounded-lg border bg-popover/90 px-2.5 py-2 text-[11px] text-muted-foreground backdrop-blur">
         <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
