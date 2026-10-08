@@ -95,6 +95,8 @@ function sentence({ event, state, assets, names }: Omit<Props, "onSelectAddress"
 function FlowRow({ flow, state, assets, names, onSelectAddress }: { flow: SemanticFlow } & Omit<Props, "event">) {
   const side = (address: string | null) =>
     address ? <AddressButton address={address} names={names} onSelect={onSelectAddress} /> : <span className="text-xs text-muted-foreground">—</span>;
+  const amount = formatAssetAmount(flow.amount, flow.assetId, state, assets);
+  const asset = assetLabel(flow.assetId, assets);
   return (
     <li className="flex flex-col gap-0.5">
       <span className="flex min-w-0 items-center gap-1">
@@ -103,9 +105,10 @@ function FlowRow({ flow, state, assets, names, onSelectAddress }: { flow: Semant
         {side(flow.to)}
       </span>
       <span className="flex justify-between gap-2 text-xs">
-        <span className="text-[10px] text-muted-foreground uppercase">{flow.role ? FLOW_TEXT[flow.role] : "Transfer"}</span>
-        <span className="tabular-nums whitespace-nowrap">
-          {formatAssetAmount(flow.amount, flow.assetId, state, assets)} {assetLabel(flow.assetId, assets)}
+        <span className="shrink-0 text-[10px] text-muted-foreground uppercase">{flow.role ? FLOW_TEXT[flow.role] : "Transfer"}</span>
+        <span className="flex min-w-0 gap-1 tabular-nums" title={`${amount} ${asset}`}>
+          <span className="whitespace-nowrap">{amount}</span>
+          <span className="truncate">{asset}</span>
         </span>
       </span>
     </li>
