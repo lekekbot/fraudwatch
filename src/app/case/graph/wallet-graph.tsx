@@ -1019,32 +1019,30 @@ export function WalletGraph({
             </Button>
           )}
           {clusters.length > 0 && (
-            // Addresses the ranking left off the map, by group.
+            // Addresses the ranking left off the map, by group: picking one draws it.
             <>
               <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
-              <span className="pl-1 text-xs text-muted-foreground">Not on the map</span>
-              {clusters.map((node) => {
-                const { kind, addresses, wallets } = node.cluster!;
-                const decoys = kind === "decoy";
-                return (
-                  <Button
-                    key={node.id}
-                    variant="ghost"
-                    size="sm"
-                    className={decoys ? "text-destructive hover:text-destructive" : undefined}
-                    title={[
-                      `${addresses.toLocaleString()} addresses · ${node.txCount.toLocaleString()} transactions`,
-                      `With ${wallets.map((id) => names.of(id)).join(", ")}`,
-                      ...(decoys ? ["Look-alikes that only moved dust: likely address poisoning."] : []),
-                      "Click to draw these addresses on the map",
-                    ].join("\n")}
-                    onClick={() => onToggleCluster(kind)}
-                  >
-                    {CLUSTER_LABELS[kind]}
-                    <span className="tabular-nums text-muted-foreground">{addresses.toLocaleString()}</span>
-                  </Button>
-                );
-              })}
+              <label className="sr-only" htmlFor="graph-off-map">
+                Addresses not on the map
+              </label>
+              <select
+                id="graph-off-map"
+                value=""
+                title="Addresses the ranking left off the map. Pick a group to draw it."
+                onChange={(event) => event.target.value && onToggleCluster(event.target.value as ClusterKind)}
+                className="h-7 rounded-md bg-transparent px-2 text-xs outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="">Not on the map ({clusters.reduce((n, c) => n + c.cluster!.addresses, 0).toLocaleString()})</option>
+                {clusters.map((node) => {
+                  const { kind, addresses, wallets } = node.cluster!;
+                  return (
+                    <option key={node.id} value={kind} title={`${node.txCount.toLocaleString()} transactions · with ${wallets.map((id) => names.of(id)).join(", ")}`}>
+                      {CLUSTER_LABELS[kind]} · {addresses.toLocaleString()}
+                      {kind === "decoy" ? " (likely address poisoning)" : ""}
+                    </option>
+                  );
+                })}
+              </select>
             </>
           )}
           {[...expandedClusters].map((kind) => (
