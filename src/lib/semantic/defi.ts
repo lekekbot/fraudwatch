@@ -152,24 +152,77 @@ const KAMINO_OPS = new Map([
 const PAYS_IN = new Set(["DEPOSIT", "SUPPLY_COLLATERAL", "REPAY"]);
 
 /**
- * Top-level Kamino lending calls. Several in one transaction (a leveraged
- * loop, say) are named together and kept MEDIUM; one called from inside
- * another program is that program's action and left to the generic readers.
+ * Top-level calls to one lending program. Several in one transaction (a
+ * leveraged loop, say) are named together and kept MEDIUM; one called from
+ * inside another program is that program's action and left to the generic readers.
  */
-export const kaminoLending: Interpreter = {
-  id: "kamino-lending",
+function lending(id: string, programId: string, ops: ReadonlyMap<string, string>): Interpreter {
+  return {
+    id,
+    interpret: (ctx) => {
+      const calls = decoded(ctx, programId, ops, true);
+      const actor = movingSigner(ctx);
+      if (calls.length === 0 || !actor) return null;
+      const actions = [...new Set(calls.map((c) => c.op))];
+      const evidence = calls.map((c) => c.ref);
+      const name = protocolOf(ctx, programId)?.name ?? "The lending program";
+      if (actions.length > 1) {
+        return reading(ctx, { category: "LENDING", action: actions.join("+"), programId, actor, evidence }, false, `Several lending actions in one transaction: ${actions.join(", ")}.`);
+      }
+      const [action] = actions;
+      const agrees = PAYS_IN.has(action) ? spentAny(ctx, actor) : receivedAny(ctx, actor);
+      return reading(ctx, { category: "LENDING", action, programId, actor, evidence }, agrees, `${name}'s ${action} doesn't match the wallet's balances.`);
+    },
+  };
+}
+
+export const kaminoLending = lending("kamino-lending", KAMINO, KAMINO_OPS);
+
+// marginfi v2.
+const MARGINFI = "MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA";
+export const marginfiLending = lending(
+  "marginfi-lending",
+  MARGINFI,
+  new Map([
+    ["171,94,235,103,82,64,212,140", "DEPOSIT"], // lending_account_deposit
+    ["36,72,74,19,210,210,192,192", "WITHDRAW"], // lending_account_withdraw
+    ["4,126,116,53,48,5,212,31", "BORROW"], // lending_account_borrow
+    ["79,209,172,177,222,51,173,151", "REPAY"], // lending_account_repay
+  ]),
+);
+
+// SPL stake pools: the SPL program and Sanctum's single- and multi-validator deployments of it.
+// Not Anchor: the first data byte is the instruction's index.
+const STAKE_POOLS = new Set(["SPoo1Ku8WFXoNDMHPsrGSTSG1Y47rzgn41SLUNakuHy", "SP12tWFxD9oJsVWNavTTBZvMbA6gkAmxtVgxdqvyvhY", "SPMBzsVUuoHA4Jm6KunbsotaahvVikZs1JyTW6iJvbn"]);
+const STAKE_POOL_OPS = new Map<number, { category: EventCategory; action: string }>([
+  [9, { category: "STAKE", action: "LIQUID_STAKE" }], // DepositStake
+  [10, { category: "UNSTAKE", action: "LIQUID_UNSTAKE" }], // WithdrawStake
+  [14, { category: "STAKE", action: "LIQUID_STAKE" }], // DepositSol
+  [16, { category: "UNSTAKE", action: "LIQUID_UNSTAKE" }], // WithdrawSol
+  [23, { category: "STAKE", action: "LIQUID_STAKE" }], // DepositStakeWithSlippage
+  [24, { category: "UNSTAKE", action: "LIQUID_UNSTAKE" }], // WithdrawStakeWithSlippage
+  [25, { category: "STAKE", action: "LIQUID_STAKE" }], // DepositSolWithSlippage
+  [26, { category: "UNSTAKE", action: "LIQUID_UNSTAKE" }], // WithdrawSolWithSlippage
+]);
+
+/**
+ * A deposit into or withdrawal from a stake pool, at any depth: a router
+ * (Sanctum's, say) calling the pool is still the wallet staking. Pool upkeep
+ * (balance updates, rebalancing) isn't a user action and is left alone.
+ */
+export const splStakePool: Interpreter = {
+  id: "spl-stake-pool",
   interpret: (ctx) => {
-    const calls = decoded(ctx, KAMINO, KAMINO_OPS, true);
-    const actor = movingSigner(ctx);
-    if (calls.length === 0 || !actor) return null;
-    const actions = [...new Set(calls.map((c) => c.op))];
-    const evidence = calls.map((c) => c.ref);
-    if (actions.length > 1) {
-      return reading(ctx, { category: "LENDING", action: actions.join("+"), programId: KAMINO, actor, evidence }, false, `Several lending actions in one transaction: ${actions.join(", ")}.`);
+    for (const { ix, ref } of ctx.instructions) {
+      if (!STAKE_POOLS.has(ix.programId)) continue;
+      const op = STAKE_POOL_OPS.get(bytesOf(ix.data)?.[0] ?? -1);
+      const actor = op && movingSigner(ctx);
+      if (!op || !actor) continue;
+      const agrees = op.category === "STAKE" ? spentAny(ctx, actor) && receivedAny(ctx, actor) : receivedAny(ctx, actor);
+      const programId = ctx.instructions.find((i) => i.ref.kind === "OUTER_INSTRUCTION" && protocolOf(ctx, i.ix.programId))?.ix.programId ?? ix.programId;
+      return reading(ctx, { ...op, programId, actor, evidence: [ref] }, agrees, "The stake pool's instruction and the wallet's balances don't agree.");
     }
-    const [action] = actions;
-    const agrees = PAYS_IN.has(action) ? spentAny(ctx, actor) : receivedAny(ctx, actor);
-    return reading(ctx, { category: "LENDING", action, programId: KAMINO, actor, evidence }, agrees, `Kamino's ${action} doesn't match the wallet's balances.`);
+    return null;
   },
 };
 

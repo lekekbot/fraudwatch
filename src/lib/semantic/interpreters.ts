@@ -6,7 +6,7 @@ import {
   SYSTEM_PROGRAM,
   TOKEN_PROGRAMS,
 } from "@/lib/solana/programs";
-import { cctpBridge, jupiterSwap, kaminoLending, marinadeStake, relayBridge, sanctumUnstake } from "./defi";
+import { cctpBridge, jupiterSwap, kaminoLending, marginfiLending, marinadeStake, relayBridge, sanctumUnstake, splStakePool } from "./defi";
 import type { Interpreter } from "./interpret";
 import { readNft } from "./nft";
 import { actionName, actorFlows, kindIs, knownProgram, protocolOf, refsWhere, summaryRef } from "./reading";
@@ -34,11 +34,11 @@ const marketplaceNftTrade: Interpreter = {
   },
 };
 
-/** One asset out, another in, through a DEX or aggregator program the registry verifies. */
+/** One asset out, another in, through a DEX, aggregator or launchpad program the registry verifies. */
 const knownDexSwap: Interpreter = {
   id: "known-dex-swap",
   interpret: (ctx) => {
-    const dex = kindIs(ctx, "SWAP") ? knownProgram(ctx, ["dex_aggregator", "dex"]) : null;
+    const dex = kindIs(ctx, "SWAP") ? knownProgram(ctx, ["dex_aggregator", "dex", "launchpad"]) : null;
     if (!dex || !ctx.feePayer) return null;
     const { flows, warnings } = actorFlows(ctx, ctx.feePayer);
     return { category: "SWAP", action: "SWAP", confidence: "MEDIUM", protocol: dex.protocol, evidence: refsWhere(ctx, (ix) => ix.programId === dex.programId), flows, warnings };
@@ -133,8 +133,10 @@ export const INTERPRETERS: readonly Interpreter[] = [
   cctpBridge,
   relayBridge,
   kaminoLending,
+  marginfiLending,
   marinadeStake,
   sanctumUnstake,
+  splStakePool,
   jupiterSwap,
   knownDexSwap,
   nativeStake,
