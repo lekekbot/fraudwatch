@@ -3,19 +3,19 @@
 import { select } from "d3-selection";
 import { type ZoomBehavior, type ZoomTransform, zoom, zoomIdentity } from "d3-zoom";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownLeftIcon, ArrowUpRightIcon, ChevronUpIcon, FocusIcon, MaximizeIcon, MinusIcon, PlusIcon, RotateCcwIcon, WorkflowIcon, XIcon } from "lucide-react";
+import { ArrowDownLeftIcon, ArrowUpRightIcon, ChevronDownIcon, ChevronUpIcon, FocusIcon, MaximizeIcon, MinusIcon, PlusIcon, RotateCcwIcon, WorkflowIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { AddressState } from "@/lib/case/address-state";
 import { graphWheelAction } from "@/lib/gestures";
-import { BURNED_NODE_ID, CLUSTER_LABELS, type ClusterKind, entityNodeId, flowShares, startedBy, type GraphEdge, type GraphNode, type GraphRanking, type WalletGraph as Graph } from "@/lib/graph/build";
+import { BURNED_NODE_ID, CLUSTER_KINDS, CLUSTER_LABELS, type ClusterKind, entityNodeId, flowShares, startedBy, type GraphEdge, type GraphNode, type GraphRanking, type WalletGraph as Graph } from "@/lib/graph/build";
 import { classifyLayout, hashId, type LayoutRole, layoutGraph, majorEdges, nodeRadius, type Point, type Spacing, SPACINGS, type ZoomTier, zoomTier } from "@/lib/graph/layout";
 import type { Names } from "@/lib/labels/labels";
 import { AssetIcon } from "../asset-icon";
 import { readPalette, sizeCanvas } from "../canvas";
 import { categoryLabel, kindLabel } from "../filter-panel";
 
-/** Remembers the chosen graph spacing in this browser. */
-const SPACING_KEY = "fraudwatch:graph-spacing";
 
 const PALETTE = {
   fg: "--foreground",
@@ -192,6 +192,14 @@ export function WalletGraph({
   onToggleCluster,
   expandedEntities,
   onToggleEntity,
+  reducedMotion = false,
+  spacing,
+  onSpacingChange,
+  arrows = "all",
+  lowValueHidden = 0,
+  onShowLowValue,
+  viewSettings,
+  drawAll,
 }: {
   /** Clusters of collapsed addresses come in as `aggregate` nodes; they're listed in a strip over the map, not drawn on it. */
   graph: Graph;
@@ -219,10 +227,25 @@ export function WalletGraph({
   /** Registry protocols drawn as their separate addresses. */
   expandedEntities: ReadonlySet<string>;
   onToggleEntity: (protocolId: string) => void;
+  /** No moving value dots and no layout tweening. */
+  reducedMotion?: boolean;
+  spacing: Spacing;
+  onSpacingChange: (spacing: Spacing) => void;
+  /** "selected": direction arrows (and value dots) only on the selected or hovered connections. */
+  arrows?: "all" | "selected";
+  /** Connections left off because only dust moved on them; shown as a chip with a way back. */
+  lowValueHidden?: number;
+  onShowLowValue?: () => void;
+  /** The View settings control, beside zoom and layout. */
+  viewSettings?: React.ReactNode;
+  /** Offered when "All" was capped until confirmed. */
+  drawAll?: React.ReactNode;
 }) {
   // Collapsed-address clusters aren't connected to anything: they sit in a strip over the map, readable at any zoom.
   const graph = useMemo<Graph>(() => ({ ...fullGraph, nodes: fullGraph.nodes.filter((node) => node.kind !== "aggregate") }), [fullGraph]);
   const clusters = useMemo(() => fullGraph.nodes.filter((node) => node.kind === "aggregate" && node.cluster), [fullGraph]);
+  const clusterOf = useMemo(() => new Map(clusters.map((node) => [node.cluster!.kind, node])), [clusters]);
+  const offMap = clusters.reduce((n, node) => n + node.cluster!.addresses, 0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const zoomRef = useRef<ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
   const transformRef = useRef<ZoomTransform>(zoomIdentity);
@@ -232,17 +255,14 @@ export function WalletGraph({
   const suppressClick = useRef(false);
   const [hoverCard, setHoverCard] = useState<HoverCard | null>(null);
 
-  // How spread out the map is; remembered in this browser. The graph only mounts client-side, so storage is there.
-  const [spacing, setSpacing] = useState<Spacing>(() => {
-    const saved = localStorage.getItem(SPACING_KEY);
-    return saved && saved in SPACINGS ? (saved as Spacing) : "normal";
-  });
   const layout = useMemo(
     () => layoutGraph(graph.nodes, graph.edges, primaryWallet, SPACINGS[spacing]),
     [graph, primaryWallet, spacing],
   );
   // Positions start from the layout; dragging moves them without re-running it.
   const positions = useRef(new Map<string, Point>());
+  /** Nodes the investigator placed by hand: they stay put when the graph is rebuilt, until Reset layout. */
+  const dragged = useRef(new Set<string>());
   const nodesById = useMemo(() => new Map(graph.nodes.map((n) => [n.id, n])), [graph]);
   const layoutRoles = useMemo(() => classifyLayout(graph.nodes, graph.edges), [graph]);
   const major = useMemo(() => majorEdges(graph.nodes, graph.edges), [graph]);
@@ -270,10 +290,10 @@ export function WalletGraph({
     return shown;
   }, [graph, isolated]);
 
-  const latest = useRef({ graph, wallet, primaryWallet, names, stateOf, selectedNode, selectedEdge, nodesById, layoutRoles, relationshipsByNode, visible, major, shares });
+  const latest = useRef({ graph, wallet, primaryWallet, names, stateOf, selectedNode, selectedEdge, nodesById, layoutRoles, relationshipsByNode, visible, major, shares, reducedMotion, arrows });
   // Drawing reads props through this ref; refresh it before any effect or frame uses it.
   useLayoutEffect(() => {
-    latest.current = { graph, wallet, primaryWallet, names, stateOf, selectedNode, selectedEdge, nodesById, layoutRoles, relationshipsByNode, visible, major, shares };
+    latest.current = { graph, wallet, primaryWallet, names, stateOf, selectedNode, selectedEdge, nodesById, layoutRoles, relationshipsByNode, visible, major, shares, reducedMotion, arrows };
   });
 
   const segments = useCallback((): Segment[] => {
@@ -292,8 +312,9 @@ export function WalletGraph({
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
-    const { names, stateOf, selectedNode, selectedEdge, graph, wallet, primaryWallet, nodesById, layoutRoles, visible, major, shares } = latest.current;
-    const now = performance.now();
+    const { names, stateOf, selectedNode, selectedEdge, graph, wallet, primaryWallet, nodesById, layoutRoles, visible, major, shares, reducedMotion, arrows } = latest.current;
+    // Value dots hold still with reduced motion.
+    const now = reducedMotion ? 0 : performance.now();
     const { width, height } = sizeRef.current;
     const dpr = window.devicePixelRatio || 1;
     const t = transformRef.current;
@@ -325,7 +346,9 @@ export function WalletGraph({
       const perspective = edgePerspective(edge, wallet, nodesById);
       const { sent, received } = perspective;
       const intensity = coreEdge ? Math.min(0.85, 0.72 + Math.log1p(edge.interactions.length) / 40) : bridgeEdge ? 0.52 : Math.min(0.48, 0.3 + Math.log1p(edge.interactions.length) / 24);
-      ctx.globalAlpha = on ? (selected ? 1 : intensity) : 0.05;
+      // Dust-only connections, when faded, recede but keep their place.
+      const fade = edge.lowValue && !selected ? 0.3 : 1;
+      ctx.globalAlpha = (on ? (selected ? 1 : intensity) : 0.05) * fade;
       // One neutral line per relationship; direction is carried by the coloured arrowheads, not the line.
       // One-way lines take the direction's colour (red: the focus sent, green: it received); two-way lines stay neutral.
       ctx.strokeStyle =
@@ -375,7 +398,7 @@ export function WalletGraph({
           const anchor = end === "a" ? from : to;
           return { x: anchor.x + (tangent.x / length) * gap * sign, y: anchor.y + (tangent.y / length) * gap * sign };
         };
-        ctx.globalAlpha = on ? (selected || focusEdge === edge.id || focusNode ? 0.95 : 0.6) : 0.05;
+        ctx.globalAlpha = (on ? (selected || focusEdge === edge.id || focusNode ? 0.95 : 0.6) : 0.05) * fade;
         ctx.fillStyle = p.fg;
         ctx.strokeStyle = p.fg;
         ctx.lineWidth = 1.2 / t.k;
@@ -390,7 +413,8 @@ export function WalletGraph({
           ...(sent > 0 ? [{ source: reference, target: counterparty, share: sentShare, color: p.send }] : []),
           ...(received > 0 ? [{ source: counterparty, target: reference, share: receivedShare, color: p.receive }] : []),
         ];
-        for (const flow of flows) {
+        // With arrows on selected lines only, the rest stay plain lines (the colour still says which way).
+        for (const flow of arrows === "all" || selected || inFocus ? flows : []) {
           const source = positions.current.get(flow.source);
           const target = positions.current.get(flow.target);
           const targetNode = nodesById.get(flow.target);
@@ -404,7 +428,7 @@ export function WalletGraph({
           const tipX = target.x - ux * inset;
           const tipY = target.y - uy * inset;
           const arrow = (selected ? 7 : 5.5) / t.k;
-          ctx.globalAlpha = on ? (selected || focusEdge === edge.id || focusNode ? 0.95 : 0.48) : 0.05;
+          ctx.globalAlpha = (on ? (selected || focusEdge === edge.id || focusNode ? 0.95 : 0.48) : 0.05) * fade;
           ctx.fillStyle = flow.color;
           ctx.beginPath();
           ctx.moveTo(tipX, tipY);
@@ -692,20 +716,27 @@ export function WalletGraph({
       return;
     }
     const from = new Map(positions.current);
+    // Hand-placed nodes keep their place; nodes that left the graph lose it.
+    for (const id of dragged.current) if (!layout.has(id)) dragged.current.delete(id);
+    const targets = new Map([...layout].map(([id, target]) => [id, dragged.current.has(id) ? (from.get(id) ?? target) : target]));
     for (const [id, target] of layout) {
       if (from.has(id)) continue;
       const edge = graph.edges.find((item) => item.a === id || item.b === id);
       const parent = edge ? from.get(edge.a === id ? edge.b : edge.a) : undefined;
       from.set(id, parent ?? target);
     }
-    fit(layout);
+    fit(targets);
+    if (latest.current.reducedMotion) {
+      positions.current = targets;
+      return;
+    }
     const started = performance.now();
     let animation = 0;
     const step = (now: number) => {
       const progress = Math.min(1, (now - started) / 320);
       const eased = 1 - (1 - progress) ** 3;
       positions.current = new Map(
-        [...layout].map(([id, target]) => {
+        [...targets].map(([id, target]) => {
           const start = from.get(id) ?? target;
           return [id, { x: start.x + (target.x - start.x) * eased, y: start.y + (target.y - start.y) * eased }];
         }),
@@ -735,6 +766,7 @@ export function WalletGraph({
           if (drag) {
             if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 4) return;
             drag.moved = true;
+            dragged.current.add(drag.id);
             positions.current.set(drag.id, toWorld(event));
             return;
           }
@@ -950,11 +982,7 @@ export function WalletGraph({
             id="graph-spacing"
             value={spacing}
             title="How spread out the map is. Secondary wallets always sit beyond the primary's own counterparties."
-            onChange={(event) => {
-              const next = event.target.value as Spacing;
-              setSpacing(next);
-              localStorage.setItem(SPACING_KEY, next);
-            }}
+            onChange={(event) => onSpacingChange(event.target.value as Spacing)}
             className="h-7 rounded-md bg-transparent px-2 text-xs outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
           >
             <option value="compact">Compact</option>
@@ -990,12 +1018,14 @@ export function WalletGraph({
             aria-label="Reset layout"
             title="Reset layout (undo node drags)"
             onClick={() => {
+              dragged.current.clear();
               positions.current = new Map(layout);
               fit();
             }}
           >
             <RotateCcwIcon />
           </Button>
+          {viewSettings}
           <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
           <Button
             variant={showPrograms ? "secondary" : "ghost"}
@@ -1018,39 +1048,48 @@ export function WalletGraph({
               Show {nodesById.get(selectedNode)!.entity!.addresses.length.toLocaleString()} addresses
             </Button>
           )}
-          {clusters.length > 0 && (
-            // Addresses the ranking left off the map, by group: picking one draws it.
+          {(clusters.length > 0 || expandedClusters.size > 0) && (
+            // Address groups the ranking left off the map, ticked when drawn: one list to draw or fold any of them.
             <>
               <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
-              <label className="sr-only" htmlFor="graph-off-map">
-                Addresses not on the map
-              </label>
-              <select
-                id="graph-off-map"
-                value=""
-                title="Addresses the ranking left off the map. Pick a group to draw it."
-                onChange={(event) => event.target.value && onToggleCluster(event.target.value as ClusterKind)}
-                className="h-7 rounded-md bg-transparent px-2 text-xs outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="">Not on the map ({clusters.reduce((n, c) => n + c.cluster!.addresses, 0).toLocaleString()})</option>
-                {clusters.map((node) => {
-                  const { kind, addresses, wallets } = node.cluster!;
-                  return (
-                    <option key={node.id} value={kind} title={`${node.txCount.toLocaleString()} transactions · with ${wallets.map((id) => names.of(id)).join(", ")}`}>
-                      {CLUSTER_LABELS[kind]} · {addresses.toLocaleString()}
-                      {kind === "decoy" ? " (likely address poisoning)" : ""}
-                    </option>
-                  );
-                })}
-              </select>
+              <Popover>
+                <PopoverTrigger
+                  className="flex h-7 items-center gap-1 rounded-md px-2 text-xs outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                  title="Addresses the ranking left off the map, by group. Tick a group to draw its addresses."
+                >
+                  {offMap > 0 ? `Not on the map (${offMap.toLocaleString()})` : "Address groups"}
+                  <ChevronDownIcon className="size-3.5 text-muted-foreground" aria-hidden />
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-72 p-2">
+                  <p className="px-2 pt-1 pb-2 text-xs text-muted-foreground">Ticked groups are drawn as their addresses.</p>
+                  <ul className="flex flex-col">
+                    {CLUSTER_KINDS.filter((kind) => expandedClusters.has(kind) || clusterOf.has(kind)).map((kind) => {
+                      const node = clusterOf.get(kind);
+                      const id = `graph-group-${kind}`;
+                      return (
+                        <li key={kind}>
+                          <label
+                            htmlFor={id}
+                            className="flex cursor-pointer items-start gap-2.5 rounded-md px-2 py-1.5 text-sm hover:bg-muted"
+                            title={node ? `${node.txCount.toLocaleString()} transactions · with ${node.cluster!.wallets.map((w) => names.of(w)).join(", ")}` : undefined}
+                          >
+                            <Checkbox id={id} className="mt-0.5" checked={expandedClusters.has(kind)} onCheckedChange={() => onToggleCluster(kind)} />
+                            <span className="flex min-w-0 flex-1 flex-col">
+                              <span className="flex justify-between gap-2">
+                                {CLUSTER_LABELS[kind]}
+                                {node && <span className="tabular-nums text-muted-foreground">{node.cluster!.addresses.toLocaleString()}</span>}
+                              </span>
+                              {kind === "decoy" && <span className="text-xs text-muted-foreground">Likely address poisoning</span>}
+                            </span>
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </PopoverContent>
+              </Popover>
             </>
           )}
-          {[...expandedClusters].map((kind) => (
-            <Button key={kind} variant="secondary" size="sm" title={`Collapse ${CLUSTER_LABELS[kind].toLowerCase()} back into one box`} onClick={() => onToggleCluster(kind)}>
-              {CLUSTER_LABELS[kind]}
-              <XIcon />
-            </Button>
-          ))}
           {isolated ? (
             <>
               <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
@@ -1081,6 +1120,21 @@ export function WalletGraph({
               </Button>
             </>
           )}
+          {lowValueHidden > 0 && (
+            // Hidden by View settings, never removed: counted here with the way back.
+            <>
+              <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
+              <span className="pl-1 text-xs tabular-nums" title="Connections where only dust moved, hidden by View settings">
+                {lowValueHidden.toLocaleString()} low-value connection{lowValueHidden === 1 ? "" : "s"} hidden
+              </span>
+              {onShowLowValue && (
+                <Button variant="ghost" size="sm" onClick={onShowLowValue}>
+                  Show
+                </Button>
+              )}
+            </>
+          )}
+          {drawAll}
         </div>
       </div>
 

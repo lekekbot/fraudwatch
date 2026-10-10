@@ -31,6 +31,20 @@ export function formatAssetAmount(value: string, assetId: string, state: WalletS
   return signed && !value.startsWith("-") && value !== "0" ? `+${text}` : text;
 }
 
+const COMPACT = new Intl.NumberFormat("en", { notation: "compact", maximumSignificantDigits: 3 });
+
+/**
+ * A formatted amount ("1,234,567.89") shortened to "1.23M" for canvas cards.
+ * Below 1,000 it's left exact, so small and dust amounts never round away.
+ * Only for glanceable labels: inspectors, tables and copies stay exact.
+ */
+export function compactAmount(text: string): string {
+  const negative = text.startsWith("-");
+  const value = Number(text.replace(/[-+,]/g, ""));
+  if (!Number.isFinite(value) || value < 1000) return text;
+  return `${negative ? "-" : text.startsWith("+") ? "+" : ""}${COMPACT.format(value)}`;
+}
+
 /** Text colour for a signed change: red out, green in, muted for none. */
 export const deltaClass = (delta: string) => (delta.startsWith("-") ? "text-destructive" : delta !== "0" ? "text-emerald-500" : "text-muted-foreground");
 

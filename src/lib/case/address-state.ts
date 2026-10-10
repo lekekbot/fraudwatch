@@ -11,7 +11,7 @@ export type AddressState = "PRIMARY" | "MAPPED" | "OBSERVED" | "INFRASTRUCTURE";
  */
 export function addressState(
   address: string,
-  c: Pick<FraudWatchCase, "primaryWallet" | "mappedWallets">,
+  c: { primaryWallet: string; mappedWallets: readonly Pick<FraudWatchCase["mappedWallets"][number], "address">[] },
   reg: ProtocolRegistry,
   programs: ReadonlySet<string> = new Set(),
 ): AddressState {

@@ -7,6 +7,8 @@ import type { AddressLabel } from "@/lib/labels/labels";
 import type { RawParsedTransaction } from "@/lib/rpc/generic-adapter";
 import type { RpcSettings } from "@/lib/rpc/settings";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
+import type { GlobalPreferencesRecord } from "./preferences";
+import type { ViewPresetRecord } from "./view-presets";
 import type { WalletState } from "@/lib/state/reconstruct";
 
 export const DB_NAME = "fraudwatch";
@@ -62,7 +64,8 @@ export type MetaRecord = { key: string; value: unknown };
  * v2 (Sprint 03): transaction cache.
  * v3 (Sprint 04): wallet_states, token_metadata.
  * v4 (Sprint 06): address_labels; case labels/tags move out of the case record.
- * Later sprints add ui_state in its own version block.
+ * v5 (Global Preferences 02): preferences, one row of display preferences for every case.
+ * v6 (Global Preferences 09): view_presets, presets the user saved.
  */
 export class FraudWatchDB extends Dexie {
   cases!: EntityTable<FraudWatchCase, "id">;
@@ -76,6 +79,8 @@ export class FraudWatchDB extends Dexie {
   wallet_states!: EntityTable<WalletStateRecord, "key">;
   token_metadata!: EntityTable<AssetMetadata, "id">;
   address_labels!: Dexie.Table<AddressLabel, [string, string]>;
+  preferences!: EntityTable<GlobalPreferencesRecord, "id">;
+  view_presets!: EntityTable<ViewPresetRecord, "id">;
 
   constructor(name = DB_NAME) {
     super(name);
@@ -118,6 +123,8 @@ export class FraudWatchDB extends Dexie {
             delete c.tags;
           });
       });
+    this.version(5).stores({ preferences: "id" });
+    this.version(6).stores({ view_presets: "id, name" });
   }
 }
 
@@ -155,7 +162,7 @@ export function isQuotaError(err: unknown): boolean {
 
 export function describeStorageError(err: unknown): string {
   if (isQuotaError(err)) {
-    return "This browser's storage for FraudWatch is full. Clear the transaction cache in Storage settings, or free up disk space.";
+    return "This browser's storage for FraudWatch is full. Clear the transaction cache under Settings → Local storage, or free up disk space.";
   }
   return err instanceof Error ? err.message : "Local storage error.";
 }

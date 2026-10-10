@@ -10,7 +10,8 @@ import { useLocalQuery } from "@/hooks/use-local-db";
 import { formatRange } from "@/lib/case/range";
 import { listRecentCases } from "@/lib/db/cases";
 import { getRpcSettings } from "@/lib/db/rpc-settings";
-import { buildCasePath } from "@/lib/routing/case-path";
+import { usePreferences } from "@/hooks/use-preferences";
+import { casePathFor } from "@/lib/routing/case-path";
 import { redactRpcUrl } from "@/lib/rpc/url";
 import { shortenAddress } from "@/lib/solana/address";
 import { CaseNameInput } from "../case/case-name-input";
@@ -19,6 +20,7 @@ import { DeleteCaseButton } from "../case/delete-case-button";
 export function HomeView() {
   const cases = useLocalQuery((db) => listRecentCases(db), []);
   const rpc = useLocalQuery((db) => getRpcSettings(db), []);
+  const startView = usePreferences().get("investigation.startView");
   /** The case whose name is being edited in the list. */
   const [renaming, setRenaming] = useState<string | null>(null);
 
@@ -82,7 +84,7 @@ export function HomeView() {
                       </span>
                     </span>
                   ) : (
-                    <Link href={buildCasePath(c.id, "timeline")} className="flex min-w-0 flex-1 items-center justify-between gap-4 px-3 py-3">
+                    <Link href={casePathFor(c, startView)} className="flex min-w-0 flex-1 items-center justify-between gap-4 px-3 py-3">
                       <span className="flex min-w-0 flex-col">
                         <span className="truncate font-medium">{c.name}</span>
                         <span className="font-mono text-xs text-muted-foreground">

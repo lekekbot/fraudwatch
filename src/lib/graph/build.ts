@@ -1,4 +1,6 @@
+import { NATIVE_SOL } from "@/lib/assets/assets";
 import type { Names } from "@/lib/labels/labels";
+import { isDust } from "@/lib/labels/lookalikes";
 import { registry } from "@/lib/protocols/registry";
 import type { EventCategory, FlowRole, SemanticEvent } from "@/lib/semantic/events";
 import { projectEvent } from "@/lib/semantic/projection";
@@ -111,6 +113,8 @@ export type GraphEdge = {
   interactions: Interaction[];
   /** Computed once when the filtered graph is built; shared by every graph view. */
   summary: RelationshipSummary;
+  /** Only dust moved on it (`isDust`, per asset); drawn faded when low-value connections are faded. */
+  lowValue?: boolean;
 };
 
 /** Who made the first move on a connection: how many transactions each end approved (signed), and anyone else. */
@@ -216,6 +220,8 @@ export type WalletGraph = {
     transactions: number;
     /** Program connections that exist, whether shown or not. */
     programConnections: number;
+    /** Connections left off because only dust moved on them (`lowValue: "hidden"`). */
+    lowValueHidden: number;
   };
 };
 
@@ -259,6 +265,13 @@ export function buildInteractionGraph(
     expandedEntities?: ReadonlySet<string>;
     /** How many behaviour observations each address appears in; such addresses are offered a place on the map. */
     observed?: ReadonlyMap<string, number>;
+    /**
+     * Connections where only dust moved: drawn as usual, flagged to draw faded, or left off before ranking
+     * (counted in `counts.lowValueHidden`). Mapped wallets always stay.
+     */
+    lowValue?: "shown" | "faded" | "hidden";
+    /** An asset's decimals, to judge dust; an asset whose decimals aren't known is never dust. */
+    decimalsOf?: (assetId: string) => number | undefined;
   } = {},
 ): WalletGraph {
   const hidden = options.hiddenAssets ?? new Set<string>();
@@ -405,12 +418,25 @@ export function buildInteractionGraph(
     });
   }
 
+  const lowValue = options.lowValue ?? "shown";
+  const dust = (m: Movement) => {
+    const decimals = m.assetId === NATIVE_SOL ? 9 : options.decimalsOf?.(m.assetId);
+    return decimals !== undefined && isDust(m.assetId, BigInt(m.amount), decimals);
+  };
+  /** Value moved on it, and every movement (NFT trade legs included) was dust. Program calls move nothing, so never qualify. */
+  const onlyDust = (interactions: readonly Interaction[]) => {
+    const all = interactions.flatMap((it) => [...it.movements, ...(it.nftRelated ?? [])]);
+    return all.length > 0 && all.every(dust);
+  };
   const all: GraphEdge[] = [...edges.values()].map(({ id, a, b, kind, interactions }) => {
     const sorted = [...interactions].sort((x, y) => (x.time ?? 0) - (y.time ?? 0) || x.signature.localeCompare(y.signature));
-    return { id, a, b, kind, interactions: sorted, summary: summarizeRelationship({ a, b, interactions: sorted }) };
+    const edge: GraphEdge = { id, a, b, kind, interactions: sorted, summary: summarizeRelationship({ a, b, interactions: sorted }) };
+    return lowValue !== "shown" && kind === "interaction" && onlyDust(sorted) ? { ...edge, lowValue: true } : edge;
   });
   const programEdges = all.filter((e) => e.kind === "program");
-  const drawn = all.filter((e) => e.kind === "interaction" || options.showPrograms);
+  // Hidden dust goes before ranking, so it never takes a place from an address that moved real value.
+  const lowValueHidden = lowValue === "hidden" ? all.filter((e) => e.lowValue).length : 0;
+  const drawn = all.filter((e) => (e.kind === "interaction" || options.showPrograms) && !(lowValue === "hidden" && e.lowValue));
 
   // Nodes: every mapped wallet, then a bounded investigative projection.
   const txs = new Map<string, Set<string>>();
@@ -551,6 +577,7 @@ export function buildInteractionGraph(
       connections: interactions.length,
       transactions: new Set(interactions.flatMap((e) => e.interactions.map((it) => it.signature))).size,
       programConnections: programEdges.length,
+      lowValueHidden,
     },
   };
 }

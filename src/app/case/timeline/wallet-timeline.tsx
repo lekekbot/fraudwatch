@@ -1,21 +1,21 @@
 "use client";
 
 import { useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { ChevronLeftIcon, ChevronRightIcon, CircleHelpIcon, MaximizeIcon, MinusIcon, PlusIcon, RotateCcwIcon, StarIcon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, MaximizeIcon, MinusIcon, PlusIcon, RotateCcwIcon, StarIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import type { Names } from "@/lib/labels/labels";
 import type { BehaviorObservation } from "@/lib/behavior/observations";
-import type { SemanticEvent } from "@/lib/semantic/events";
+import type { EventCategory, SemanticEvent } from "@/lib/semantic/events";
 import type { WalletState } from "@/lib/state/reconstruct";
 import type { EffectSummary } from "@/lib/state/summarize";
 import { eventAtOrAfter, eventTimes, minimapTarget, type SpacingMode, stepEvent } from "@/lib/timeline/layout";
-import { mergeLaneEvents } from "@/lib/timeline/lanes";
+import { mergeLaneEvents, withoutCategories } from "@/lib/timeline/lanes";
 import { buildRelationships } from "@/lib/timeline/relationships";
 import { type Assets, formatAssetAmount } from "../asset-format";
 import { SidePanel } from "../panel";
-import { type TimelineHandle, type TimelineItem, type TimelineLane, type TimelineObservation, type TimelineSelection, TimelineCanvas } from "./timeline-canvas";
+import { type Density, type TimelineHandle, type TimelineItem, type TimelineLane, type TimelineObservation, type TimelineSelection, TimelineCanvas } from "./timeline-canvas";
 import { TimelineMinimap } from "./timeline-minimap";
 import { RelationshipChart, type RelationshipChartHandle } from "./relationship-chart";
 import { eventCard } from "./event-card";
@@ -42,7 +42,22 @@ export type WalletTimelineHandle = {
   showTime: (time: number) => void;
   /** Deselect, so the inspector can show something else picked elsewhere (e.g. a wallet). */
   clearSelection: () => void;
+  /** The transaction is left off by View settings (its category is hidden). */
+  hiddenByView: (signature: string) => boolean;
 };
+
+const NO_CATEGORIES: ReadonlySet<EventCategory> = new Set();
+const CATEGORY_NOUN: Partial<Record<EventCategory, string>> = { PROGRAM_INTERACTION: "program call", NFT_TRADE: "NFT event", NFT_TRANSFER: "NFT event", NFT_MINT: "NFT event" };
+
+/** "14 program calls · 3 NFT events": what View settings left off, by kind. */
+function hiddenSummary(counts: ReadonlyMap<EventCategory, number>): string {
+  const byNoun = new Map<string, number>();
+  for (const [category, n] of counts) {
+    const noun = CATEGORY_NOUN[category] ?? category.toLowerCase().replaceAll("_", " ");
+    byNoun.set(noun, (byNoun.get(noun) ?? 0) + n);
+  }
+  return [...byNoun].map(([noun, n]) => `${n.toLocaleString()} ${noun}${n === 1 ? "" : "s"}`).join(" · ");
+}
 
 /**
  * The case's chronological mapper: one lane per mapped wallet, one semantic
@@ -57,6 +72,12 @@ export function WalletTimeline({
   range,
   assets,
   names,
+  compactAmounts = false,
+  density,
+  connectorMode,
+  hiddenCategories = NO_CATEGORIES,
+  onShowHidden,
+  viewSettings,
   inspector,
   addressPanel,
   inspectorOpen,
@@ -87,6 +108,15 @@ export function WalletTimeline({
   range: { start: string; end: string };
   assets: Assets;
   names: Names;
+  /** Shorten large amounts on cards ("1.2M"); the inspector stays exact. */
+  compactAmounts?: boolean;
+  density?: Density;
+  connectorMode?: "always" | "hover" | "selected";
+  /** Event categories View settings leave off the lanes: whole transactions, counted, with `onShowHidden` to bring them back. */
+  hiddenCategories?: ReadonlySet<EventCategory>;
+  onShowHidden?: () => void;
+  /** The View settings control, beside zoom and reset. */
+  viewSettings?: React.ReactNode;
   /** Right-panel content while no transaction is selected. */
   inspector: React.ReactNode;
   /** An address opened from the details; shown over them until dismissed. */
@@ -136,7 +166,7 @@ export function WalletTimeline({
   const [jumpDate, setJumpDate] = useState("");
 
   const bounds = useMemo(() => ({ start: Date.parse(range.start), end: Date.parse(range.end) }), [range.start, range.end]);
-  const events = useMemo(
+  const allEvents = useMemo(
     () =>
       mergeLaneEvents(
         lanes.map((lane) => {
@@ -146,6 +176,13 @@ export function WalletTimeline({
       ),
     [lanes],
   );
+  // View settings may leave whole transactions off (program calls, NFT activity); they're counted, never dropped silently.
+  const { shown: events, counts: hiddenCounts } = useMemo(
+    () => withoutCategories(allEvents, (signature) => semanticEvents.get(signature)?.category, hiddenCategories),
+    [allEvents, semanticEvents, hiddenCategories],
+  );
+  const hiddenTotal = [...hiddenCounts.values()].reduce((a, b) => a + b, 0);
+  const hiddenLabel = hiddenSummary(hiddenCounts);
   const items = useMemo<TimelineItem[]>(
     () =>
       events.map((ev) => ({
@@ -156,11 +193,11 @@ export function WalletTimeline({
           const event = semanticEvents.get(ev.signature);
           // Every loaded transaction has an event; one that somehow doesn't still shows, as unknown.
           if (!event) return { lane, tone: "neutral" as const, label: "Unknown", flow: "none" as const, lines: ["", "UNKNOWN", "", ""] };
-          const { tone, label, flow, lines, party } = eventCard(event, wallet, ev.time, state, summaries[effectIndex], assets, names);
+          const { tone, label, flow, lines, party } = eventCard(event, wallet, ev.time, state, summaries[effectIndex], assets, names, compactAmounts);
           return { lane, tone, label, flow, lines, party };
         }),
       })),
-    [events, lanes, semanticEvents, assets, names],
+    [events, lanes, semanticEvents, assets, names, compactAmounts],
   );
   const relationships = useMemo(
     () =>
@@ -274,6 +311,10 @@ export function WalletTimeline({
       setSelection(null);
       setObservationId(null);
     },
+    hiddenByView: (signature) => {
+      const category = semanticEvents.get(signature)?.category;
+      return category !== undefined && hiddenCategories.has(category);
+    },
     showTime: centreOn,
   }));
 
@@ -341,8 +382,13 @@ export function WalletTimeline({
   if (items.length === 0) {
     return (
       <>
-        <div className="flex min-w-0 flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
-          {emptyMessage}
+        <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
+          {hiddenTotal > 0 ? `Everything here is hidden by View settings (${hiddenLabel}).` : emptyMessage}
+          {hiddenTotal > 0 && onShowHidden && (
+            <Button variant="outline" size="sm" onClick={onShowHidden}>
+              Show them
+            </Button>
+          )}
         </div>
         {panel}
       </>
@@ -395,6 +441,8 @@ export function WalletTimeline({
               lanes={canvasLanes}
               range={bounds}
               mode={mode}
+              density={density}
+              connectorMode={connectorMode}
               selected={selected}
               onSelect={select}
               onSelectLane={(lane) => {
@@ -450,6 +498,12 @@ export function WalletTimeline({
               >
                 ◆ {laneObservations.length}
               </Button>
+              {hiddenTotal > 0 && (
+                // Left off by View settings, never removed: counted here with the way back.
+                <Button size="xs" variant="ghost" title={`Hidden by View settings: ${hiddenLabel}. Click to show them.`} onClick={onShowHidden}>
+                  {hiddenTotal.toLocaleString()} hidden · Show
+                </Button>
+              )}
               <Divider />
               <Button variant="ghost" size="icon-sm" aria-label="Zoom out" title="Zoom out" onClick={() => (chart === "relationships" ? relationshipChart.current : timeline.current)?.zoomBy(1 / 1.6)}>
                 <MinusIcon />
@@ -474,6 +528,7 @@ export function WalletTimeline({
               >
                 <RotateCcwIcon />
               </Button>
+              {viewSettings}
               <Divider />
               <Button variant="ghost" size="icon-sm" aria-label="Previous transaction" title="Previous transaction (←)" onClick={() => step(-1)}>
                 <ChevronLeftIcon />
@@ -513,12 +568,6 @@ export function WalletTimeline({
               >
                 <StarIcon />
               </Button>
-              <span
-                className="flex size-7 items-center justify-center text-muted-foreground"
-                title="Scroll to zoom, drag to pan, click a cluster to open it. ← and → step between transactions."
-              >
-                <CircleHelpIcon className="size-4" aria-hidden />
-              </span>
             </div>
           </div>
         </div>

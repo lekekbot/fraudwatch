@@ -54,7 +54,7 @@ export function DeleteCaseButton({ id, name, compact = false }: { id: string; na
             <DialogTitle>Delete &ldquo;{name}&rdquo;?</DialogTitle>
             <DialogDescription>
               The case, its mapped wallets, labels, and tags are removed from this browser. Cached transactions are kept,
-              because other cases may use them; clear them in Storage settings.
+              because other cases may use them; clear them under Settings → Local storage.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

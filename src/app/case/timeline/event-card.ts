@@ -5,7 +5,7 @@ import { projectEvent } from "@/lib/semantic/projection";
 import type { WalletState } from "@/lib/state/reconstruct";
 import { describeAction, type EffectSummary } from "@/lib/state/summarize";
 import type { Flow } from "@/lib/timeline/lanes";
-import { type Assets, assetLabel, formatAssetAmount, nftLabel } from "../asset-format";
+import { type Assets, assetLabel, compactAmount, formatAssetAmount, nftLabel } from "../asset-format";
 
 /** Card colour, one per broad kind of activity. */
 export type Tone = "send" | "receive" | "swap" | "nft" | "defi" | "bridge" | "burn" | "approval" | "neutral" | "failed";
@@ -95,11 +95,12 @@ export type EventCard = {
  * who or what it was with. `summary` (this wallet's own reading) names the
  * program for activity that moved no value.
  */
-export function eventCard(event: SemanticEvent, wallet: string, time: number, state: WalletState, summary: EffectSummary, assets: Assets, names: Names): EventCard {
+export function eventCard(event: SemanticEvent, wallet: string, time: number, state: WalletState, summary: EffectSummary, assets: Assets, names: Names, compact = false): EventCard {
   const projection = projectEvent(event, wallet);
   const out = (projection?.outgoing ?? []).filter((f) => MAIN.has(f.role) && f.source === "balance");
   const into = (projection?.incoming ?? []).filter((f) => MAIN.has(f.role) && f.source === "balance");
-  const amount = (f: { amount: string; assetId: string }) => `${formatAssetAmount(f.amount, f.assetId, state, assets)} ${assetLabel(f.assetId, assets)}`;
+  const formatted = (f: { amount: string; assetId: string }) => formatAssetAmount(f.amount, f.assetId, state, assets);
+  const amount = (f: { amount: string; assetId: string }) => `${compact ? compactAmount(formatted(f)) : formatted(f)} ${assetLabel(f.assetId, assets)}`;
   const label = eventLabel(event, wallet);
   const protocol = event.protocol?.name ?? event.service?.name ?? "";
   // The actor's own spent and received flows: a swap, stake, loan or bridge, whoever's lane this is.

@@ -17,3 +17,9 @@ export function isCaseRoute(segments: readonly string[]): boolean {
   const [caseId, view, wallet, extra] = segments;
   return Boolean(caseId) && VIEWS.includes(view as CaseView) && extra === undefined && (!wallet || view === "table");
 }
+
+/** Where a link to a case opens, by the start view preference: a view, or the one last open ("last"). */
+export function casePathFor(c: { id: string; lastView?: CaseView }, startView: CaseView | "last"): string {
+  const view = startView === "last" ? (c.lastView && VIEWS.includes(c.lastView) ? c.lastView : "timeline") : startView;
+  return buildCasePath(c.id, view);
+}

@@ -159,6 +159,17 @@ The event inspector's **Developer details** shows, for the selected transaction:
 
 Interpretation, observation and graph building run once per case open in memoised workspace state (`case-shell.tsx`), and again only when their inputs change (new transactions, NFT metadata arriving, filters for the graph). Nothing semantic runs in React render, canvas draw, hover or zoom handlers.
 
+## Display settings
+
+Settings change how evidence is shown, never the evidence. They live in `src/lib/preferences/` (registry, resolution, presets, file format), `src/lib/db/preferences.ts` and `src/lib/db/view-presets.ts` (storage), and `src/lib/case/view-settings.ts` (per-case overrides). Views read them through `usePreferences` (`src/hooks/use-preferences.ts`).
+
+- **Registry** (`SETTINGS` in `schema.ts`): every setting is an enum with a default and a scope: `global` (one value everywhere) or `case` (a default a case may override). Defaults equal how FraudWatch behaved before settings existed.
+- **Resolution**, per setting, highest wins: case override › explicit global choice › active preset › default. Every value reports which of these it came from. A preset sits below explicit choices, so a change made after picking one sticks; applying a preset clears the explicit choices for the settings it controls.
+- **Storage**: one row in `preferences` (Dexie v5), saved presets in `view_presets` (v6), case overrides on the case record (`viewSettings`), written in a transaction from the stored case. Values are sparse and validated on read: unknown keys are kept, invalid values ignored, malformed data reads as "nothing set" and is never deleted unprompted. A `localStorage` copy of the theme exists only for the pre-paint script.
+- **Presets**: Minimal / Balanced / Forensic set the detail settings; saved presets may set any per-case setting. Applying one to a case copies its values in (so later edits to the preset never change the case).
+- **Hiding by a setting** (low-value graph connections, timeline program calls or NFT activity) leaves whole transactions or connections off a view and always shows a count with a way back. It's separate from filters (temporary) and hide rules (a case's triage decisions).
+- No setting causes an RPC request. `src/lib/preferences/integrity.test.ts` checks that every settings write touches only settings.
+
 ## Canonical transaction rule
 
 Store once:

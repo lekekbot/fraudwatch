@@ -8,7 +8,8 @@ import { buttonVariants } from "@/components/ui/button";
 import { findDuplicateCases } from "@/lib/db/cases";
 import { getDb } from "@/lib/db/db";
 import { parseMapParams } from "@/lib/routing/map-params";
-import { buildCasePath } from "@/lib/routing/case-path";
+import { getGlobalPreferences } from "@/lib/db/preferences";
+import { casePathFor } from "@/lib/routing/case-path";
 
 /**
  * /map?wallet=&from=&to= — simple startup link.
@@ -28,12 +29,12 @@ export function MapStartup() {
       return;
     }
     let cancelled = false;
-    findDuplicateCases(getDb(), parsed.value.wallet, parsed.value.range)
-      .then((matches) => {
+    Promise.all([findDuplicateCases(getDb(), parsed.value.wallet, parsed.value.range), getGlobalPreferences(getDb())])
+      .then(([matches, prefs]) => {
         if (cancelled) return;
         if (matches.length > 0) {
           const newest = [...matches].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-          router.replace(buildCasePath(newest.id, "timeline"));
+          router.replace(casePathFor(newest, prefs["investigation.startView"] ?? "timeline"));
         } else {
           router.replace(`/cases/new/?${search}`);
         }

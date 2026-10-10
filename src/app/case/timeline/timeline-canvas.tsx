@@ -5,7 +5,7 @@ import { select } from "d3-selection";
 import { type ZoomBehavior, type ZoomTransform, zoomIdentity } from "d3-zoom";
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react";
 import { connectors, type Flow, mergeConnectors, type Trunk } from "@/lib/timeline/lanes";
-import { horizontalZoom, readPalette, sizeCanvas } from "../canvas";
+import { horizontalZoom, onThemeChange, readPalette, sizeCanvas } from "../canvas";
 import type { Tone } from "./event-card";
 import {
   chooseBucket,
@@ -69,6 +69,10 @@ type Props = {
   lanes: TimelineLane[];
   range: { start: number; end: number };
   mode: SpacingMode;
+  /** How far apart lanes and cards are. */
+  density?: Density;
+  /** Lines between lanes for shared transactions: every one, the selected one, or the selected and hovered ones. */
+  connectorMode?: "always" | "hover" | "selected";
   selected: TimelineSelection | null;
   onSelect: (index: number, lane: number) => void;
   onSelectLane: (lane: number) => void;
@@ -85,19 +89,27 @@ const UNRESOLVABLE_MS = 1000;
 const MIN_HEIGHT = 280;
 const PAD = 28;
 const CARD_W = 150;
+/** Cards hold four lines whatever the density, so their size is fixed; density spaces everything around them. */
 const CARD_H = 64;
-const CARD_GAP = 22;
-const DOT_GAP = 12;
 /** Connectors closer than this (px) between the same lanes merge into one arrow with a count. */
 const CONNECTOR_MERGE = 40;
 const PILL_GAP = 6;
-/** Narrowest bucket a dense period is split into, in px; fits a two-line pill. */
-const BUCKET_MIN = 84;
 const PILL_H = 32;
-/** Stacked lanes: room above the first for the floating toolbar, and each lane's band (a card tier, the lane, its label). */
+/** Stacked lanes: room above the first for the floating toolbar. */
 const LANES_TOP = 60;
-const LANE_BAND = CARD_GAP + CARD_H + 48;
 const AXIS_SPACE = 44;
+
+/**
+ * Spacing per lane density. cardGap: lane to card. laneBand: each lane's band (a card tier, the lane, its label).
+ * bucketMin: narrowest bucket a dense period is split into, in px (fits a two-line pill). dotGap: dots closer than
+ * this cluster. Comfortable is the spacing the timeline always had.
+ */
+export const DENSITY = {
+  compact: { cardGap: 14, laneBand: 14 + CARD_H + 30, bucketMin: 72, dotGap: 10 },
+  comfortable: { cardGap: 22, laneBand: 22 + CARD_H + 48, bucketMin: 84, dotGap: 12 },
+  spacious: { cardGap: 30, laneBand: 30 + CARD_H + 68, bucketMin: 100, dotGap: 16 },
+} as const;
+export type Density = keyof typeof DENSITY;
 
 type Hit =
   | { type: "event"; x0: number; y0: number; x1: number; y1: number; first: number; last: number; lane: number; label?: string }
@@ -189,7 +201,7 @@ function fitText(ctx: CanvasRenderingContext2D, font: string, text: string, max:
  * magnifying cards, so dense periods open up as you zoom in. A transaction
  * several lanes share is drawn once at one x, joined across lanes.
  */
-export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSelect, onSelectLane, onViewChange, onNeedsEventSpacing, observations, selectedObservation, onSelectObservation }: Props) {
+export function TimelineCanvas({ ref, items, lanes, range, mode, density = "comfortable", connectorMode = "always", selected, onSelect, onSelectLane, onViewChange, onNeedsEventSpacing, observations, selectedObservation, onSelectObservation }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const zoomRef = useRef<ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
   const transformRef = useRef<ZoomTransform>(zoomIdentity);
@@ -198,19 +210,23 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
   /** Visible part of the canvas when lanes overflow and the container scrolls. */
   const viewportRef = useRef({ top: 0, height: MIN_HEIGHT });
   const hitsRef = useRef<Hit[]>([]);
+  /** The transaction under the pointer, for connectors shown on hover. */
+  const hoveredRef = useRef<string | null>(null);
   const frameRef = useRef<number | null>(null);
-  const latest = useRef({ items, lanes, range, mode, selected, onViewChange, observations, selectedObservation });
+  const geo = DENSITY[density];
+  const latest = useRef({ items, lanes, range, mode, geo, connectorMode, selected, onViewChange, observations, selectedObservation });
   useLayoutEffect(() => {
-    latest.current = { items, lanes, range, mode, selected, onViewChange, observations, selectedObservation };
+    latest.current = { items, lanes, range, mode, geo, connectorMode, selected, onViewChange, observations, selectedObservation };
   });
 
   const stacked = () => latest.current.lanes.length > 1;
   /** y of each lane's line. A single lane sits in the middle, with cards above and below. */
   const laneY = useCallback((lane: number) => {
     if (latest.current.lanes.length <= 1) return Math.round((heightRef.current - 18 - 14) / 2);
-    return LANES_TOP + lane * LANE_BAND + CARD_GAP + CARD_H;
+    const { laneBand, cardGap } = latest.current.geo;
+    return LANES_TOP + lane * laneBand + cardGap + CARD_H;
   }, []);
-  const contentHeight = (laneCount: number) => (laneCount <= 1 ? MIN_HEIGHT : LANES_TOP + laneCount * LANE_BAND + AXIS_SPACE);
+  const contentHeight = (laneCount: number) => (laneCount <= 1 ? MIN_HEIGHT : LANES_TOP + laneCount * latest.current.geo.laneBand + AXIS_SPACE);
 
   /** Base (unzoomed) x for an item, in the current spacing mode. */
   const baseScale = useCallback(() => {
@@ -227,7 +243,7 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const { items, lanes, range, mode, selected, observations = [], selectedObservation } = latest.current;
+    const { items, lanes, range, mode, geo, connectorMode, selected, observations = [], selectedObservation } = latest.current;
     const width = widthRef.current;
     const height = heightRef.current;
     const multi = lanes.length > 1;
@@ -271,11 +287,19 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
     // Cluster pills, so marks painted after them can keep out of them.
     const pills: { x0: number; x1: number; lane: number }[] = [];
     const pillAt = (x: number, lane: number) => pills.find((pl) => pl.lane === lane && x > pl.x0 && x < pl.x1);
-    const clipOutPills = () => {
+    /** Event dots, so marks painted after them can pass behind them. */
+    const dots: { x: number; y: number; r: number }[] = [];
+    const clipOutPills = (andDots = false) => {
       ctx.save();
       ctx.beginPath();
       ctx.rect(-50, -50, width + 100, height + 100);
       for (const pl of pills) ctx.roundRect(pl.x0, laneY(pl.lane) - PILL_H / 2, pl.x1 - pl.x0, PILL_H, 10);
+      if (andDots) {
+        for (const d of dots) {
+          ctx.moveTo(d.x + d.r, d.y);
+          ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+        }
+      }
       ctx.clip("evenodd");
     };
 
@@ -353,29 +377,23 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
       if (x < -20 || x > width + 20) return;
       const link = { x, connectors: connectors(item.entries) };
       if (item.signature === selectedSignature) selectedLink = link;
-      else links.push(link);
+      else if (connectorMode === "always" || (connectorMode === "hover" && item.signature === hoveredRef.current)) links.push(link);
     });
+    /** Arrowheads, drawn once the pills are placed so they sit on a pill's edge instead of under it. */
+    const arrows: { x: number; lane: number; direction: 1 | -1; on: boolean }[] = [];
     const drawTrunk = (t: Trunk, on: boolean) => {
       const top = laneY(t.lanes[0]);
       const bottom = laneY(t.lanes[t.lanes.length - 1]);
-      const tipY = t.direction === 1 ? bottom - 9 : top + 9;
       ctx.strokeStyle = on ? p.fg : p.muted;
       ctx.fillStyle = on ? p.fg : p.muted;
       // Heavier with more transactions behind it, within reason.
       ctx.lineWidth = on ? 2 : Math.min(3.5, 1.25 + Math.log2(t.count) * 0.5);
       ctx.beginPath();
-      ctx.moveTo(t.x, t.direction === -1 ? tipY : top + 7);
-      ctx.lineTo(t.x, t.direction === 1 ? tipY : bottom - 7);
+      ctx.moveTo(t.x, top + 7);
+      ctx.lineTo(t.x, bottom - 7);
       ctx.stroke();
-      if (t.direction) {
-        const d = t.direction;
-        ctx.beginPath();
-        ctx.moveTo(t.x, tipY + d * 2);
-        ctx.lineTo(t.x - 4, tipY - d * 5);
-        ctx.lineTo(t.x + 4, tipY - d * 5);
-        ctx.closePath();
-        ctx.fill();
-      }
+      // An arrow into every lane that received value, so a trunk over several lanes says who got what, both ways.
+      for (const a of t.arrivals) arrows.push({ x: t.x, lane: a.lane, direction: a.direction, on });
       // Lanes it passes through mid-way get a small dot, so a crossing reads apart from a stop.
       for (const l of t.lanes.slice(1, -1)) {
         ctx.beginPath();
@@ -407,12 +425,12 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
     if (mode === "time") {
       const t0 = range.start;
       const pxPerMs = Math.max(1e-12, (scale(t0 + DAY) - scale(t0)) / DAY);
-      const bucket = chooseBucket(pxPerMs, BUCKET_MIN);
+      const bucket = chooseBucket(pxPerMs, geo.bucketMin);
       bucketMs = bucket.ms;
       keyOfGlobal = (i) => +bucket.interval.floor(new Date(items[i].time));
     } else {
       const pxPerEvent = Math.max(1e-9, scale(1) - scale(0));
-      const chunk = Math.max(1, Math.ceil(BUCKET_MIN / pxPerEvent));
+      const chunk = Math.max(1, Math.ceil(geo.bucketMin / pxPerEvent));
       keyOfGlobal = (i) => Math.floor(i / chunk);
     }
     // Merging asks for the same pills' labels many times per frame; format each once.
@@ -443,7 +461,7 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
         return Math.max(textWidth(ctx, "600 11px ui-sans-serif, system-ui, sans-serif", count), textWidth(ctx, "10px ui-sans-serif, system-ui, sans-serif", when)) + 18;
       };
       const groups = mergeOverlapping(
-        splitByBucket(groupEvents(lxs, DOT_GAP), lxs, (k) => keyOfGlobal(indices[k])),
+        splitByBucket(groupEvents(lxs, geo.dotGap), lxs, (k) => keyOfGlobal(indices[k])),
         (g) => (g.count > 1 ? pillWidth(g) : 14),
         PILL_GAP,
       );
@@ -509,7 +527,7 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
         const color = p[entry.tone];
         const placement = placements[gi];
         if (placement) {
-          const top = placement.tier === 0 ? y - CARD_GAP - CARD_H : y + CARD_GAP;
+          const top = placement.tier === 0 ? y - geo.cardGap - CARD_H : y + geo.cardGap;
           // The card slides to stay inside the canvas; its stem still starts at the event's own dot.
           const left = Math.max(4, Math.min(placement.left, width - CARD_W - 4));
           ctx.strokeStyle = p.border;
@@ -561,6 +579,7 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
           hits.push({ type: "event", x0: left, y0: top, x1: left + CARD_W, y1: top + CARD_H, first, last: first, lane: l });
         }
 
+        dots.push({ x: g.x, y, r: isSelected ? 7 : 5 });
         ctx.beginPath();
         ctx.arc(g.x, y, isSelected ? 7 : 5, 0, Math.PI * 2);
         if (entry.tone === "failed") {
@@ -667,9 +686,22 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
       }
     }
 
+    for (const a of arrows) {
+      // Seated just outside the dot, or on the edge of the pill the trunk runs into.
+      const tipY = laneY(a.lane) - a.direction * (pillAt(a.x, a.lane) ? PILL_H / 2 + 1 : 8);
+      const d = a.direction;
+      ctx.fillStyle = a.on ? p.fg : p.muted;
+      ctx.beginPath();
+      ctx.moveTo(a.x, tipY);
+      ctx.lineTo(a.x - 4.5, tipY - d * 7);
+      ctx.lineTo(a.x + 4.5, tipY - d * 7);
+      ctx.closePath();
+      ctx.fill();
+    }
+
     // OPEN and CLOSE on top of the events: a bar across the lane at the exact edge, and a small label
-    // on a background so it reads over lines and pill edges. A bar never cuts through a pill: the label still marks it.
-    clipOutPills();
+    // on a background so it reads over lines and pill edges. A bar never cuts through a pill or an event's dot: the label still marks it.
+    clipOutPills(true);
     for (const mark of lifecycle) {
       ctx.strokeStyle = p.fg;
       ctx.lineWidth = 2;
@@ -853,7 +885,7 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
         if (lane !== undefined && scroller && stacked()) {
           const y = laneY(lane);
           const { top, height } = viewportRef.current;
-          if (y - CARD_H - CARD_GAP < top || y + 40 > top + height - AXIS_SPACE) {
+          if (y - CARD_H - latest.current.geo.cardGap < top || y + 40 > top + height - AXIS_SPACE) {
             scroller.scrollTo({ top: Math.max(0, y - height / 2), behavior: "smooth" });
           }
         }
@@ -895,14 +927,13 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
     observer.observe(scroller);
     scroller.addEventListener("scroll", onScroll, { passive: true });
     resize();
-    const theme = matchMedia("(prefers-color-scheme: dark)");
-    theme.addEventListener("change", schedule);
+    const stopTheme = onThemeChange(schedule);
     return () => {
       observer.disconnect();
       scroller.removeEventListener("scroll", onScroll);
-      theme.removeEventListener("change", schedule);
+      stopTheme();
     };
-  }, [baseScale, maxZoom, schedule, showBaseRange, laneCount]);
+  }, [baseScale, maxZoom, schedule, showBaseRange, laneCount, density]);
 
   // Drag pans on the x axis; a vertical swipe scrolls overflowing lanes or zooms when they fit.
   useEffect(() => {
@@ -935,7 +966,7 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
     schedule();
   }, [items, applyTransform, maxZoom, schedule]);
 
-  useEffect(schedule, [selected, lanes, observations, selectedObservation, schedule]);
+  useEffect(schedule, [selected, lanes, observations, selectedObservation, connectorMode, schedule]);
 
   function hitAt(event: React.MouseEvent<HTMLCanvasElement>): Hit | undefined {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -949,7 +980,7 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
     <canvas
       ref={canvasRef}
       role="img"
-      aria-label="Transaction timeline, one lane per mapped wallet. Use the controls or arrow keys to move between transactions."
+      aria-label="Transaction timeline, one lane per mapped wallet. Scroll to zoom, drag to pan, click a cluster to open it; the arrow keys step between transactions."
       className="block cursor-grab touch-pan-y active:cursor-grabbing"
       onClick={(event) => {
         const hit = hitAt(event);
@@ -972,9 +1003,19 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, selected, onSel
       onMouseMove={(event) => {
         const hit = hitAt(event);
         event.currentTarget.style.cursor = hit ? "pointer" : "";
+        const hovered = hit?.type === "event" && hit.first === hit.last ? (latest.current.items[hit.first]?.signature ?? null) : null;
+        if (hovered !== hoveredRef.current) {
+          hoveredRef.current = hovered;
+          if (latest.current.connectorMode === "hover") schedule();
+        }
         // Clusters say what's inside on hover.
         const label = hit?.type === "event" || hit?.type === "observation" ? (hit.label ?? "") : "";
         if (event.currentTarget.title !== label) event.currentTarget.title = label;
+      }}
+      onMouseLeave={() => {
+        if (hoveredRef.current === null) return;
+        hoveredRef.current = null;
+        if (latest.current.connectorMode === "hover") schedule();
       }}
     />
   );

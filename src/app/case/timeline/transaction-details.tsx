@@ -110,14 +110,17 @@ export function TransactionDetails({
 
   return (
     <section className="flex min-w-0 flex-col gap-4 p-3" aria-label="Transaction details">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Badge variant={summary.kind === "FAILED" ? "destructive" : "secondary"}>{event ? eventLabel(event, wallet) : kindLabel(summary.kind)}</Badge>
-          <span className="text-xs text-muted-foreground tabular-nums">
+      {/* The buttons move to their own row when the panel is too narrow for both. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+        <div className="flex min-w-0 flex-col items-start gap-0.5">
+          <Badge variant={summary.kind === "FAILED" ? "destructive" : "secondary"} className="min-w-0 truncate">
+            {event ? eventLabel(event, wallet) : kindLabel(summary.kind)}
+          </Badge>
+          <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground tabular-nums">
             {position.index + 1} / {position.count}
           </span>
         </div>
-        <div className="flex gap-1">
+        <div className="flex shrink-0 gap-1">
           <Button variant="ghost" size="icon-sm" aria-label="Previous transaction" onClick={onPrevious}>
             <ChevronLeftIcon />
           </Button>
@@ -150,7 +153,7 @@ export function TransactionDetails({
 
       {event && <EventSummary event={event} state={state} assets={assets} names={names} onSelectAddress={onSelectAddress} />}
 
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+      <dl className="grid grid-cols-[6rem_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
         {walletName && (
           <>
             <dt className="text-muted-foreground">Wallet</dt>
@@ -158,8 +161,9 @@ export function TransactionDetails({
           </>
         )}
         <dt className="text-muted-foreground">Signature</dt>
-        <dd className="flex min-w-0 items-center gap-1">
-          <span className="truncate font-mono text-xs">{effect.signature}</span>
+        <dd className="flex min-w-0 items-start gap-1">
+          {/* In full: a signature cut short can't be checked by eye. */}
+          <span className="min-w-0 font-mono text-xs break-all">{effect.signature}</span>
           <Button
             variant="ghost"
             size="icon-xs"
@@ -186,15 +190,15 @@ export function TransactionDetails({
         <dt className="text-muted-foreground">Slot</dt>
         <dd className="tabular-nums">{effect.slot.toLocaleString()}</dd>
         <dt className="text-muted-foreground">Action</dt>
-        <dd className="min-w-0 truncate font-mono text-xs" title={summary.action?.programId}>
+        <dd className="min-w-0 font-mono text-xs break-words" title={summary.action?.programId}>
           {describeAction(summary.action, summary.action ? names.known(summary.action.programId) : undefined)}
         </dd>
         {summary.actor && (
           <>
             <dt className="text-muted-foreground">Sent by</dt>
-            <dd className="flex min-w-0 items-center gap-1">
+            <dd className="flex min-w-0 flex-wrap items-baseline gap-x-1">
               <AddressButton address={summary.actor} names={names} onSelect={onSelectAddress} />
-              <span className="text-xs text-muted-foreground">(not this wallet)</span>
+              <span className="text-xs whitespace-nowrap text-muted-foreground">(not this wallet)</span>
             </dd>
           </>
         )}

@@ -69,7 +69,7 @@ export function StorageSettings() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6">
       <section className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Local storage</h1>
+        <h2 className="text-lg font-semibold tracking-tight">Local storage</h2>
         <p className="text-muted-foreground">
           Everything FraudWatch keeps lives in this browser&apos;s IndexedDB. Nothing is stored on a server.
         </p>
@@ -115,7 +115,7 @@ export function StorageSettings() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-sm">
               <p className="font-medium">Clear transaction cache</p>
-              <p className="text-muted-foreground">Keeps cases, labels, and RPC settings. History is refetched on next load.</p>
+              <p className="text-muted-foreground">Keeps cases, labels, settings and your RPC endpoint. History is refetched on next load.</p>
             </div>
             <Button variant="outline" onClick={() => setPending("cache")}>
               Clear cache
@@ -124,7 +124,7 @@ export function StorageSettings() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-sm">
               <p className="font-medium">Clear all local data</p>
-              <p className="text-muted-foreground">Deletes every case, the cache, and your saved RPC endpoint.</p>
+              <p className="text-muted-foreground">Deletes every case, the cache, your settings and your saved RPC endpoint.</p>
             </div>
             <Button variant="destructive" onClick={() => setPending("all")}>
               <Trash2Icon />
@@ -140,7 +140,7 @@ export function StorageSettings() {
             <DialogTitle>{pending === "all" ? "Clear all local data?" : "Clear the transaction cache?"}</DialogTitle>
             <DialogDescription>
               {pending === "all"
-                ? "All cases, cached transactions, labels, and your RPC settings will be deleted from this browser. This can't be undone."
+                ? "All cases, cached transactions, labels, settings and your RPC endpoint will be deleted from this browser. This can't be undone."
                 : "Cached transactions and coverage are deleted. Cases stay, and their history is fetched again from your RPC the next time you load it."}
             </DialogDescription>
           </DialogHeader>

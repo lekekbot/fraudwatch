@@ -80,6 +80,7 @@ Where FraudWatch is heading, in [ROADMAP.md](ROADMAP.md). There are no dates; it
 
 ## Docs
 
+- [Repository guide](docs/REPOSITORY_GUIDE.md): detailed setup, architecture, data contracts, workflows, module reference and limitations
 - [Architecture](docs/ARCHITECTURE.md): the data lifecycle and the semantic model
 - [Terminology](docs/TERMINOLOGY.md)
 - [Roadmap](ROADMAP.md): where the project is heading
