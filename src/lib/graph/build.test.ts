@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RawParsedTransaction } from "@/lib/rpc/generic-adapter";
 import { interpretTransaction } from "@/lib/semantic/interpret";
-import { FEE, makeTx, read, SOL } from "@/lib/semantic/testing";
+import { FEE, makeTx, read, SOL, token } from "@/lib/semantic/testing";
 import { type CanonicalTransaction, canonicalize } from "@/lib/solana/canonical";
 import { reconstructWalletState } from "@/lib/state/reconstruct";
 import { type NftCatalog, NO_NFTS, summarizeEffect } from "@/lib/state/summarize";
@@ -66,5 +66,37 @@ describe("graph relationships from semantic events", () => {
     const whale = significant.nodes.find((node) => node.id === "Whale");
     expect(whale?.reasons).toEqual(expect.arrayContaining(["Among the 5 that moved the most value", "In 2 behaviour observations"]));
     expect(significant.nodes.find((node) => node.id === "Busy")?.reasons).toContain("Among the 10 with the most events");
+  });
+});
+
+describe("low-value connections", () => {
+  const dust = 1000; // lamports: well under the dust threshold
+  const txs = () => [transfer("A", "D", dust), transfer("A", "D", dust), transfer("A", "D", dust), transfer("A", "R", 5 * SOL), transfer("A", "M", dust), transfer("M", "A", 5 * SOL)];
+
+  it("draws everything as before by default", () => {
+    const graph = buildInteractionGraph([side("A", txs())]);
+    expect(graph.edges.some((e) => e.lowValue)).toBe(false);
+    expect(graph.counts.lowValueHidden).toBe(0);
+  });
+
+  it("flags dust-only connections to fade, keeping connections where real value also moved", () => {
+    const graph = buildInteractionGraph([side("A", txs())], { lowValue: "faded" });
+    const flagged = graph.edges.filter((e) => e.lowValue).map((e) => [e.a, e.b].sort().join("-"));
+    expect(flagged).toEqual(["A-D"]);
+  });
+
+  it("leaves dust-only connections off before ranking, so they never take a real address's place, and counts them", () => {
+    // Room for one counterparty: D has the most events, but only dust.
+    expect(buildInteractionGraph([side("A", txs())], { maxNodes: 2, ranking: "interactions" }).nodes.map((n) => n.id)).toContain("D");
+    const graph = buildInteractionGraph([side("A", txs())], { maxNodes: 2, ranking: "interactions", lowValue: "hidden" });
+    expect(graph.nodes.map((n) => n.id)).not.toContain("D");
+    expect(graph.counts.lowValueHidden).toBe(1);
+    expect(graph.nodes.some((n) => n.id === "A" && n.kind === "wallet")).toBe(true);
+  });
+
+  it("never calls a token dust when its decimals aren't known", () => {
+    const tx = makeTx({ signature: "tok", native: { A: [SOL, SOL - FEE] }, tokens: [token("a1", "A", "MINT", 10, 9), token("b1", "B", "MINT", 0, 1)] });
+    expect(buildInteractionGraph([side("A", [tx])], { lowValue: "hidden" }).counts.lowValueHidden).toBe(0);
+    expect(buildInteractionGraph([side("A", [tx])], { lowValue: "hidden", decimalsOf: () => 6 }).counts.lowValueHidden).toBe(1);
   });
 });

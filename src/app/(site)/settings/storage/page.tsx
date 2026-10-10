@@ -1,5 +1,6 @@
-import { StorageSettings } from "./storage-settings";
+import { redirect } from "next/navigation";
 
+/** Storage became part of Settings. */
 export default function Page() {
-  return <StorageSettings />;
+  redirect("/settings/");
 }

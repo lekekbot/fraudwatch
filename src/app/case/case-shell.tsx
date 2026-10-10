@@ -3,15 +3,20 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownIcon, ArrowUpIcon, CalendarIcon, EyeIcon, EyeOffIcon, FocusIcon, Link2Icon, PanelLeftIcon, HashIcon, PanelRightIcon, PauseIcon, PencilIcon, PlayIcon, PlusIcon, SearchIcon, ShieldIcon, Trash2Icon, WalletIcon, XIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, CalendarIcon, EyeIcon, EyeOffIcon, FocusIcon, Link2Icon, PanelLeftIcon, HashIcon, PanelRightIcon, PauseIcon, SettingsIcon, PencilIcon, PlayIcon, PlusIcon, SearchIcon, ShieldIcon, Trash2Icon, WalletIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { RpcStatusBadge } from "@/components/rpc-status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useIngestion } from "@/hooks/use-ingestion";
 import { useSnsNames } from "@/hooks/use-sns-names";
 import { useLocalQuery } from "@/hooks/use-local-db";
+import { type Preferences, usePreferences, useReducedMotion } from "@/hooks/use-preferences";
+import { saveLastView } from "@/lib/case/view-settings";
+import type { SettingKey } from "@/lib/preferences/schema";
+import { ViewSettingsPanel } from "./view-settings-panel";
 import { useWalletStates } from "@/hooks/use-wallet-states";
 import { addressState } from "@/lib/case/address-state";
 import { isBookmarked, removeBookmark, toggleBookmark } from "@/lib/case/bookmarks";
@@ -26,7 +31,7 @@ import { touchCase } from "@/lib/db/cases";
 import { getDb } from "@/lib/db/db";
 import { getRpcSettings } from "@/lib/db/rpc-settings";
 import { communityLabel } from "@/lib/labels/community";
-import { createNames } from "@/lib/labels/labels";
+import { ADDRESS_CHARS, createNames } from "@/lib/labels/labels";
 import { isDust, judgeLookalikes, lookalikeGroups, type LookalikeVerdict } from "@/lib/labels/lookalikes";
 import { enrichTransaction, protocolsUsed, registry } from "@/lib/protocols/registry";
 import { buildMapSearch } from "@/lib/routing/map-params";
@@ -35,7 +40,7 @@ import type { RpcSettings } from "@/lib/rpc/settings";
 import { shortenAddress } from "@/lib/solana/address";
 import { collectCounterparties } from "@/lib/state/counterparties";
 import { type BehaviorObservation, observeWallet } from "@/lib/behavior/observations";
-import type { SemanticEvent } from "@/lib/semantic/events";
+import type { EventCategory, SemanticEvent } from "@/lib/semantic/events";
 import { interpretTransaction } from "@/lib/semantic/interpret";
 import { eventLabel } from "./timeline/event-card";
 import { type EffectSummary, type NftCatalog, summarizeEffect } from "@/lib/state/summarize";
@@ -71,6 +76,11 @@ const SNS_LOOKUP_LIMIT = 300;
 /** The hide rule that holds likely look-alike decoys. */
 const DECOY_RULE_ID = "lookalike-decoys";
 const SHOWN_WALLETS = 50;
+const NO_ADDRESSES: string[] = [];
+/** Above this many addresses, drawing all of them asks first (`graph.confirmLarge`). */
+const LARGE_GRAPH = 200;
+const TIMELINE_VIEW_KEYS: SettingKey[] = ["timeline.density", "timeline.connectors", "timeline.programInteractions", "timeline.nft"];
+const GRAPH_VIEW_KEYS: SettingKey[] = ["graph.nodeLimit", "graph.programs", "graph.knownServices", "graph.lowValue", "graph.spacing", "graph.arrows"];
 
 /**
  * Hosted by the case layout, not the page: the page segment is keyed by its
@@ -87,12 +97,14 @@ function CaseLoader({ id }: { id: string }) {
   const fwCase = useLocalQuery((db) => db.cases.get(id), [id]);
   const rpc = useLocalQuery((db) => getRpcSettings(db), []);
   const found = fwCase.status === "ready" && fwCase.data !== undefined;
+  // Read here, so the workspace never lays out once with defaults and again with the stored values.
+  const prefs = usePreferences(found ? fwCase.data : undefined);
 
   useEffect(() => {
     if (found) void touchCase(getDb(), id).catch(() => {});
   }, [found, id]);
 
-  if (fwCase.status === "loading") {
+  if (fwCase.status === "loading" || prefs.status === "loading") {
     return <p className="flex h-dvh items-center justify-center text-sm text-muted-foreground">Loading case…</p>;
   }
   if (fwCase.status === "error" || !fwCase.data) {
@@ -115,7 +127,7 @@ function CaseLoader({ id }: { id: string }) {
     );
   }
 
-  return <CaseWorkspace key={fwCase.data.id} c={fwCase.data} rpc={rpc.status === "ready" ? rpc.data : undefined} rpcKnown={rpc.status === "ready"} />;
+  return <CaseWorkspace key={fwCase.data.id} c={fwCase.data} prefs={prefs} rpc={rpc.status === "ready" ? rpc.data : undefined} rpcKnown={rpc.status === "ready"} />;
 }
 
 /**
@@ -123,7 +135,7 @@ function CaseLoader({ id }: { id: string }) {
  * wallets and loading on the left, and an inspector on the right.
  * Cmd/Ctrl+\ hides both panels.
  */
-function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettings | undefined; rpcKnown: boolean }) {
+function CaseWorkspace({ c, prefs, rpc, rpcKnown }: { c: FraudWatchCase; prefs: Preferences; rpc: RpcSettings | undefined; rpcKnown: boolean }) {
   const pathname = usePathname();
   const route = parseCasePath(pathname);
   const ingestion = useIngestion(c);
@@ -132,7 +144,9 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   const [leftOpen, setLeftOpen] = useState(true);
   /** The case name in the header is being edited. */
   const [renaming, setRenaming] = useState(false);
-  const [rightOpen, setRightOpen] = useState(true);
+  const inspectorMode = prefs.get("investigation.inspector");
+  const [rightOpen, setRightOpen] = useState(inspectorMode === "open");
+  const reducedMotion = useReducedMotion(prefs);
   const view = route.view;
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
   const [rulesDialog, setRulesDialog] = useState<RulesDialogState>(null);
@@ -145,8 +159,25 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   const [selectedWallet, setSelectedWallet] = useState(c.primaryWallet);
   const [filter, setFilter] = useState(() => ({ ...EMPTY_FILTER, address: route.wallet }));
   const [graphRanking, setGraphRanking] = useState<GraphRanking>("significant");
-  const [graphNodeLimit, setGraphNodeLimit] = useState<10 | 25 | 50 | 100 | null>(25);
+  // Graph display comes from the case's view settings; clicking a cluster open is exploration, kept for the session.
+  const graphNodeLimit = prefs.get("graph.nodeLimit");
+  const showPrograms = prefs.get("graph.programs") === "shown";
+  const graphLowValue = prefs.get("graph.lowValue");
+  const confirmLarge = prefs.get("graph.confirmLarge") === "on";
   const [graphClusters, setGraphClusters] = useState<ReadonlySet<ClusterKind>>(new Set());
+  // Known services follow their setting; a click flips them until the setting itself changes (the toggle remembers which value it flipped).
+  const knownSetting = prefs.get("graph.knownServices");
+  const [knownFlippedAt, setKnownFlippedAt] = useState<string | null>(null);
+  const knownExpanded = (knownSetting === "expanded") !== (knownFlippedAt === knownSetting);
+  const expandedClusters = useMemo(() => {
+    const out = new Set(graphClusters);
+    if (knownExpanded) out.add("known");
+    else out.delete("known");
+    return out;
+  }, [graphClusters, knownExpanded]);
+  /** "All" draws more than LARGE_GRAPH addresses only once confirmed, for this session. */
+  const [allowLarge, setAllowLarge] = useState(false);
+  const [confirmDraw, setConfirmDraw] = useState<{ count: number; run: () => void } | null>(null);
   const [graphEntities, setGraphEntities] = useState<ReadonlySet<string>>(new Set());
   /** Observed address the Map wallet dialog is open for. */
   const [mapTarget, setMapTarget] = useState<string | null>(null);
@@ -160,11 +191,21 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   const [justMapped, setJustMapped] = useState<string | null>(null);
   /** An address opened in the inspector (counterparty, sender, program); shown over transaction details. */
   const [selectedAddress, setSelectedAddress] = useState<string | null>(null);
+  // "When something is selected": the inspector opens for each new selection, and can still be closed.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- opening follows the selection, which several handlers set
+    if (inspectorMode === "on_selection" && (selectedAddress || selectedEdge || tableTx)) setRightOpen(true);
+  }, [inspectorMode, selectedAddress, selectedEdge, tableTx]);
 
   const routeTo = (nextView: CaseView, wallet?: string | null, replace = false) => {
     if (nextView === "table") setFilter((current) => ({ ...current, address: wallet ?? null }));
     window.history[replace ? "replaceState" : "pushState"](null, "", buildCasePath(c.id, nextView, wallet));
   };
+
+  // Remembered for "open cases on the last used view", however the view was reached (tabs, links, back and forward).
+  useEffect(() => {
+    if (view !== c.lastView) void saveLastView(getDb(), c.id, view).catch(() => {});
+  }, [view, c.id, c.lastView]);
 
   const updateFilter = (next: TxFilter) => {
     setFilter(next);
@@ -267,12 +308,36 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     const busiest = [...activity].filter(([a]) => unnamed(a)).sort((x, y) => y[1] - x[1]).slice(0, SNS_LOOKUP_LIMIT).map(([a]) => a);
     return [...new Set([...c.mappedWallets.map((w) => w.address).filter(unnamed), ...busiest])];
   }, [labels, summariesByWallet, c.mappedWallets]);
-  const snsNames = useSnsNames(snsCandidates, rpc?.url);
+  const showSns = prefs.get("labels.sns") === "shown";
+  // Hidden .sol names aren't looked up at all.
+  const snsNames = useSnsNames(showSns ? snsCandidates : NO_ADDRESSES, rpc?.url);
+  const preferNames = prefs.get("labels.preferNames") === "on";
+  const showCommunity = prefs.get("labels.community") === "shown";
+  const addressChars = ADDRESS_CHARS[prefs.get("appearance.addressFormat")];
   const names = useMemo(
-    () => createNames(new Map(labels.map((l) => [l.address, l])), registry, lookalikes, verdicts, snsNames),
-    [labels, lookalikes, verdicts, snsNames],
+    () =>
+      createNames(new Map(labels.map((l) => [l.address, l])), registry, lookalikes, verdicts, snsNames, {
+        chars: addressChars,
+        preferNames,
+        community: showCommunity,
+        sns: showSns,
+      }),
+    [labels, lookalikes, verdicts, snsNames, addressChars, preferNames, showCommunity, showSns],
   );
-  const graphNames = useMemo(() => withGraphNames(names), [names]);
+  // Canvases have room for medium addresses at most; inspectors show the preference in full.
+  const canvasNames = useMemo(
+    () =>
+      addressChars <= ADDRESS_CHARS.medium
+        ? names
+        : createNames(new Map(labels.map((l) => [l.address, l])), registry, lookalikes, verdicts, snsNames, {
+            chars: ADDRESS_CHARS.medium,
+            preferNames,
+            community: showCommunity,
+            sns: showSns,
+          }),
+    [names, addressChars, labels, lookalikes, verdicts, snsNames, preferNames, showCommunity, showSns],
+  );
+  const graphNames = useMemo(() => withGraphNames(canvasNames), [canvasNames]);
   /** Likely dust decoys, for the "Hide dust decoys" filter. */
   const decoySet = useMemo(() => new Set([...verdicts].filter(([, v]) => v === "decoy").map(([a]) => a)), [verdicts]);
   const isDecoy = useCallback((address: string) => decoySet.has(address), [decoySet]);
@@ -374,8 +439,6 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   }, [walletStates, filterables, summariesByWallet, filter, names, reasons, isDecoy]);
   const visible = perWallet.get(selectedWallet);
   const visibleState = visible?.state;
-  // Program connections are separate from wallet interactions and hidden until asked for.
-  const [showPrograms, setShowPrograms] = useState(false);
   // Every program the loaded transactions invoked; unknown programs are still infrastructure.
   const programs = useMemo(() => {
     const ids = new Set<string>();
@@ -501,7 +564,18 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
   /** Select a transaction on the timeline, switching to it if needed. */
   function goToTransaction(signature: string, wallet?: string) {
     if (view === "timeline" && timelineRef.current) {
-      if (!timelineRef.current.jumpTo(signature, wallet)) toast.info("That transaction is hidden by your filters or a hidden lane.");
+      if (timelineRef.current.jumpTo(signature, wallet)) return;
+      if (timelineRef.current.hiddenByView(signature)) {
+        toast.info("That transaction is hidden by this case's View settings.", {
+          action: {
+            label: "Show",
+            onClick: () => {
+              pendingJump.current = { signature, wallet };
+              void showHiddenTimeline();
+            },
+          },
+        });
+      } else toast.info("That transaction is hidden by your filters or a hidden lane.");
       return;
     }
     setFocusSignature(signature);
@@ -741,6 +815,9 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
     ),
   );
 
+  // Only the wallet addresses, so saving a view setting on the case doesn't rebuild the graph.
+  const mappedKey = c.mappedWallets.map((w) => w.address).join(",");
+  const caseWallets = useMemo(() => ({ primaryWallet: c.primaryWallet, mappedWallets: mappedKey.split(",").map((address) => ({ address })) }), [c.primaryWallet, mappedKey]);
   // The interaction map covers every visible lane, from the same filtered transactions as the timeline.
   const graph = useMemo(() => {
     if (view !== "graph") return null;
@@ -752,19 +829,37 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
       observed: observedAddresses,
       hiddenAssets: filter.hiddenAssets,
       showPrograms,
-      maxNodes: graphNodeLimit ?? Infinity,
+      maxNodes: graphNodeLimit === "all" ? (confirmLarge && !allowLarge ? LARGE_GRAPH : Infinity) : Number(graphNodeLimit),
       ranking: graphRanking,
+      lowValue: graphLowValue,
+      decimalsOf,
       // Look-alikes and labelled addresses are investigation signals: they always keep their own node.
       clusterOf: (address) => {
         if (names.verdict(address) === "decoy") return "decoy";
         if (names.lookalikes(address).length > 0 || names.label(address)) return null;
-        if (addressState(address, c, registry, programs) === "INFRASTRUCTURE") return "infrastructure";
+        if (addressState(address, caseWallets, registry, programs) === "INFRASTRUCTURE") return "infrastructure";
         return names.known(address) ? "known" : "unknown";
       },
-      expandedClusters: graphClusters,
+      expandedClusters,
       expandedEntities: graphEntities,
     });
-  }, [view, shownLanes, perWallet, semanticEvents, observedAddresses, filter.hiddenAssets, showPrograms, c, graphNodeLimit, graphRanking, names, programs, graphClusters, graphEntities]);
+  }, [view, shownLanes, perWallet, semanticEvents, observedAddresses, filter.hiddenAssets, showPrograms, caseWallets, graphNodeLimit, confirmLarge, allowLarge, graphRanking, graphLowValue, decimalsOf, names, programs, expandedClusters, graphEntities]);
+  // Event categories the timeline's View settings leave off; whole transactions, counted on the timeline.
+  const hideProgramCalls = prefs.get("timeline.programInteractions") === "hidden";
+  const hideNfts = prefs.get("timeline.nft") === "hidden";
+  const timelineHidden = useMemo(
+    () => new Set<EventCategory>([...(hideProgramCalls ? (["PROGRAM_INTERACTION"] as const) : []), ...(hideNfts ? (["NFT_TRADE", "NFT_TRANSFER", "NFT_MINT"] as const) : [])]),
+    [hideProgramCalls, hideNfts],
+  );
+  const showHiddenTimeline = () => prefs.setManyForCase({ "timeline.programInteractions": "shown", "timeline.nft": "shown" });
+  /** A jump waiting for hidden transactions to be shown again. */
+  const pendingJump = useRef<{ signature: string; wallet?: string } | null>(null);
+  useEffect(() => {
+    const jump = pendingJump.current;
+    if (jump && timelineRef.current?.jumpTo(jump.signature, jump.wallet)) pendingJump.current = null;
+  }, [timelineHidden]);
+  /** Asks first when an action would draw more than LARGE_GRAPH addresses (unless that's switched off). */
+  const guardLarge = (count: number, run: () => void) => (confirmLarge && count > LARGE_GRAPH ? setConfirmDraw({ count, run }) : run());
   const edge = graph?.edges.find((e) => e.id === selectedEdge);
   // The Timeline narrowed to exactly the transactions behind some graph lines.
   const openInTimeline = (label: string, lines: readonly GraphEdge[]) => {
@@ -907,6 +1002,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
             wallet={graphWallet}
             primaryWallet={c.primaryWallet}
             names={graphNames}
+            reducedMotion={reducedMotion}
             assetInfo={(assetId) => ({ id: assetId, label: assetLabel(assetId, walletStates.assets), logo: assetLogo(assetId, walletStates.assets) })}
             stateOf={(address) => addressState(address, c, registry, programs)}
             selectedNode={selectedAddress}
@@ -914,17 +1010,45 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
             onSelectNode={setSelectedAddress}
             onSelectEdge={setSelectedEdge}
             showPrograms={showPrograms}
-            onToggleProgramCalls={() => setShowPrograms((v) => !v)}
+            onToggleProgramCalls={() => void prefs.setForCase("graph.programs", showPrograms ? "hidden" : "shown")}
             ranking={graphRanking}
             onRankingChange={setGraphRanking}
-            nodeLimit={graphNodeLimit}
-            onNodeLimitChange={setGraphNodeLimit}
+            nodeLimit={graphNodeLimit === "all" ? null : (Number(graphNodeLimit) as 10 | 25 | 50 | 100)}
+            onNodeLimitChange={(limit) => void prefs.setForCase("graph.nodeLimit", limit === null ? "all" : (String(limit) as "10" | "25" | "50" | "100"))}
             timeRange={filter.dateRange}
             onClearTimeRange={() => updateFilter({ ...filter, dateRange: null })}
-            expandedClusters={graphClusters}
-            onToggleCluster={(kind) => setGraphClusters((current) => toggled(current, kind))}
+            expandedClusters={expandedClusters}
+            onToggleCluster={(kind) => {
+              if (kind === "known") return setKnownFlippedAt((at) => (at === knownSetting ? null : knownSetting));
+              const opening = !graphClusters.has(kind);
+              const toggle = () => setGraphClusters((current) => toggled(current, kind));
+              const size = graph.nodes.find((n) => n.cluster?.kind === kind)?.cluster?.addresses ?? 0;
+              if (opening) guardLarge(graph.counts.addresses + size, toggle);
+              else toggle();
+            }}
             expandedEntities={graphEntities}
             onToggleEntity={toggleEntity}
+            spacing={prefs.get("graph.spacing")}
+            onSpacingChange={(spacing) => void prefs.setForCase("graph.spacing", spacing)}
+            arrows={prefs.get("graph.arrows")}
+            lowValueHidden={graph.counts.lowValueHidden}
+            onShowLowValue={() => void prefs.setForCase("graph.lowValue", "shown")}
+            viewSettings={<ViewSettingsPanel prefs={prefs} keys={GRAPH_VIEW_KEYS} title="Graph" appliedPreset={c.viewSettings?.appliedPreset} />}
+            drawAll={
+              graphNodeLimit === "all" &&
+              confirmLarge &&
+              !allowLarge &&
+              graph.omittedNodes > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    title={`Showing the top ${LARGE_GRAPH.toLocaleString()}. Large maps can be slow.`}
+                    onClick={() => guardLarge(graph.counts.addresses + graph.omittedNodes, () => setAllowLarge(true))}
+                  >
+                    Draw all {(graph.counts.addresses + graph.omittedNodes).toLocaleString()}
+                  </Button>
+              )
+            }
           />
           {(rightOpen || addressPanel || edge) && (
             <SidePanel side="right" label="Inspector">
@@ -979,7 +1103,13 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
           }}
           range={c.range}
           assets={walletStates.assets}
-          names={names}
+          names={canvasNames}
+          compactAmounts={prefs.get("appearance.numberFormat") === "compact"}
+          density={prefs.get("timeline.density")}
+          connectorMode={prefs.get("timeline.connectors")}
+          hiddenCategories={timelineHidden}
+          onShowHidden={() => void showHiddenTimeline()}
+          viewSettings={<ViewSettingsPanel prefs={prefs} keys={TIMELINE_VIEW_KEYS} title="Timeline" appliedPreset={c.viewSettings?.appliedPreset} />}
           inspector={walletInspector}
           addressPanel={addressPanel}
           onSelectAddress={setSelectedAddress}
@@ -1004,6 +1134,7 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
           onSelectTransaction={() => {
             setSelectedAddress(null);
             setSelectedEdge(null);
+            if (inspectorMode === "on_selection") setRightOpen(true);
           }}
           onDateRangeChange={(dateRange) => updateFilter({ ...filter, dateRange })}
           overviewTimes={overviewTimes}
@@ -1144,6 +1275,9 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
             Copy link
           </Button>
           <RpcStatusBadge />
+          <Link href="/settings/" aria-label="Settings" title="Settings" className={buttonVariants({ variant: "ghost", size: "icon-sm" })}>
+            <SettingsIcon />
+          </Link>
           <Button
             variant="ghost"
             size="icon-sm"
@@ -1509,6 +1643,27 @@ function CaseWorkspace({ c, rpc, rpcKnown }: { c: FraudWatchCase; rpc: RpcSettin
           onCancel={() => setMapTarget(null)}
         />
       )}
+      <Dialog open={confirmDraw !== null} onOpenChange={(open) => !open && setConfirmDraw(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Draw {confirmDraw?.count.toLocaleString()} addresses?</DialogTitle>
+            <DialogDescription>Large maps can be slow to draw and hard to read. You can turn this question off in Settings.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirmDraw(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                confirmDraw?.run();
+                setConfirmDraw(null);
+              }}
+            >
+              Draw them
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

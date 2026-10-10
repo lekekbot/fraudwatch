@@ -8,6 +8,13 @@ export function readPalette<K extends string>(el: Element, vars: Record<K, strin
   return Object.fromEntries(Object.entries<string>(vars).map(([key, name]) => [key, css.getPropertyValue(name).trim()])) as Record<K, string>;
 }
 
+/** Calls `onChange` whenever the theme switches (the `dark` class on <html>); returns the unsubscribe. */
+export function onThemeChange(onChange: () => void): () => void {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+  return () => observer.disconnect();
+}
+
 /** Sizes a canvas to `width` × `height` CSS px, with a backing store crisp on HiDPI screens. */
 export function sizeCanvas(canvas: HTMLCanvasElement, width: number, height: number) {
   const dpr = window.devicePixelRatio || 1;

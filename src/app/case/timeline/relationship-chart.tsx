@@ -6,7 +6,7 @@ import { type ZoomBehavior, type ZoomTransform, zoomIdentity } from "d3-zoom";
 import { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { Names } from "@/lib/labels/labels";
 import { binEvents, type Relationship } from "@/lib/timeline/relationships";
-import { horizontalZoom, readPalette, sizeCanvas } from "../canvas";
+import { horizontalZoom, onThemeChange, readPalette, sizeCanvas } from "../canvas";
 
 /** Row height range: rows shrink to fit the view, down to the minimum, then the chart scrolls. */
 const ROW_MAX = 52;
@@ -158,6 +158,7 @@ export function RelationshipChart({ ref, relationships, range, names, onPick }: 
   const schedule = useCallback(() => {
     if (frameRef.current === null) frameRef.current = requestAnimationFrame(draw);
   }, [draw]);
+  useEffect(() => onThemeChange(schedule), [schedule]);
 
   // Size to the container; the rows can make the canvas taller than it, and the container scrolls.
   useEffect(() => {

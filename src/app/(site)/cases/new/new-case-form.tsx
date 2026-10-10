@@ -36,7 +36,8 @@ import { getRpcSettings } from "@/lib/db/rpc-settings";
 import { findActivitySpan } from "@/lib/ingest/activity-span";
 import { createRpcAdapter } from "@/lib/rpc/generic-adapter";
 import { parseMapParams } from "@/lib/routing/map-params";
-import { buildCasePath } from "@/lib/routing/case-path";
+import { usePreferences } from "@/hooks/use-preferences";
+import { casePathFor } from "@/lib/routing/case-path";
 
 type Pending = { value: { name: string; primaryWallet: string; range: CaseRange }; duplicates: FraudWatchCase[] };
 
@@ -57,6 +58,7 @@ function initialInput(params: URLSearchParams): { input: NewCaseInput; widenedFr
 export function NewCaseForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const startView = usePreferences().get("investigation.startView");
   const [{ input: initial, widenedFrom }] = useState(() => initialInput(new URLSearchParams(searchParams.toString())));
   const [input, setInput] = useState<NewCaseInput>(initial);
   const [errors, setErrors] = useState<NewCaseErrors>({});
@@ -91,7 +93,7 @@ export function NewCaseForm() {
         .filter(Boolean)
         .reduce((c, address) => mapWallet(c, { address, rangeMode: "case" }), createCase(value));
       await getDb().cases.put(fwCase);
-      router.push(buildCasePath(fwCase.id, "timeline"));
+      router.push(casePathFor(fwCase, startView));
     } catch (err) {
       setSaving(false);
       toast.error(err instanceof Error ? err.message : "Could not save the case.");
@@ -333,7 +335,7 @@ export function NewCaseForm() {
             {pending?.duplicates.map((d) => (
               <li key={d.id}>
                 <Link
-                  href={buildCasePath(d.id, "timeline")}
+                  href={casePathFor(d, startView)}
                   className={buttonVariants({ variant: "outline", className: "w-full justify-between" })}
                 >
                   <span className="truncate">{d.name}</span>

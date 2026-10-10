@@ -1,3 +1,5 @@
+import type { EventCategory } from "@/lib/semantic/events";
+
 /**
  * Multi-wallet timeline events: a transaction several mapped wallets share is
  * one event at one time, with an entry per lane.
@@ -45,8 +47,8 @@ export type Trunk = {
   lanes: number[];
   /** Transactions behind it. */
   count: number;
-  /** Set when every one of them moved value the same way down (+1) or up (-1) the lanes. */
-  direction: 1 | -1 | null;
+  /** Lanes that received value, and which way it came: +1 down the lanes, -1 up. Each lane and way once. */
+  arrivals: { lane: number; direction: 1 | -1 }[];
 };
 
 /**
@@ -64,15 +66,40 @@ export function mergeConnectors(links: readonly { x: number; connectors: readonl
     if (i < list.length && list[i].x - list[start].x <= gap) continue;
     const run = list.slice(start, i);
     const all = run.flatMap((l) => l.connectors);
-    const signs = new Set(all.map((c) => (c.directed ? Math.sign(c.to - c.from) : 0)));
-    const sign = signs.size === 1 ? [...signs][0] : 0;
+    const arrivals = new Map<string, { lane: number; direction: 1 | -1 }>();
+    for (const c of all) {
+      if (!c.directed || c.to === c.from) continue;
+      const direction = c.to > c.from ? 1 : -1;
+      arrivals.set(`${c.to}:${direction}`, { lane: c.to, direction });
+    }
     out.push({
       x: (list[start].x + list[i - 1].x) / 2,
       lanes: [...new Set(all.flatMap((c) => [c.from, c.to]))].sort((a, b) => a - b),
       count: run.length,
-      direction: sign === 1 ? 1 : sign === -1 ? -1 : null,
+      arrivals: [...arrivals.values()].sort((a, b) => a.lane - b.lane || a.direction - b.direction),
     });
     start = i;
   }
   return out;
+}
+
+/**
+ * Leaves out whole transactions whose semantic event is in `hidden` (a view setting, not a filter): a
+ * transaction on several lanes goes from all of them at once, and order is kept. Counts what was left out,
+ * by category, so the view can say so. With nothing hidden the same array comes back, so memos keep.
+ */
+export function withoutCategories<E extends { signature: string }>(
+  events: readonly E[],
+  categoryOf: (signature: string) => EventCategory | undefined,
+  hidden: ReadonlySet<EventCategory>,
+): { shown: readonly E[]; counts: Map<EventCategory, number> } {
+  const counts = new Map<EventCategory, number>();
+  if (hidden.size === 0) return { shown: events, counts };
+  const shown = events.filter((event) => {
+    const category = categoryOf(event.signature);
+    if (category === undefined || !hidden.has(category)) return true;
+    counts.set(category, (counts.get(category) ?? 0) + 1);
+    return false;
+  });
+  return { shown, counts };
 }

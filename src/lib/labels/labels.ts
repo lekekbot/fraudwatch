@@ -78,6 +78,20 @@ export type Names = {
  * form; those are shortened just far enough to tell apart wherever a bare
  * address is shown.
  */
+export type NameOptions = {
+  /** Characters kept at each end of a bare address when the caller doesn't say; `Infinity` shows it whole. Default 4. */
+  chars?: number;
+  /** Off: `of` shows the address even when there's a name; `known` still gives the name. Default on. */
+  preferNames?: boolean;
+  /** Use the community list's (unverified) names. Default on. */
+  community?: boolean;
+  /** Use primary .sol names. Default on. */
+  sns?: boolean;
+};
+
+/** Characters kept at each end for an address format preference. */
+export const ADDRESS_CHARS = { short: 4, medium: 8, full: Infinity } as const;
+
 export function createNames(
   labels: ReadonlyMap<string, AddressLabel>,
   reg: ProtocolRegistry,
@@ -85,14 +99,23 @@ export function createNames(
   verdicts: ReadonlyMap<string, LookalikeVerdict> = new Map(),
   /** Primary .sol names looked up on-chain. */
   sns: ReadonlyMap<string, string> = new Map(),
+  options: NameOptions = {},
 ): Names {
-  const resolve = (address: string, chars?: number) => {
-    const name = displayName(address, labels.get(address), reg.lookup(address), chars, { community: communityLabel(address), sns: sns.get(address) });
+  const { chars: defaultChars = 4, preferNames = true, community = true, sns: useSns = true } = options;
+  const bare = (address: string, chars: number) => {
     const twins = lookalikes.get(address);
-    return name.source === "address" && twins ? { ...name, text: distinguishingShort(address, twins, chars) } : name;
+    if (!Number.isFinite(chars)) return address;
+    return twins ? distinguishingShort(address, twins, chars) : shortenAddress(address, chars);
+  };
+  const resolve = (address: string, chars = defaultChars) => {
+    const name = displayName(address, labels.get(address), reg.lookup(address), chars, {
+      community: community ? communityLabel(address) : undefined,
+      sns: useSns ? sns.get(address) : undefined,
+    });
+    return name.source === "address" ? { ...name, text: bare(address, chars) } : name;
   };
   return {
-    of: (address, chars) => resolve(address, chars).text,
+    of: (address, chars) => (preferNames ? resolve(address, chars).text : bare(address, chars ?? defaultChars)),
     known: (address) => {
       const name = resolve(address);
       return name.source === "address" ? undefined : name.text;

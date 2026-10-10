@@ -92,20 +92,42 @@ function sentence({ event, state, assets, names }: Omit<Props, "onSelectAddress"
   }
 }
 
+/** What to say for a side of a movement the balances can't name. */
+function unknownSide(flow: SemanticFlow, end: "from" | "to"): { text: string; why: string } {
+  // A swap's, stake's or loan's own legs have no counterparty: the other side is the protocol's routing.
+  if (flow.role === "spent" || flow.role === "received") {
+    return { text: end === "to" ? "into the trade" : "from the trade", why: "Routed through the protocol's accounts, not a wallet: see the instructions below." };
+  }
+  return {
+    text: end === "to" ? "unknown recipient" : "unknown sender",
+    why: "The balances don't show who: several accounts sent and received this asset in the transaction, or it was burned or went to an account that closed. FraudWatch doesn't guess.",
+  };
+}
+
 function FlowRow({ flow, state, assets, names, onSelectAddress }: { flow: SemanticFlow } & Omit<Props, "event">) {
-  const side = (address: string | null) =>
-    address ? <AddressButton address={address} names={names} onSelect={onSelectAddress} /> : <span className="text-xs text-muted-foreground">—</span>;
+  const side = (address: string | null, end: "from" | "to") => {
+    if (address) return <AddressButton address={address} names={names} onSelect={onSelectAddress} />;
+    const unknown = unknownSide(flow, end);
+    return (
+      <span className="text-xs text-muted-foreground italic" title={unknown.why}>
+        {unknown.text}
+      </span>
+    );
+  };
   const amount = formatAssetAmount(flow.amount, flow.assetId, state, assets);
-  const asset = assetLabel(flow.assetId, assets);
+  const meta = assets.get(flow.assetId);
+  // Without a name or symbol, the label is the token's own address: say so.
+  const asset = meta?.symbol || meta?.name || flow.assetId === NATIVE_SOL ? assetLabel(flow.assetId, assets) : `unknown token ${assetLabel(flow.assetId, assets)}`;
   return (
     <li className="flex flex-col gap-0.5">
       <span className="flex min-w-0 items-center gap-1">
-        {side(flow.from)}
+        {side(flow.from, "from")}
         <span className="text-xs text-muted-foreground">→</span>
-        {side(flow.to)}
+        {side(flow.to, "to")}
       </span>
       <span className="flex justify-between gap-2 text-xs">
-        <span className="shrink-0 text-[10px] text-muted-foreground uppercase">{flow.role ? FLOW_TEXT[flow.role] : "Transfer"}</span>
+        {/* A plain movement needs no label; a role (payment, royalty, fee…) says what it was for. */}
+        <span className="shrink-0 text-[10px] text-muted-foreground uppercase">{flow.role ? FLOW_TEXT[flow.role] : ""}</span>
         <span className="flex min-w-0 gap-1 tabular-nums" title={`${amount} ${asset}`}>
           <span className="whitespace-nowrap">{amount}</span>
           <span className="truncate">{asset}</span>
@@ -123,7 +145,8 @@ export function EventSummary(props: Props) {
   return (
     <Section title="What happened">
       <p className="text-sm">{sentence(props)}</p>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+      {/* The same label width as the transaction's details below, so the values line up. */}
+      <dl className="grid grid-cols-[6rem_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
         {event.participants.map((p) => (
           <Fragment key={`${p.address}:${p.role}`}>
             <dt className="text-muted-foreground">{ROLE_TEXT[p.role]}</dt>

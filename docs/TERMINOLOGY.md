@@ -4,7 +4,10 @@ Terms used across the architecture and sprint docs. When code names differ, the 
 
 ## Cases
 
-- **Case** (`FraudWatchCase`): one local investigation. It holds a name, primary wallet, date range, mapped wallets, labels, tags and UI preferences. It lives in IndexedDB only; there is no server copy.
+- **Case** (`FraudWatchCase`): one local investigation. It holds a name, primary wallet, date range, mapped wallets, labels, tags and its view settings. It lives in IndexedDB only; there is no server copy.
+- **Setting:** a display choice in Settings (theme, address length, graph and timeline detail). It changes how evidence is shown, never the evidence.
+- **View settings / case override:** a setting changed for one case only, from a view's View settings. Other cases keep following Settings.
+- **Preset:** a named set of settings. Built in: Minimal, Balanced, Forensic. Users can save their own and share them as a file. A preset describes a way of looking at a case, never a finding about it.
 - **Case range** (`range`): the case's start/end window. Only transactions inside it are fetched for mapped wallets unless the user asks for context.
 - **Recent cases:** cases in this browser, sorted by last opened (`updatedAt`).
 - **Portable case state:** the case configuration that can be exported, imported or put in a `#state=` URL fragment. It never includes the RPC URL or fetched transaction data.

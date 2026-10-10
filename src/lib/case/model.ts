@@ -1,3 +1,4 @@
+import type { CaseView } from "@/lib/routing/case-path";
 import { isValidSolanaAddress, shortenAddress } from "@/lib/solana/address";
 import type { EffectKind } from "@/lib/state/summarize";
 import { type CaseRange, isValidRange, rangeFromDates } from "./range";
@@ -53,6 +54,14 @@ export type HideRule = {
   protocols?: string[];
 };
 
+/** Sparse and untrusted at rest, like the global preferences row; read through `caseOverrides`. */
+export type CaseViewSettings = {
+  schemaVersion: number;
+  values: Record<string, unknown>;
+  /** The preset last applied to this case: its values were copied into `values`, so editing or deleting it changes nothing here. */
+  appliedPreset?: { ref: string; name: string; at: string };
+};
+
 export type FraudWatchCase = {
   id: string;
   name: string;
@@ -75,6 +84,10 @@ export type FraudWatchCase = {
   hideRules?: HideRule[];
   /** Places the investigator marked to come back to (Sprint 09). */
   bookmarks?: Bookmark[];
+  /** Display preferences this case overrides; see `src/lib/case/view-settings.ts`. Never evidence. */
+  viewSettings?: CaseViewSettings;
+  /** The view last open, for "open cases on the last used view". */
+  lastView?: CaseView;
 
   createdAt: string;
   updatedAt: string;
