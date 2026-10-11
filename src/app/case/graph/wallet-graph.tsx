@@ -601,6 +601,7 @@ export function WalletGraph({
     // Zoom out as far as it takes to show every wallet: wide spacing can spread them well beyond one screen.
     const k = Math.min(1.15, Math.max(0.2, Math.min(width / (x1 - x0), height / (y1 - y0))));
     const t = zoomIdentity.translate(width / 2 - (k * (x0 + x1)) / 2, height / 2 - (k * (y0 + y1)) / 2).scale(k);
+    console.debug(`[graph-zoom] fit: k ${transformRef.current.k.toFixed(3)} -> ${k.toFixed(3)}`);
     select(canvas).call(zoomRef.current.transform, t);
   }, []);
 
@@ -675,12 +676,15 @@ export function WalletGraph({
         if (event.type === "wheel") return false;
         if (event.button) return false;
         const point = event.touches?.[0] ?? event;
-        return !hitAt(point).node;
+        const node = hitAt(point).node;
+        if (node) console.debug(`[graph-zoom] ${event.type} on node ${node}: drags the node, no pan/zoom`);
+        return !node;
       })
       .on("zoom", (event: { transform: ZoomTransform }) => {
         transformRef.current = event.transform;
       });
     zoomRef.current = behavior;
+    console.debug("[graph-zoom] zoom behaviour attached");
     select(canvas).call(behavior).on("dblclick.zoom", null);
     return () => {
       select(canvas).on(".zoom", null);
@@ -693,9 +697,19 @@ export function WalletGraph({
     if (!canvas) return;
     const onWheel = (event: WheelEvent) => {
       const behavior = zoomRef.current;
-      if (!behavior) return;
+      if (!behavior) {
+        console.debug("[graph-zoom] wheel ignored: no zoom behaviour yet");
+        return;
+      }
       event.preventDefault();
       const action = graphWheelAction(event);
+      const before = transformRef.current.k;
+      // Logged after d3 applies the transform, so a zoom stuck at the 0.1–4 limit shows as k unchanged.
+      queueMicrotask(() =>
+        console.debug(
+          `[graph-zoom] wheel ${action.type} ctrl=${event.ctrlKey} meta=${event.metaKey} dx=${event.deltaX} dy=${event.deltaY} mode=${event.deltaMode} k ${before.toFixed(3)} -> ${transformRef.current.k.toFixed(3)}`,
+        ),
+      );
       if (action.type === "zoom") {
         const rect = canvas.getBoundingClientRect();
         select(canvas).call(behavior.scaleBy, action.factor, [event.clientX - rect.left, event.clientY - rect.top]);
