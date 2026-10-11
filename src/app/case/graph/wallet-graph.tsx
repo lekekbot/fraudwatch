@@ -249,6 +249,8 @@ export function WalletGraph({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const zoomRef = useRef<ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
   const transformRef = useRef<ZoomTransform>(zoomIdentity);
+  /** The investigator panned or zoomed: data updates stop re-framing the map until they ask for a fit. */
+  const cameraMoved = useRef(false);
   const sizeRef = useRef({ width: 800, height: 600 });
   const hoverRef = useRef<{ node?: string; edge?: string }>({});
   const dragRef = useRef<{ id: string; x: number; y: number; moved: boolean } | null>(null);
@@ -584,6 +586,7 @@ export function WalletGraph({
   const fit = useCallback((source: ReadonlyMap<string, Point> = positions.current) => {
     const canvas = canvasRef.current;
     if (!canvas || !zoomRef.current || source.size === 0) return;
+    cameraMoved.current = false;
     const { graph, primaryWallet, selectedNode, selectedEdge, visible } = latest.current;
     // Everything drawn, clusters included, so nothing sits off-screen or under the toolbar.
     const important = new Set<string>(visible ?? [primaryWallet, ...graph.nodes.map((node) => node.id)]);
@@ -680,8 +683,9 @@ export function WalletGraph({
         if (node) console.debug(`[graph-zoom] ${event.type} on node ${node}: drags the node, no pan/zoom`);
         return !node;
       })
-      .on("zoom", (event: { transform: ZoomTransform }) => {
+      .on("zoom", (event: { transform: ZoomTransform; sourceEvent: Event | null }) => {
         transformRef.current = event.transform;
+        if (event.sourceEvent) cameraMoved.current = true;
       });
     zoomRef.current = behavior;
     console.debug("[graph-zoom] zoom behaviour attached");
@@ -702,6 +706,7 @@ export function WalletGraph({
         return;
       }
       event.preventDefault();
+      cameraMoved.current = true;
       const action = graphWheelAction(event);
       const before = transformRef.current.k;
       // Logged after d3 applies the transform, so a zoom stuck at the 0.1–4 limit shows as k unchanged.
@@ -739,7 +744,8 @@ export function WalletGraph({
       const parent = edge ? from.get(edge.a === id ? edge.b : edge.a) : undefined;
       from.set(id, parent ?? target);
     }
-    fit(targets);
+    // Live data (wallets still loading, a case save) rebuilds the layout often; don't yank a view the investigator set.
+    if (!cameraMoved.current) fit(targets);
     if (latest.current.reducedMotion) {
       positions.current = targets;
       return;
