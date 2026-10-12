@@ -660,13 +660,14 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, density = "comf
             }
             ctx.restore();
           }
-          const text = group.length === 1 ? group[0].o.label : `${group.length}`;
+          // A merged group shows no text: its tooltip lists what's in it.
+          const text = group.length === 1 ? group[0].o.label : "";
           ctx.font = "600 10px ui-sans-serif, system-ui, sans-serif";
           let w = ctx.measureText(text).width;
           const left = Math.max(4, Math.min(x0 - 4, width - w - 8));
-          // A label that would run into the next marker shortens to its count.
+          // A label that would run into the next marker is dropped.
           const next = groups[gi + 1]?.[0].x0 ?? Number.POSITIVE_INFINITY;
-          const shown = left + w + 6 < next - 4 ? text : group.length === 1 ? "" : `${group.length}`;
+          const shown = left + w + 6 < next - 4 ? text : "";
           w = ctx.measureText(shown).width;
           ctx.fillStyle = p.bg;
           ctx.globalAlpha = shown ? 0.85 : 0;
