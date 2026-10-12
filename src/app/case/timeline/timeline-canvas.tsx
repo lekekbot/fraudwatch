@@ -627,29 +627,39 @@ export function TimelineCanvas({ ref, items, lanes, range, mode, density = "comf
         }
         ctx.globalAlpha = 1;
         ctx.restore();
-        // Markers merge by where they start, so a long span never swallows the ones inside it.
+        // Markers merge by where they start, so a long span never swallows the ones inside it. Ones in the same pill merge too.
         const groups: (typeof placed)[] = [];
         for (const m of placed) {
           const last = groups[groups.length - 1];
-          if (last && m.x0 - last[last.length - 1].x0 <= 16) last.push(m);
+          const prev = last?.[last.length - 1];
+          if (prev && (m.x0 - prev.x0 <= 16 || (pillAt(m.x0, l) !== undefined && pillAt(m.x0, l) === pillAt(prev.x0, l)))) last.push(m);
           else groups.push([m]);
         }
         groups.forEach((group, gi) => {
           const x0 = group[0].x0;
           const on = group.some((g) => g.o.key === selectedObservation);
-          // One that lands in a pill sits on its bottom edge instead, a badge rather than a mark through the label.
-          const my = pillAt(x0, l) ? y + PILL_H / 2 : y;
-          ctx.save();
-          ctx.translate(x0, my);
-          ctx.rotate(Math.PI / 4);
-          ctx.fillStyle = p.behavior;
-          ctx.fillRect(-4.5, -4.5, 9, 9);
-          if (on) {
-            ctx.lineWidth = 2;
-            ctx.strokeStyle = p.fg;
-            ctx.strokeRect(-4.5, -4.5, 9, 9);
+          // One that lands in a pill outlines the pill instead of a diamond, with its label below the pill.
+          const pill = pillAt(x0, l);
+          const my = pill ? y + PILL_H / 2 : y;
+          if (pill) {
+            ctx.beginPath();
+            ctx.roundRect(pill.x0, y - PILL_H / 2, pill.x1 - pill.x0, PILL_H, 10);
+            ctx.lineWidth = on ? 2.5 : 1.5;
+            ctx.strokeStyle = p.behavior;
+            ctx.stroke();
+          } else {
+            ctx.save();
+            ctx.translate(x0, my);
+            ctx.rotate(Math.PI / 4);
+            ctx.fillStyle = p.behavior;
+            ctx.fillRect(-4.5, -4.5, 9, 9);
+            if (on) {
+              ctx.lineWidth = 2;
+              ctx.strokeStyle = p.fg;
+              ctx.strokeRect(-4.5, -4.5, 9, 9);
+            }
+            ctx.restore();
           }
-          ctx.restore();
           const text = group.length === 1 ? group[0].o.label : `${group.length}`;
           ctx.font = "600 10px ui-sans-serif, system-ui, sans-serif";
           let w = ctx.measureText(text).width;
