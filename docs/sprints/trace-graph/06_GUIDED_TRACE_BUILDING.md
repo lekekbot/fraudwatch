@@ -119,7 +119,7 @@ Each opens the seed dialog, creates the trace and routes to `/case/<id>/trace/<t
 
 ### Context menu (Base UI Menu / ContextMenu)
 
-Node: Next movements · Earlier movements · Map wallet (if OBSERVED) · Pin / Unpin · Copy address · Start new trace here. Edge: Show movements · Remove step(s) · Copy signature(s).
+Node: Next movements · Earlier movements · Map wallet (if OBSERVED) · Colour · Add note here · Copy address · Start new trace here. Edge: Show movements · Remove step(s) · Copy signature(s).
 
 ## Prerequisites and Dependencies
 

@@ -1,6 +1,6 @@
 # Sprint 01 — Repository Audit and Product Specification
 
-**Status:** Planned. The audit below was done while writing the plan (2026-10-08, `04f121b`). The sprint's remaining work is review and sign-off of the decisions, with no code.
+**Status:** Done 2026-10-10. Audit done while writing the plan (2026-10-08, `04f121b`) and re-checked against `29ae8a4` before Sprint 02 (no drift in the rows Sprints 02–03 rely on). The product owner chose the draw.io direction (D8, D9 below); D1–D7 proceed on their recommendations and stay open to change at review.
 
 ## Summary and Why It Matters
 
@@ -15,7 +15,7 @@ Every later sprint builds on facts about how FraudWatch stores transactions, rea
 | Framework | Next.js 16.3 App Router, React 19.2, TypeScript, Tailwind v4, shadcn/Base UI (`src/components/ui/`: alert, badge, button, card, checkbox, dialog, field, input, label, sonner, textarea). No menu, popover, tabs or select component. | `package.json`, `AGENTS.md` |
 | Routing | Case workspace `/case/<id>/<view>[/<wallet>]`, `CaseView = "timeline" \| "graph" \| "table"`. `isCaseRoute` rejects unknown views. The workspace is hosted by the case **layout**, so switching views keeps state. | `src/lib/routing/case-path.ts`, `src/app/case/layout.tsx`, `src/app/case/case-shell.tsx` (`CaseShell` comment) |
 | State | No store. `CaseWorkspace` in `case-shell.tsx` (~1,500 lines) owns workspace state and memoised derivations: `semanticEvents`, `summariesByWallet`, `filterables`, `reasons` (hiding), `perWallet`, `lanes`, `graph`, `names`, `observations`. | `src/app/case/case-shell.tsx` |
-| Persistence | Dexie v4: `cases`, `rpc_settings`, `transactions`, `raw_transactions`, `wallet_transactions`, `coverage`, `ingestion_jobs`, `meta`, `wallet_states`, `token_metadata`, `address_labels`. Reactive reads with `useLocalQuery`. `deleteCase` removes the case, its labels and its last-load record. | `src/lib/db/db.ts`, `src/lib/db/cases.ts`, `src/hooks/use-local-db.ts` |
+| Persistence | Dexie v6 (drift since `04f121b`: Global Preferences added v5 `preferences` and v6 `view_presets`; the trace table takes v7): `cases`, `rpc_settings`, `transactions`, `raw_transactions`, `wallet_transactions`, `coverage`, `ingestion_jobs`, `meta`, `wallet_states`, `token_metadata`, `address_labels`. Reactive reads with `useLocalQuery`. `deleteCase` removes the case, its labels and its last-load record. | `src/lib/db/db.ts`, `src/lib/db/cases.ts`, `src/hooks/use-local-db.ts` |
 | Canonical transaction | One record per `solana:<signature>`: slot, time, success, fee, accounts, native and token balance changes (pre/post/delta, token `owner`), outer and inner instructions. Raw response in `raw_transactions`. | `src/lib/solana/canonical.ts` |
 | Movements | `deltas()` nets balances by **owner** (token accounts resolved to `owner`; the payer's fee added back; token-account rent excluded). `balanceFlows()` pairs senders and receivers per asset exactly when one side is single, **otherwise leaves the other side `null`**. `withSettlement()` adds settlement flows so flows reconcile with balances. | `src/lib/semantic/flows.ts` |
 | Semantic event | `SemanticEvent` per transaction (`id = solana:<sig>:event:0`): category, action, participants, infrastructure, `flows: SemanticFlow[]` (`assetId`, `amount` base units, `from`, `to`, `source: balance \| compressed_nft`, `role?`), protocol, service, confidence, evidence, warnings, NFT/bridge/stake detail, fee payer and fee. **Computed on open, never stored.** | `src/lib/semantic/events.ts`, `interpret.ts`, `docs/ARCHITECTURE.md` |
@@ -33,6 +33,11 @@ Every later sprint builds on facts about how FraudWatch stores transactions, rea
 | Hiding | Case-level `hiddenSignatures`, `shownSignatures`, `hideRules`, evaluated by `hiddenReasons`. | `src/lib/case/hiding.ts` |
 | Tests | Vitest, node environment, `src/**/*.test.ts` only; fixtures in `fixtures/solana/{basic,cnft,defi,magic-eden-core,magic-eden-sale,nft-sale}`; helpers `makeTx`, `token`, `ix`, `read`, `reconciles` (`src/lib/semantic/testing.ts`); timing budgets in `src/lib/semantic/performance.test.ts` (1/5/10 wallets, 1k/2k/5k transactions). No DOM tests, no fake IndexedDB (DB tests stub tables). | `vitest.config.mts` |
 | Chains | Solana only. `BridgeEnvelope` keeps identifiers for the remote side but nothing is fetched off-chain. | `events.ts` |
+
+### Drift found at `29ae8a4` (2026-10-10)
+
+- Dexie is at v6, not v4 (above). Global Preferences is merged (PR #35), so Sprint 12's precondition is met.
+- `src/app/case/canvas.ts` now exports `onThemeChange`; canvases redraw through it (theme can be forced light/dark by a preference, not only `prefers-color-scheme`). Sprint 05 uses it.
 
 ### Gaps and limitations
 
@@ -74,15 +79,21 @@ Code, dependencies, UI prototypes.
 - **Boundary:** a reason a path stops: history not loaded, outside the case range, custodial service, ambiguous pairing, failed transaction, burn, bridge out, end of loaded history.
 - **Candidate:** a movement that could be added next from a selected node, given direction and scope.
 - **Continuation:** a later movement out of an address that received an earlier one. **It means "then", not "the same funds".**
+- **Annotation:** anything the investigator draws that isn't evidence: a text note, a shape or frame, or a user connector between two items. Never a step.
+- **User connector:** an annotation line between two items (nodes, notes, shapes) or free points. It states the investigator's claim, not an observed movement.
+- **Position:** where a node or annotation sits on the canvas, in world coordinates. Stored for every node once placed.
+- **Auto-place:** where a newly added node is first put (beside the node it was reached from). **Tidy layout:** an explicit, undoable rearrangement of evidence nodes.
 
 ### MVP user stories
 
+0. Arrange the trace freely: drag nodes and annotations anywhere, and find them exactly there on reopening.
 1. From a mapped wallet's address panel, start a forward trace limited to one asset and a date range, and see the wallet as the only node.
 2. Open the candidate list for a node and add one or more outgoing movements, each becoming an edge to its recipient.
 3. From a Timeline event, start a trace seeded with that transaction's movements, and pick which ones to include.
 4. From a node that is OBSERVED, see "History not loaded" and map it (existing dialog) to continue.
 5. Click any step and see its transaction, movement, time, asset, amount, real addresses, interpretation confidence and evidence.
 6. Save, rename, reopen and delete traces in a case; reopening needs no RPC.
+7. Add a text note, a frame around a group of nodes, and a dashed connector labelled "same operator?" between two nodes; none of them changes the trace's steps or totals.
 
 ### Representative flows (each becomes a fixture-backed test somewhere in 03–08)
 
@@ -108,6 +119,10 @@ Code, dependencies, UI prototypes.
 | 5 | **D6** Dedicated canvas component reusing helpers | Reuse `WalletGraph`; adopt a graph library (React Flow, Cytoscape) | `WalletGraph`'s layout, clusters and hover model are network-specific. A library adds a dependency and a second rendering model when Canvas + d3-zoom already work. |
 | 6 | Continuations are chronological, never lineage | FIFO/proportional attribution | No defensible method yet; account-model balances don't carry coin identity. |
 | 7 | **D5** Hidden-by-rule transactions are shown as candidates, marked | Excluded | Hide rules declutter the main views; removing evidence from a trace silently would be worse. |
+| 8 | **D8** Evidence plus annotations: notes, shapes, frames and user connectors, stored in their own list on the trace and styled apart from evidence | Evidence only; fully free-form (any box or arrow, evidence just badged) | The investigator needs to record reasoning on the diagram (draw.io-like), but a hand-drawn arrow must never pass for an observed transfer. Separate storage keeps every evidence invariant testable. **Decided by the product owner 2026-10-10.** |
+| 9 | **D9** Free placement with auto-place for new nodes and an explicit Tidy layout | Automatic columns by hop with pins (original plan); fully manual | A diagram the investigator arranges reads as their work and stays put; auto-place keeps building fast. **Decided 2026-10-10.** Supersedes the column layout in Sprint 05. |
+
+ADR 5 still holds under D8/D9: free placement, shapes and connectors are straightforward on Canvas 2D with d3-zoom, and a diagram library (React Flow, tldraw) would bring a second rendering model and a DOM node per item. Revisit only if 05A's editing interactions (resize handles, text editing) prove costly; text editing uses a positioned HTML input over the canvas.
 
 ### Success measures (measured in 13)
 
@@ -127,12 +142,13 @@ None (documentation).
 
 ### Task Group A — Review
 
-- [ ] Reviewer confirms or changes D1–D7 in `00_README.md` §9; record the outcome there
-- [ ] Reviewer confirms the MVP stories and post-MVP list
+- [x] Product owner chose D8 (evidence + annotations) and D9 (free placement + auto-place), 2026-10-10; recorded in `00_README.md` §9
+- [ ] Reviewer confirms or changes D1–D7 (proceeding on the recommendations)
+- [x] MVP stories updated for the canvas (stories 0 and 7)
 
 ### Task Group B — Hand-off
 
-- [ ] If any decision changes, update the affected sprint files before Sprint 02 starts
+- [x] Affected sprint files updated for D8/D9 before Sprint 02: 02 (canvas model), 04 (updaters), 05 (free placement), new 05A (annotations), 08 (undo scope), 11 (export of layout and annotations), 12 (preference boundary)
 
 ## UI Behavior and Example Scenarios
 
@@ -156,12 +172,12 @@ None this sprint. Fixture needs are listed in 03.
 
 ## Acceptance Criteria (observable and measurable)
 
-- [ ] Every row of the capability table cites a path that exists at the audited commit.
-- [ ] Decisions D1–D7 have a recorded outcome.
+- [x] Every row of the capability table cites a path that exists at the audited commit (re-checked at `29ae8a4`).
+- [x] Decisions have a recorded outcome: D8, D9 decided; D1–D7 on recommendation.
 
 ## Definition of Done
 
-- [ ] Decisions signed off; affected sprint files updated; no code changed.
+- [x] Decisions recorded; affected sprint files updated; no code changed.
 
 ## Known Risks / Open Decisions
 

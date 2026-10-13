@@ -48,6 +48,7 @@ Real traces split, merge, loop back and revisit the same counterparties. Without
 ### Definitions
 
 - **Branch of node N (forward):** N's descendants reachable by steps directed away from the seed, stopping at nodes closer to the seed (so a return edge doesn't make the whole trace a branch). Backward is symmetric.
+- **Annotations and branches:** annotations aren't part of any branch. A connector whose end is on a hidden node is drawn to the visible chip of the branch root.
 - **Hidden branch:** `presentation.hiddenBranches` holds N. N stays visible with a chip "12 movements hidden ▸"; its branch's nodes and edges aren't drawn. **Steps are kept.**
 - **Focus path:** an ephemeral (unsaved) mode showing only the path from the seed to a selected node (the shortest by steps), with the rest dimmed, not removed. Esc leaves it.
 - **Branch summary** (on a selected node's panel): number of steps and nodes downstream, per-asset totals of the **added steps** ("Added movements total: 40 SOL, 1,200 USDC"), time span, and boundaries reached. Wording never says "traced funds".
@@ -68,9 +69,9 @@ type History = { past: Trace[]; future: Trace[] };   // snapshots of the trace r
 push(h, before): History; undo(h, current): { history; trace } | null; redo(…)
 ```
 
-- Every edit (add or remove steps, scope, direction, rename, pin, expand service, hide branch) pushes the previous record, then saves the new one. Undo saves the restored record.
+- Every edit (add or remove steps, scope, direction, rename, move, style, annotation add/edit/remove, tidy layout, expand service, hide branch) pushes the previous record, then saves the new one. Undo saves the restored record.
 - Cmd/Ctrl+Z, Shift+Cmd/Ctrl+Z, and toolbar buttons. The stack resets when switching traces or reloading (session only, D7).
-- Pin drags push one entry per drop, not per move.
+- Drags push one entry per drop, not per move; text edits push one entry per commit (blur or Enter), not per keystroke.
 
 ### Safeguards
 

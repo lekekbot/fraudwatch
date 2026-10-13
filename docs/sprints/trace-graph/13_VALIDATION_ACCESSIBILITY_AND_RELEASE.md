@@ -108,7 +108,7 @@ Before investigators rely on the Trace Graph, every evidence invariant must be p
 ### Task Group D — Docs and release
 
 - [ ] Limitations statement in the product and `ARCHITECTURE.md`; terminology final; roadmap updated
-- [ ] Open issues: add trace-specific known limitations (D1 mapping-to-continue, custodial list scope, column-vs-time)
+- [ ] Open issues: add trace-specific known limitations (D1 mapping-to-continue, custodial list scope, free layout doesn't encode time, annotations are claims not evidence)
 - [ ] Release note; `00_README.md` statuses updated to reflect only what is done
 
 ## UI Behavior and Example Scenarios

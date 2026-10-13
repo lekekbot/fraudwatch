@@ -30,7 +30,7 @@ Investigators think in "Binance", "Magic Eden", "Jupiter", not in vault and fee-
 ## Objectives and User Outcomes
 
 - Service addresses fold into one entity node per protocol, by default, with the real address on every movement.
-- One-click expand to individual addresses and back, with no loss of steps or pins.
+- One-click expand to individual addresses and back, with no loss of steps, positions or annotations.
 - Custodial services stop continuation clearly.
 - User labels stay visible and respected.
 
@@ -61,7 +61,7 @@ This is the same exemption logic as the Graph's `clusterOf` in `case-shell.tsx` 
 
 - `TraceNode.addresses` lists the real addresses behind the entity that appear in the trace; `TraceEdge.provenance = "service"` and each step keeps its real endpoint. The view model adds `via` per step on edges into or out of an entity.
 - Folding is **presentation only**: steps are stored with real addresses, and expanding or collapsing re-runs `buildTraceView` without touching `steps`.
-- Pins on an entity node are stored under the entity id; expanding places the individual addresses next to it (05's incremental layout) and collapsing reuses the entity pin.
+- An entity node's position is stored under the entity id; expanding auto-places the individual addresses next to it (05) and collapsing reuses the entity position. Connectors attached to an entity node stay attached to it while expanded (drawn to the first address).
 
 ### Custody
 
@@ -107,7 +107,7 @@ This is the same exemption logic as the Graph's `clusterOf` in `case-shell.tsx` 
 
 ## UI Behavior and Example Scenarios
 
-- **F5:** A → Binance deposit address. The canvas shows A → **Binance** (custodial boundary). Expand → A → `9xQ…c4 (Binance hot wallet)`. Collapse → back. Steps and pins unchanged throughout.
+- **F5:** A → Binance deposit address. The canvas shows A → **Binance** (custodial boundary). Expand → A → `9xQ…c4 (Binance hot wallet)`. Collapse → back. Steps, positions and annotations unchanged throughout.
 - Magic Eden sale with the fee leg added as supporting: the fee edge goes to the **Magic Eden** entity, labelled "marketplace fee", via the fee account.
 - A user-labelled Binance address "Suspect's Binance deposit": shown on its own node with that label, never folded.
 

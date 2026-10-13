@@ -52,7 +52,7 @@ A trace is investigative work product. It has to survive reloads, stay inside it
 ### Table
 
 ```ts
-// db.ts, next free version
+// db.ts, v7 (v5/v6 are Global Preferences')
 traces: "id, caseId, updatedAt"
 ```
 
@@ -79,6 +79,7 @@ export type LoadedTrace =
 - `schemaVersion` higher → `newer_version`: listed as "Made by a newer FraudWatch; read-only", not editable, never overwritten.
 - Invalid → listed as "Couldn't read this trace" with **Delete** and **Copy raw JSON** (for a bug report). Never auto-deleted.
 - **Individual invalid steps** inside an otherwise valid trace: the trace loads; those steps are kept in an `invalidSteps` array and shown as an issue, so the user can remove them.
+- **Presentation** is validated separately and never blocks loading: positions with non-finite numbers are dropped (the node is auto-placed again), unknown colour keys fall back to `default`, and annotations with an unknown kind or invalid fields are kept in `invalidAnnotations` and listed for removal. A trace without a `presentation` (or an older shape with `pins`) gets `emptyPresentation()`, with any pins carried over as positions.
 
 ### Updaters (`src/lib/trace/edit.ts`), all pure, returning a new `Trace`
 
@@ -88,7 +89,11 @@ removeSteps(t, stepIds, now?)                // presentation entries for nodes l
 setScope(t, scope, now?)                     // never removes steps; out-of-scope steps become issues (02)
 setDirection(t, direction, now?)
 renameTrace(t, name, now?)                   // 1–80 chars trimmed; duplicates allowed
-setPin(t, nodeId, point | null, now?)
+setPositions(t, positions: Record<string, Point>, now?)       // move one or many items (nodes by id); one record per drop
+setNodeStyle(t, nodeId, style: NodeStyle | null, now?)
+addAnnotation(t, annotation, now?) / updateAnnotation(t, id, patch, now?) / removeAnnotations(t, ids, now?)   // removal detaches connector ends (02 `detachEnds`)
+reorderAnnotation(t, id, "front" | "back", now?)
+setCanvasOptions(t, { grid?, snap? }, now?)
 setServiceExpanded(t, protocolId, expanded, now?)
 setBranchHidden(t, nodeId, hidden, now?)
 duplicateTrace(t, deps?)                     // new id, "Copy of …"
@@ -97,7 +102,7 @@ duplicateTrace(t, deps?)                     // new id, "Copy of …"
 ### Save model
 
 - Every edit goes `trace → updater → saveTrace`, immediately, as case edits do today. Writes of one trace are serialised (a promise chain per trace id) so rapid edits keep their order.
-- Pin moves are saved on drag end only, not per pointer move.
+- Moves (nodes and annotations) are saved on drag end only, not per pointer move. Annotation positions live on the annotation; node positions in `presentation.positions`.
 - Save failure: `toast.error(describeStorageError(err))`; the UI shows the stored state (the live query is authoritative).
 
 ### Lifecycle against the rest of the case
@@ -167,13 +172,13 @@ None visible beyond the Storage page count (traces are listed in 06).
 
 ## Performance Considerations
 
-A 500-step trace record is ≈ 150 KB of JSON; `put` is well within IndexedDB limits. Pin saves happen on drag end only.
+A 500-step trace record is ≈ 150 KB of JSON; `put` is well within IndexedDB limits. Position saves happen on drag end only. Annotations are small (a note is its text plus a few numbers); cap 500 per trace and 2,000 characters per note/label, enforced by the updaters and `parseTrace`.
 
 ## Tests and Fixtures to Add
 
 - `traces.test.ts` (stub tables): create → get round trip; list per case only (case isolation); delete; `deleteCase` cascade removes only that case's traces.
 - `parseTrace`: valid; missing field → invalid; amount `"1.5"` → invalid step kept aside; `schemaVersion` 99 → newer_version; v0 (synthetic) → migrated.
-- `edit.test.ts`: `addSteps` ignores duplicate keys; `removeSteps` prunes pins; `setScope` keeps every step; editing trace A leaves trace B (same case) unchanged; every updater leaves `id`, `caseId`, `createdAt` unchanged.
+- `edit.test.ts`: `addSteps` ignores duplicate keys; `removeSteps` prunes positions and styles of nodes left without steps and detaches connector ends to points (the connector stays); `removeAnnotations` detaches ends pointing at removed annotations; `setScope` keeps every step; editing trace A leaves trace B (same case) unchanged; every updater leaves `id`, `caseId`, `createdAt` unchanged.
 
 ## Acceptance Criteria (observable and measurable)
 
@@ -192,4 +197,4 @@ A 500-step trace record is ≈ 150 KB of JSON; `put` is well within IndexedDB li
 
 ## Handoff Notes for the Next Sprint
 
-05 reads `presentation.pins` and writes them through `setPin`; 06 builds the trace list and editing UI on `useTraces`.
+05 reads `presentation.positions` and writes them through `setPositions`; 05A edits styles and annotations through the annotation updaters; 06 builds the trace list and editing UI on `useTraces`.

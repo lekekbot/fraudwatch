@@ -77,3 +77,19 @@ See `ARCHITECTURE.md` → Semantic model for how these fit together.
 - **Evidence categories:** fact, verified attribution, derived interpretation, heuristic observation, user label, community label. Kept apart in the inspector; labels are shown but never used to interpret.
 - **Bridge envelope** (`BridgeEnvelope`): the Solana side of a cross-chain transfer, with the identifiers (nonce, message account, domains) that could find the other side.
 - **Analysis versions** (`analysisVersions`): parser, reconstruction, semantic model, each interpreter, registry and behaviour rule versions, reported together; the stored caches clear when theirs change.
+
+## Trace Graph
+
+See `docs/sprints/trace-graph/` and `src/lib/trace/`. Planned as an investigator's canvas, like draw.io; the model and movement index exist, the view doesn't yet.
+
+- **Trace:** a named, saved, investigator-built set of steps within one case, plus how the investigator arranged and annotated it.
+- **Seed:** where a trace starts: an address, a transaction, or one movement.
+- **Direction:** forward (where value went), backward (where it came from), or both.
+- **Movement:** one flow of one event with both ends known, named by a **movement key** built from its content (`solana:<sig>:event:<i>:mv:<asset>:<from>:<to>:<amount>:<n>`), so it survives reloads and most reinterpretations.
+- **Step:** a movement the investigator added, linking two trace nodes. A step whose movement is gone or changed is **stale**: kept and flagged, never re-pointed.
+- **Conversion:** one actor gave up some assets and got others back (a swap, a liquid stake, a receipt-token deposit). The asset under the trace changes; nobody else receives it.
+- **Boundary:** why a path stops at an address: history not loaded, partial history, outside range, custodial, ambiguous pairing, failed, burned, minted, bridged out or in, protocol position, end of history. Only "end of history" means nothing further, and only for a wallet whose loaded history is complete.
+- **Candidate:** a movement that could be added next from a node, given direction and scope. Fees, royalties and rent are **supporting** candidates, offered only on request.
+- **Continuation:** a later movement out of an address that received an earlier one. It means "then", not "the same funds".
+- **Annotation:** anything the investigator draws that isn't evidence: a note, a shape or frame, or a **user connector** (their claim, drawn dashed). Never a step, never counted.
+- **Position / auto-place / Tidy layout:** every node stays where it's put; new nodes are auto-placed beside the node they came from; Tidy layout rearranges evidence nodes on request.

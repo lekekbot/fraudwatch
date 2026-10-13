@@ -1,6 +1,6 @@
 # Sprint 02 — Trace Domain Model and Provenance
 
-**Status:** Planned
+**Status:** Implemented on `trace-graph` (2026-10-10), awaiting review
 **Depends on:** 01
 
 ## Summary and Why It Matters
@@ -36,6 +36,7 @@ A trace is only as trustworthy as the link from each drawn line back to the chai
 
 - `src/lib/trace/model.ts`: types, movement keys, step and trace types, provenance kinds
 - `src/lib/trace/view.ts`: `buildTraceView` (steps + current evidence → nodes, edges, boundaries, issues), without layout
+- `src/lib/trace/presentation.ts`: canvas types (positions, node styles, annotations) and pure helpers; no editing UI
 - Terminology additions to `docs/TERMINOLOGY.md` (from Sprint 01)
 - Unit tests
 
@@ -104,7 +105,7 @@ export type Trace = {
   direction: "forward" | "backward" | "both";
   scope: TraceScope;
   steps: TraceStep[];
-  presentation: TracePresentation;              // 04/05/07/08 fill this in; never evidence
+  presentation: TracePresentation;              // positions, styles, annotations (04/05/05A/07/08); never evidence
   analysisAtSave: { semantic: number; registry: number };
   createdAt: string; updatedAt: string;
 };
@@ -174,17 +175,45 @@ export type TraceEvidence = {
 - Totals are BigInt sums of the steps' own amounts per asset. They're totals of *added steps*, never a wallet's balance and never "funds traced".
 - A stale step stays in the trace and in the view (drawn with a warning), with its stored reference fields, until the investigator removes it.
 
-### Presentation (reserved here, filled later)
+### Presentation: the investigator's canvas (D8, D9)
+
+Everything the investigator arranges or draws. None of it is evidence, and `buildTraceView` reads none of it except service folding (07).
 
 ```ts
+export type Point = { x: number; y: number };            // world coordinates
+
 export type TracePresentation = {
-  pins: Record<string, { x: number; y: number }>;    // 05
-  expandedServices: string[];                        // 07 (collapsed is the default)
-  hiddenBranches: string[];                          // node ids whose downstream is hidden; 08
+  /** Every evidence node that has been placed. A node without an entry is auto-placed (05) and then gets one. */
+  positions: Record<string, Point>;
+  /** Optional per-node look; absent = theme default. Never changes what the node is. */
+  nodeStyles: Record<string, NodeStyle>;
+  /** Notes, shapes, frames and user connectors, in draw order (later on top). */
+  annotations: Annotation[];
+  expandedServices: string[];                             // 07 (collapsed is the default)
+  hiddenBranches: string[];                               // node ids whose downstream is hidden; 08
+  canvas: { grid: boolean; snap: boolean };               // 05
 };
+
+/** A palette key, resolved to a CSS variable at draw time so themes keep working. */
+export type ColorKey = "default" | "red" | "orange" | "yellow" | "green" | "teal" | "blue" | "purple" | "pink" | "gray";
+
+export type NodeStyle = { color?: ColorKey; size?: "s" | "m" | "l"; note?: string };
+
+/** Where a user connector ends: an evidence node, another annotation, or a free point. */
+export type AnnotationEnd = { kind: "node"; id: string } | { kind: "annotation"; id: string } | { kind: "point"; at: Point };
+
+export type Annotation =
+  | { id: string; kind: "note"; at: Point; width: number; text: string; color: ColorKey }
+  | { id: string; kind: "shape"; shape: "rect" | "ellipse" | "frame"; at: Point; width: number; height: number;
+      label: string; stroke: ColorKey; fill: ColorKey | "none" }
+  | { id: string; kind: "connector"; from: AnnotationEnd; to: AnnotationEnd; label: string;
+      arrow: "none" | "end" | "both"; color: ColorKey };
 ```
 
-Presentation never affects `steps`, and `buildTraceView` ignores it except for service folding (07).
+- **Separate list, separate type.** A connector is never a `TraceEdge`, never in `steps`, never in totals, branches or candidates. Its provenance is "annotation" everywhere it's shown (05A draws it dashed; 09 and 11 label it).
+- **Ends survive deletion.** Removing a node or annotation that a connector points at turns that end into a `point` at the item's last position (04's updaters), so the investigator's line is never silently deleted.
+- **Pure helpers here** (`src/lib/trace/presentation.ts`): `emptyPresentation()`, `isColorKey`, `resolveEnd(end, positions, annotations)` → `Point | null`, and `detachEnds(presentation, removedIds, lastPositions)`. Editing UI is 05A; storage validation is 04.
+- The original plan's `pins` are gone: every placed node has a position, so "pinned" is the only state (D9).
 
 ## Prerequisites and Dependencies
 
@@ -192,29 +221,34 @@ Presentation never affects `steps`, and `buildTraceView` ignores it except for s
 
 ## Affected Modules and Proposed Files
 
-- **Proposed new:** `src/lib/trace/model.ts`, `src/lib/trace/view.ts`, `src/lib/trace/model.test.ts`, `src/lib/trace/view.test.ts`
+- **Proposed new:** `src/lib/trace/model.ts`, `src/lib/trace/view.ts`, `src/lib/trace/presentation.ts`, and a test file for each
 - **Existing, docs only:** `docs/TERMINOLOGY.md` (Trace section), `docs/ARCHITECTURE.md` (one paragraph: trace reads events, stores steps)
 
 ## Implementation Plan
 
 ### Task Group A — Model
 
-- [ ] Create `model.ts` with the types above
-- [ ] Implement `movementKey` and `keyedFlows`. The occurrence counter is per identical `(assetId, from, to, amount)` tuple in flow order.
-- [ ] Add `TRACE_SCHEMA_VERSION = 1`, `MAX_HOPS = 20`, `DEFAULT_MAX_HOPS = 6`
+- [x] Create `model.ts` with the types above
+- [x] Implement `movementKey` and `keyedFlows`. The occurrence counter is per identical `(assetId, from, to, amount)` tuple in flow order.
+- [x] Add `TRACE_SCHEMA_VERSION = 1`, `MAX_HOPS = 20`, `DEFAULT_MAX_HOPS = 6`
 
 ### Task Group B — View
 
-- [ ] Implement `buildTraceView`: resolve each movement step via `keyedFlows` of the current event; mark stale when the event is missing (`transaction_not_loaded`) or no flow has the key (`movement_changed`)
-- [ ] BFS depths from the seed; one node per address; `returns` flag
-- [ ] Group steps into edges by `(from, to)`; `bundled` when more than one step; BigInt totals per asset
-- [ ] Conversion steps: no edge; listed on their node (05 draws them as a badge)
-- [ ] Boundaries per node from `TraceEvidence` (rules above; `end_of_history` only with complete coverage)
-- [ ] `out_of_scope` issue when a step's asset or time falls outside the current scope (the step stays)
+- [x] Implement `buildTraceView`: resolve each movement step via `keyedFlows` of the current event; mark stale when the event is missing (`transaction_not_loaded`) or no flow has the key (`movement_changed`)
+- [x] BFS depths from the seed; one node per address; `returns` flag
+- [x] Group steps into edges by `(from, to)`; `bundled` when more than one step; BigInt totals per asset
+- [x] Conversion steps: no edge; listed on their node (05 draws them as a badge)
+- [x] Boundaries per node from `TraceEvidence` (rules above; `end_of_history` only with complete coverage)
+- [x] `out_of_scope` issue when a step's asset or time falls outside the current scope (the step stays)
+
+### Task Group B2 — Canvas model
+
+- [x] `presentation.ts`: types above, `emptyPresentation`, `isColorKey`, `resolveEnd`, `detachEnds`
+- [x] Tests: an end on a removed node becomes a point at its last position; an end on a missing item with no known position resolves to null (drawn as a dangling end, never dropped)
 
 ### Task Group C — Docs
 
-- [ ] Terminology and architecture paragraphs
+- [x] Terminology and architecture paragraphs
 
 ## UI Behavior and Example Scenarios
 
@@ -225,6 +259,7 @@ None visible this sprint.
 - No function here writes anything; all are pure.
 - Amounts are only summed as BigInt within one asset.
 - No step is dropped, merged or re-pointed by `buildTraceView`; stale and out-of-scope steps are reported, not removed.
+- `buildTraceView` output is identical whatever the presentation holds (apart from 07's service folding): positions, styles and annotations can't change nodes, edges, totals or boundaries (test).
 - Two flows with identical content in one event get distinct keys (`:0`, `:1`).
 
 ## Edge Cases and Failure Recovery
@@ -257,17 +292,38 @@ None visible this sprint.
 
 ## Acceptance Criteria (observable and measurable)
 
-- [ ] All tests above pass; `pnpm test`, `pnpm typecheck`, `pnpm lint` clean (results recorded here).
-- [ ] No production UI or storage change.
+- [x] All tests above pass; `pnpm test`, `pnpm typecheck`, `pnpm lint` clean (results recorded here).
+- [x] No production UI or storage change.
 
 ## Definition of Done
 
-- [ ] Types and functions merged with tests; terminology and architecture docs updated; validation recorded.
+- [ ] Types and functions merged (written with tests on `trace-graph`; awaiting review)
+- [x] Terminology and architecture docs updated; validation recorded.
 
 ## Known Risks / Open Decisions
 
 - If multi-event transactions arrive, `eventIndex` already covers them. The seed `transaction` kind then lists every event's flows.
 - Content keys can't distinguish two genuinely identical movements across reinterpretations if their order swaps. The impact is cosmetic (both identical), so it's accepted.
+
+## Implementation record (2026-10-10)
+
+**Files:** `src/lib/trace/model.ts`, `view.ts`, `presentation.ts`, `testing.ts` (builders for tests), and `model.test.ts`, `view.test.ts`, `presentation.test.ts`. Docs: `docs/TERMINOLOGY.md` (Trace Graph section), `docs/ARCHITECTURE.md` (Trace Graph model).
+
+**Validation:** `pnpm test` 28 files / 244 tests pass (22 new here); `pnpm typecheck` and `pnpm lint` clean. 500-step `buildTraceView`: median **0.69 ms** (budget 20 ms; Apple M5 Pro, Node 24.10). No production UI or storage change.
+
+**Deviations from the plan above, and why:**
+
+- `TraceNode.depth` is `number | null`: a node no step connects to the seed (after removing a middle step) has no hop count rather than a made-up one.
+- `TraceNode.conversions` lists conversion step ids, so 05 can draw the badge without searching steps.
+- `TraceIssue` gains `ignored` (`unknown_side`, `self_transfer`) for movement steps that can't be edges; the plan said "ignore with an issue" without a kind.
+- `out_of_scope` carries its reason (`asset`, `time`, `amount`, `hops`).
+- `BoundaryKind` adds `partial_history` (mapped, but loaded history incomplete: the plan had no honest kind for it), and, from Sprint 03's fixtures, `entered_supply` and `bridged_in`.
+- Coverage boundaries (`history_not_loaded`, `partial_history`, `end_of_history`) are set only on frontier nodes, where the trace currently ends in its direction; otherwise every mapped wallet mid-path would read "end of history". `custodial` applies anywhere.
+- Event-derived boundaries (failed, burned, bridged, position) aren't set by `buildTraceView`; they come from the movement index (03) and 06 attaches them.
+- Seed roots: the address; a seeded movement's sender (receiver if unknown); a seeded transaction's senders among its steps.
+- `returns` uses signed depth: value flows from lower to higher depth in both directions (0 → 1 forward, −1 → 0 backward), so an edge is a return when its receiver's depth is lower than its sender's.
+- Steps order by slot then key in the view (`compareRefs`); refs don't carry the in-slot transaction index. Exact chronological order lives in 03's index.
+
 
 ## Handoff Notes for the Next Sprint
 

@@ -81,7 +81,8 @@ Traces get shared with colleagues, exchanges and law enforcement. An export has 
 - `analysis` values come from `analysisVersions()` at export time (the numbers above are placeholders).
 - `steps` always contains **every** step, including hidden-branch and stale ones (with `status: "stale" | "hidden_branch" | "ok"`). Hiding affects the picture, not the record.
 - `labels` is present only when the user ticks "Include my labels". Registry names are included as public attribution under each address in an `attribution` field (registry, protocol name, registry version).
-- Never included: RPC URL, raw transactions, balances, other traces, cases' hide rules or bookmarks, pins (layout is presentation; an optional `layout` block may hold pins for "reopen exactly as I saw it", off by default).
+- Never included: RPC URL, raw transactions, balances, other traces, cases' hide rules or bookmarks.
+- Included as a separate `canvas` block, clearly marked "investigator presentation, not evidence": positions, node styles and annotations (D8/D9). Without it an imported trace would lose the investigator's diagram. Annotations are listed apart from steps in the JSON and drawn in the PNG with a legend entry "Dashed lines and notes are the investigator's annotations".
 
 ### Import
 

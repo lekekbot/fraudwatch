@@ -155,6 +155,15 @@ Each statement either holds (✓) or names something missing (?), so uncertainty
 
 The event inspector's **Developer details** shows, for the selected transaction: every version above, the interpreters considered and their outcome, registry matches, and the canonical transaction, this wallet's effect and summary, the semantic event and its behaviour observations side by side. **Copy debug bundle** puts all of that on the clipboard as JSON (public chain data and FraudWatch's reading of it; no RPC URL, no labels).
 
+## Trace Graph model (`src/lib/trace/`)
+
+A trace reads the semantic model and stores only the investigator's decisions. Planned in `docs/sprints/trace-graph/`; the model (Sprint 02) and movement index (Sprint 03) exist, with no UI or storage yet.
+
+- **Steps reference movements by content** (`movementKey`, `keyedFlows` in `model.ts`): signature, event index, asset, owners, amount and an occurrence counter. Nothing from the transaction is copied. `buildTraceView` (`view.ts`) re-resolves every step against the current events each time; a step whose movement is gone or changed is reported stale and kept, never re-pointed.
+- **Classification** (`classifyEvent`, `movements.ts`): each flow is a primary or supporting movement, part of a conversion, a boundary, or excluded (settlement, zero, bridge cost). The network fee is never a flow. `buildMovementIndex` builds per-address chronological lists once; `candidates` filters and pages them.
+- **Presentation is separate** (`presentation.ts`): node positions, styles and annotations (notes, shapes, user connectors) are the investigator's diagram, never evidence. `buildTraceView` doesn't read them.
+- No trace operation issues an RPC request; continuing past an unloaded address means mapping it.
+
 ## Where work runs
 
 Interpretation, observation and graph building run once per case open in memoised workspace state (`case-shell.tsx`), and again only when their inputs change (new transactions, NFT metadata arriving, filters for the graph). Nothing semantic runs in React render, canvas draw, hover or zoom handlers.

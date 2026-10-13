@@ -65,7 +65,7 @@ Targets are starting points. Record the measured value next to each; tests asser
 ### Rules
 
 - The movement index is built once per case open while the trace view is active, and rebuilt only when `semanticEvents` changes.
-- Presentation changes (pin, expand service, hide branch, zoom, theme) never rebuild the index; only view and layout as needed.
+- Presentation changes (move, style, annotation edits, expand service, hide branch, zoom, theme) never rebuild the index; only view and layout as needed.
 - The candidate panel virtualises nothing beyond paging (50); if a page renders slowly, reduce the page size before adding a virtualisation dependency.
 - Canvas culling and label-hiding thresholds come from measurements.
 

@@ -69,6 +69,7 @@ import { SearchDialog } from "./search-dialog";
 import { assetLabel, assetLogo, formatAssetAmount, formatUtcMinute } from "./asset-format";
 import { copy } from "./timeline/inspector-ui";
 import { TransactionDetails } from "./timeline/transaction-details";
+import { TraceView } from "./trace/trace-view";
 import { type TableNav, type TableSide, WalletStateSummary, WalletStateTable } from "./wallet-state-view";
 
 /** Most counterparties whose .sol names are looked up per case, busiest first. */
@@ -1139,6 +1140,8 @@ function CaseWorkspace({ c, prefs, rpc, rpcKnown }: { c: FraudWatchCase; prefs: 
           onDateRangeChange={(dateRange) => updateFilter({ ...filter, dateRange })}
           overviewTimes={overviewTimes}
         />
+      ) : view === "trace" ? (
+        <TraceView />
       ) : (
         // Every shown lane, like the timeline and graph, through the same filters.
       <WalletStateTable
@@ -1235,7 +1238,7 @@ function CaseWorkspace({ c, prefs, rpc, rpcKnown }: { c: FraudWatchCase; prefs: 
 
         {walletState && (
           <div className="absolute left-1/2 flex -translate-x-1/2 rounded-lg border p-0.5" role="group" aria-label="View">
-            {(["timeline", "graph", "table"] as const).map((v) => (
+            {(["timeline", "graph", "table", "trace"] as const).map((v) => (
               <Button
                 key={v}
                 size="xs"
@@ -1253,7 +1256,7 @@ function CaseWorkspace({ c, prefs, rpc, rpcKnown }: { c: FraudWatchCase; prefs: 
                   }
                 }}
               >
-                {v === "timeline" ? "Timeline" : v === "graph" ? "Graph" : "Table"}
+                {v === "timeline" ? "Timeline" : v === "graph" ? "Graph" : v === "table" ? "Table" : "Trace"}
               </Button>
             ))}
           </div>

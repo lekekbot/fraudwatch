@@ -1,6 +1,6 @@
 # Sprint 03 — Transaction and Movement Semantics
 
-**Status:** Planned
+**Status:** Implemented on `trace-graph` (2026-10-10), awaiting review
 **Depends on:** 02
 
 ## Summary and Why It Matters
@@ -141,25 +141,25 @@ export function candidates(index: MovementIndex, q: CandidateQuery, page: { curs
 
 ### Task Group A — Classification
 
-- [ ] Implement `classifyEvent` per the table, using `keyedFlows` for refs
-- [ ] Pair conversions: group `spent` and `received` flows by actor (the address on the non-null side); an actor with both → conversion; only spent → boundary per category
-- [ ] Bridge OUT/IN from `event.bridge`
-- [ ] Unit-test each row with `makeTx` or a fixture
+- [x] Implement `classifyEvent` per the table, using `keyedFlows` for refs
+- [x] Pair conversions: group `spent` and `received` flows by actor (the address on the non-null side); an actor with both → conversion; only spent → boundary per category
+- [x] Bridge OUT/IN from `event.bridge`
+- [x] Unit-test each row with `makeTx` or a fixture
 
 ### Task Group B — Index and candidates
 
-- [ ] `buildMovementIndex` with chronological arrays and `bySignature`
-- [ ] `candidates` with scope, order bounds, exclusions, supporting toggle, hidden marking, completeness, paging
-- [ ] Deterministic sort: order, then movement key
+- [x] `buildMovementIndex` with chronological arrays and `bySignature`
+- [x] `candidates` with scope, order bounds, exclusions, supporting toggle, hidden marking, completeness, paging
+- [x] Deterministic sort: order, then signature, keeping one transaction's legs in flow order (changed; see the implementation record)
 
 ### Task Group C — Fixture tests for representative flows
 
-- [ ] F1 `basic/sol-transfer.json`: one primary movement, correct direction and amount
-- [ ] F3 `nft-sale/transaction.json` and `magic-eden-sale/`: payment and nft primary; royalty and fee supporting; one signature group; `reconciles()` still true for the event
-- [ ] F4 `defi/jupiter-multi-hop.json`: one conversion on the trader; no pool appears as a movement endpoint
-- [ ] F7 synthetic: OBSERVED node → `partial_history`; failed fixture → boundary `failed`
-- [ ] CCTP burn fixture → `bridged_out` with destination chain
-- [ ] Kamino deposit → `protocol_position`
+- [x] F1 `basic/sol-transfer.json`: one primary movement, correct direction and amount
+- [x] F3 `nft-sale/transaction.json` and `magic-eden-sale/`: payment and nft primary; royalty and fee supporting; one signature group; `reconciles()` still true for the event
+- [x] F4 `defi/jupiter-multi-hop.json`: one conversion on the trader; no pool appears as a movement endpoint
+- [x] F7 synthetic: OBSERVED node → `partial_history`; failed fixture → boundary `failed`
+- [x] CCTP burn fixture → `bridged_out` with the movement ref; the destination chain and remote address are read from the event's `bridge` envelope by signature, not copied into the boundary
+- [x] Kamino deposit → **conversion** (it returns a receipt token); Kamino repay → `protocol_position` (changed; see the implementation record)
 
 ## UI Behavior and Example Scenarios
 
@@ -195,18 +195,57 @@ None visible. Example query: forward from B after the step A→B at order 1,204,
 
 ## Acceptance Criteria (observable and measurable)
 
-- [ ] Every classification row has a passing test.
-- [ ] Index and candidate budgets met (numbers recorded).
-- [ ] `pnpm test`, `pnpm typecheck`, `pnpm lint` clean.
+- [x] Every classification row has a passing test.
+- [x] Index and candidate budgets met (numbers recorded).
+- [x] `pnpm test`, `pnpm typecheck`, `pnpm lint` clean.
 
 ## Definition of Done
 
-- [ ] Module and tests merged; results recorded; no UI or storage change.
+- [ ] Module and tests merged (written and validated on `trace-graph`; awaiting review)
+- [x] Results recorded; no UI or storage change.
 
 ## Known Risks / Open Decisions
 
 - **Bridge IN origin**: shown as an off-chain source node labelled with the source chain. Confirm wording in 05.
 - Whether supporting movements should be addable at all in MVP. Recommended yes, behind "Show fees, royalties and rent".
+
+## Implementation record (2026-10-10)
+
+**Files:** `src/lib/trace/movements.ts` (`classifyEvent`, `chronologicalOrder`, `buildMovementIndex`, `candidates`), `movements.test.ts`. No new fixture files: every recorded row uses existing fixtures; synthetic cases are named as such.
+
+**Validation:** `pnpm test` 28 files / 244 tests pass (19 new here); `pnpm typecheck` and `pnpm lint` clean. Medians on Apple M5 Pro, Node 24.10, synthetic 10 wallets / 5,000 transactions / 15,000 flows: index build **9.8 ms** (budget 150 ms); candidate page of 50 from an address with 5,000 movements **0.27 ms** (budget 5 ms).
+
+**Classification as built** (the table above, corrected against real fixtures):
+
+| Flow | Result | Fixture |
+|---|---|---|
+| Plain transfer, both sides | movement, primary | `basic/sol-transfer`, `basic/spl-transfer`, `cnft/transfer` |
+| NFT `payment`, `nft` | movement, primary | `magic-eden-sale`, `nft-sale` (Tensor) |
+| `royalty`, `marketplace_fee`, `rent`, `unidentified` | movement, supporting | `magic-eden-sale` (5 legs), `nft-sale` (royalty to the creator) |
+| `spent` + `received` by one actor | conversion | `jupiter-multi-hop`, `marinade-deposit`, **`kamino-deposit`** |
+| Only `spent`, or only `received`, in STAKE / UNSTAKE / LENDING / LIQUIDITY | boundary `protocol_position` | `kamino-repay`, **`marginfi-borrow`**, **`sanctum-unstake`** |
+| Only one side elsewhere | boundary `ambiguous` | synthetic |
+| BRIDGE OUT `spent` | boundary `bridged_out` (with ref) | `cctp-v1-burn`, `relay-deposit-native` |
+| BRIDGE IN `received` | boundary **`bridged_in`**; the actor's own `spent` excluded as `bridge_cost` | **`cctp-v2-receive`** |
+| BURN, receiver unknown | boundary `left_supply` | synthetic |
+| `nft` with no sender (mint) | boundary **`entered_supply`** | **`cnft/mint-v2`** |
+| No role, one side unknown | boundary `ambiguous` | synthetic |
+| `settlement`; amount 0 | excluded | many; synthetic |
+| FAILED | boundary `failed` on the fee payer, nothing else | `basic/failed` |
+
+**Deviations from the plan above, and why:**
+
+- **Receipt-token deposits are conversions.** The plan put LENDING deposits under `protocol_position`, but Kamino's deposit returns a collateral token (SOL + USDC → kToken). Treating it as a position would hide that the asset under the trace changed. Only a one-way spend (a repay) is a position.
+- **Received-only is a position too.** Borrows, stake sales and instant unstakes bring value out of a position with no spend; backward tracing stops there.
+- **Bridge events have their own rule.** The CCTP receive fixture has the recipient spending SOL (account rent) alongside the arrival; the generic rule would have called it a USDC ↔ SOL conversion. Bridge IN is a `bridged_in` boundary (new kind: the origin is off Solana), and what the crossing cost is excluded as `bridge_cost`.
+- **Mints have no sender**, so they're `entered_supply` (new kind) rather than a movement with a null side.
+- `CandidateQuery` takes `loaded: { complete, start, end } | null` and `caseRange` explicitly; completeness compares the scope with the range the wallet was **loaded for** (a wallet mapped from its first interaction has no earlier history), not with its oldest loaded transaction.
+- `after`/`before` are inclusive, so another leg of the arrival's own transaction is still offered (the arrival itself is excluded by key).
+- Legs of one transaction keep their flow order (payment before fees); the plan's "order, then key" would have sorted them by asset name.
+- `Candidate` includes its `order`, which 06 needs to set the next `after`.
+
+**Known limitation surfaced:** in `kamino-via-other-program`, plain flows to and from a Kamino vault become primary movements with the vault as counterparty (open issue 5.1: thin vault registry). Sprint 07's infrastructure handling is where to fix it.
+
 
 ## Handoff Notes for the Next Sprint
 

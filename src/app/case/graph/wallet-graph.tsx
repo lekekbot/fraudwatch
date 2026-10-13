@@ -393,7 +393,9 @@ export function WalletGraph({
           const tangent = pathTangent(segment, progress);
           const length = Math.hypot(tangent.x, tangent.y) || 1;
           const node = nodesById.get(end === "a" ? edge.a : edge.b);
-          const gap = (node ? drawnRadius(node, layoutRoles) : 8) + 6 / t.k;
+          // Seated outside the primary's halo and any look-alike ring, so neither hides it.
+          const ring = node?.id === primaryWallet ? 8 : node && names.lookalikes(node.id).length > 0 ? 5 : 0;
+          const gap = (node ? drawnRadius(node, layoutRoles) + ring : 8) + 6 / t.k;
           const sign = end === "a" ? 1 : -1;
           const anchor = end === "a" ? from : to;
           return { x: anchor.x + (tangent.x / length) * gap * sign, y: anchor.y + (tangent.y / length) * gap * sign };

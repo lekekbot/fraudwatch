@@ -1,6 +1,6 @@
-export type CaseView = "timeline" | "graph" | "table";
+export type CaseView = "timeline" | "graph" | "table" | "trace";
 
-const VIEWS: CaseView[] = ["timeline", "graph", "table"];
+const VIEWS: CaseView[] = ["timeline", "graph", "table", "trace"];
 
 export function parseCasePath(pathname: string): { caseId: string; view: CaseView; wallet: string | null } {
   const [, caseId = "", view, wallet] = pathname.split("/").filter(Boolean);

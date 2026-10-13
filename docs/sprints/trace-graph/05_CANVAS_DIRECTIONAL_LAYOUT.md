@@ -1,26 +1,27 @@
-# Sprint 05 — Canvas and Directional Layout
+# Sprint 05 — Canvas and Free Placement
 
 **Status:** Planned
-**Depends on:** 02, 03 (04 for saved pins; stub with in-memory pins if 04 isn't merged)
+**Depends on:** 02, 03 (04 for saved positions; stub with in-memory positions if 04 isn't merged)
+
+*Revised 2026-10-10 for D9 (free placement). The original column-by-hop layout with pins is replaced; the file name is kept so links stay valid.*
 
 ## Summary and Why It Matters
 
-The trace must read left to right as "earlier hop → later hop" without suggesting more certainty than the data has. This sprint builds the renderer and a deterministic, incremental column layout. Adding a branch must not reshuffle what the investigator has already read, and pinned nodes must never move.
+The trace is the investigator's diagram. Like draw.io, whatever they arrange stays exactly where they put it, and nothing they've read moves on its own. This sprint builds the renderer and editing basics for evidence: auto-placing new nodes beside their source, dragging, multi-select, grid and snap, Tidy layout on request, and the visual language that keeps the picture honest about what it shows. Annotations (notes, shapes, connectors) are 05A, on this canvas.
 
 ## Verified Current Repository Findings
 
 ### Existing capabilities
 
-- `wallet-graph.tsx`: Canvas 2D, d3-zoom (`zoom`, `zoomIdentity`), d3-selection; `positions` held in a ref; layout via `layoutGraph`; hit testing on pointer events; hover cards; arrowheads sized by zoom; semantic zoom tiers (`zoomTier`); fit animation; wheel handling via `graphWheelAction` (`src/lib/gestures.ts`).
-- Shared canvas helpers: `readPalette(el, vars)` reads CSS variables (theme-aware), `sizeCanvas` (DPR), `horizontalZoom` (`src/app/case/canvas.ts`).
+- `wallet-graph.tsx`: Canvas 2D, d3-zoom (`zoom`, `zoomIdentity`), d3-selection; positions held in a ref; hit testing on pointer events; hover cards; arrowheads sized by zoom; semantic zoom tiers (`zoomTier`); fit animation; wheel handling via `graphWheelAction` (`src/lib/gestures.ts`).
+- Shared canvas helpers (`src/app/case/canvas.ts`): `readPalette(el, vars)` reads CSS variables (theme-aware), `onThemeChange` (redraw on theme changes, including the Global Preferences theme setting), `sizeCanvas` (DPR), `horizontalZoom`.
 - `nodeRadius`, `hashId` in `src/lib/graph/layout.ts`.
 - Names: `names.of(address)`; graph-specific `withGraphNames` for entity and burn nodes.
-- Theme today follows `prefers-color-scheme` (`globals.css`); the timeline redraws on `matchMedia` change (`timeline-canvas.tsx:898`).
 - Known defect to avoid: `wallet-graph.tsx` discards dragged positions whenever its layout recomputes.
 
 ### Gaps and limitations
 
-- No column/layered layout code. No minimap for graphs (the timeline has one: `timeline-minimap.tsx`). No keyboard node navigation on canvases.
+- No layered layout code, no multi-select or marquee on any canvas, no keyboard node navigation on canvases, no graph minimap.
 
 ### Assumptions requiring confirmation
 
@@ -28,104 +29,121 @@ The trace must read left to right as "earlier hop → later hop" without suggest
 
 ## Objectives and User Outcomes
 
-- A trace drawn in columns by hop: seed in the middle (or left for forward-only), backward to the left, forward to the right.
-- Stable positions: an expansion only places new nodes; existing nodes stay; pinned nodes never move.
+- Every node stays where the investigator puts it, across edits, reloads and expansions.
+- Adding movements places new nodes in a readable spot (beside their source, forward to the right, backward to the left) without touching anything already placed.
+- Drag one or many nodes, snap to a grid if wanted, and tidy the whole diagram on request (undoable in 08).
 - Edges show direction, amount and time compactly, with bundled counts, return edges and boundary markers.
 
 ## In Scope
 
-- `src/lib/trace/layout.ts`: pure incremental layered layout
-- `src/app/case/trace/trace-canvas.tsx`: rendering, pan/zoom/fit, selection, hover, drag-to-pin, keyboard navigation
-- Visual language for provenance, boundaries, conversions, staleness
+- `src/lib/trace/layout.ts`: pure `autoPlace` (new nodes only), `tidyLayout` (explicit), snapping
+- `src/app/case/trace/trace-canvas.tsx`: rendering, pan/zoom/fit, selection (click, Shift-click, marquee), hover, drag and multi-drag, grid and snap, keyboard navigation
+- Visual language for provenance, boundaries, conversions, staleness, node colour and size (`NodeStyle`)
 
 ## Explicitly Out of Scope
 
-- Candidate UI and trace editing (06), service folding visuals (07; this sprint draws plain nodes), branch hide/focus (08), the inspector (09), minimap (only if 10's measurements show a need)
+- Notes, shapes, frames and user connectors (05A). Candidate UI and trace editing (06). Service folding visuals (07; this sprint draws plain nodes). Branch hide/focus and undo/redo (08). The inspector (09). Minimap (only if 10's measurements show a need).
 
 ## Architecture / Data Contracts / UX Decisions
 
-### Layout (`src/lib/trace/layout.ts`)
+### Placement (`src/lib/trace/layout.ts`)
 
 ```ts
-export type TraceLayoutInput = {
+export type PlaceInput = {
   view: { nodes: TraceNode[]; edges: TraceEdge[] };   // from buildTraceView
-  previous: ReadonlyMap<string, Point>;               // last positions (for stability)
-  pins: Readonly<Record<string, Point>>;
+  positions: Readonly<Record<string, Point>>;         // presentation.positions: placed nodes
+  obstacles: readonly Rect[];                         // annotation bounds (05A), so new nodes don't land under a note
   spacing: { column: number; row: number };           // defaults 240, 72
+  grid: number | null;                                // snap size when snap is on
 };
-export function layoutTrace(input: TraceLayoutInput): Map<string, Point>;
+/** Positions for nodes not yet placed. Placed nodes are never in the result. */
+export function autoPlace(input: PlaceInput): Record<string, Point>;
+/** Every evidence node, rearranged. Only called from the Tidy layout action. */
+export function tidyLayout(input: PlaceInput): Record<string, Point>;
+export function snap(p: Point, grid: number): Point;
 ```
 
-- **x = column = depth × column width.** Depth comes from the view (negative left, positive right). Time is not the x-axis: edges carry their time, and an optional "time order" hint (a small ordinal) when two edges leave one node.
-- **y:** a new node is placed next to its parent's y (first free slot below the parent's existing children in that column, sorted by edge order). Existing nodes keep `previous` positions; pinned nodes use `pins`.
-- **Collisions:** only newly placed nodes are moved to free slots; existing ones never are.
-- **Reset layout** (explicit button): recompute every unpinned node from scratch (barycentric ordering per column to reduce crossings, a few sweeps, deterministic tie-break by id). Pinned nodes stay.
+- **Auto-place:** a new node goes beside the placed node it was reached from: `+column` in x for a forward step, `−column` for a backward one, at the parent's y, then the first free slot down (then up) at `row` intervals that doesn't overlap a placed node or obstacle. Several new nodes from one parent are placed in edge order (earliest movement first). The seed of an empty trace goes at the origin. Every result is written to `positions` in the same save as the step (06), so a node is placed exactly once.
+- **Placed nodes never move** except by the investigator: drag, arrow-key nudge, or Tidy layout.
+- **Tidy layout** (toolbar button): a layered arrangement by depth (backward left of the seed, forward right), barycentric ordering per column to reduce crossings, a few sweeps, ties by id. It moves evidence nodes only; annotations stay put (connectors follow their ends). One undo entry (08).
 - **Determinism:** same input → same output (no randomness; ties by id).
+- Time is not an axis. Edges carry their time; the caption says lines don't mean the same funds (R2).
 
 ### Rendering (`trace-canvas.tsx`)
 
 | Element | Drawing |
 |---|---|
-| Node | Rounded rectangle, name (`names.of`) and short address; seed has a distinct outline and a "Seed" tag; OBSERVED/MAPPED shown by a small marker, as in the address panel |
-| Edge | Curved left-to-right line with an arrowhead **at the receiving end**; label `12.5 SOL · 3 Mar 14:02` (asset label via `assetLabel`, full precision trimmed of trailing zeros; inspectors show the exact amount) |
+| Node | Rounded rectangle, name (`names.of`) and short address; `NodeStyle.color` tints the fill from the palette, `size` scales it; seed has a distinct outline and a "Seed" tag; OBSERVED/MAPPED shown by a small marker, as in the address panel; a note icon when `NodeStyle.note` is set |
+| Edge | Curved line between node borders with an arrowhead **at the receiving end**; label `12.5 SOL · 3 Mar 14:02` (asset label via `assetLabel`, full precision trimmed of trailing zeros; inspectors show the exact amount). Solid, evidence colour |
 | Bundled edge | One line, label `3 movements · 12.5 SOL total` (multi-asset: `2 assets`) |
-| Return edge (`returns`) | Routed below the columns back to the earlier node, dashed, labelled "returns" |
+| Return edge (`returns`) | Same line, labelled "returns" (with free placement there's no column to route under) |
 | Conversion | A badge on the node: `USDC → SOL` |
-| Boundary | A small terminal marker on the node's outgoing side (forward) or incoming side (backward), icon and text: "History not loaded", "Outside case range", "Custodial", "Ambiguous", "Failed", "Burned", "Bridged out", "Position", "End of history" |
+| Boundary | A small terminal marker on the node, icon and text: "History not loaded", "Outside case range", "Custodial", "Ambiguous", "Failed", "Burned", "Bridged out", "Position", "End of history" |
 | Stale step | Edge drawn with a warning colour and ⚠ in its label |
 | Supporting movement | Thinner line, label prefixed with its role ("royalty") |
+| Grid | Faint dots at the grid size when `canvas.grid` is on |
 
 A permanent, quiet caption in the corner: **"Observed movements in time order. Lines don't show that the same funds moved."** It links to the limitations section (13).
 
-- Colours come from CSS variables through `readPalette`. Never hard-code theme colours. Redraw on theme change as the timeline does.
+- Evidence edges are always solid and use the evidence palette. Dashed lines are reserved for annotations (05A), so the two can't be confused (R5).
+- Colours come from CSS variables through `readPalette`; `ColorKey`s map to palette variables. Never hard-code theme colours. Redraw through `onThemeChange`.
 - Labels are hidden below a zoom threshold (as with `zoomTier`), and edges keep arrowheads at every zoom. Hovering shows the full label.
-- Drag a node → on drop, `setPin(trace, id, point)`. A double-click (or the context menu in 06) unpins it.
-- Reduced motion: no tweening of new nodes (`prefers-reduced-motion`). With motion, new nodes fade in (≤ 200 ms) and existing ones never animate.
+- Reduced motion: no tweening (`prefers-reduced-motion`). With motion, new nodes fade in (≤ 200 ms) and placed ones never animate except during Tidy layout (≤ 300 ms).
+
+### Selection and editing
+
+- Click selects; Shift-click adds or removes; dragging on empty canvas draws a marquee (Space-drag or two-finger swipe pans, as `graphWheelAction`). Selection can hold nodes and, from 05A, annotations.
+- Dragging a selected item moves the whole selection; with `canvas.snap`, positions snap to the grid on drop. On drop, one `setPositions` save (04).
+- Arrow keys nudge the selection by 1 px (10 px with Shift) when the canvas is in edit focus; otherwise they navigate (below).
+- Delete/Backspace on evidence asks (06 wires removal of steps); on annotations it deletes them (05A).
 
 ### Interaction contract
 
 ```ts
+type Selection = { nodes: string[]; edges: string[]; annotations: string[] };
 type TraceCanvasProps = {
-  view: TraceView; positions: Map<string, Point>; names: Names; assets: Assets;
-  selected: { kind: "node" | "edge"; id: string } | null;
-  onSelect(sel: TraceCanvasProps["selected"]): void;
-  onPin(nodeId: string, point: Point | null): void;
-  onOpenMenu(target: { kind: "node" | "edge"; id: string }, at: Point): void;   // 06 renders the menu
+  view: TraceView; presentation: TracePresentation; names: Names; assets: Assets;
+  selection: Selection;
+  onSelect(sel: Selection): void;
+  onMove(positions: Record<string, Point>, annotationMoves: Record<string, Point>): void;   // on drop
+  onOpenMenu(target: { kind: "node" | "edge" | "annotation" | "canvas"; id?: string }, at: Point): void;   // 06/05A render the menu
 };
 ```
 
-Keyboard: the canvas is focusable. Arrow keys move selection along edges (→ next hop, ← previous hop, ↑/↓ siblings in a column), Enter opens the inspector, `F` fits, `0` resets zoom, Shift+F10 / the context-menu key opens the menu. A visually hidden live region announces the selected node or edge in words ("B, 2 hops forward, received 12 SOL from A on 3 March").
+Keyboard: the canvas is focusable. Without edit focus, arrow keys move selection along edges (→ next hop, ← previous hop, ↑/↓ the nearest node above/below), Enter opens the inspector, `F` fits, `0` resets zoom, Shift+F10 / the context-menu key opens the menu. A visually hidden live region announces the selection in words ("B, 2 hops forward, received 12 SOL from A on 3 March").
 
 ### Route
 
-`CaseView` gains `"trace"`: `/case/<id>/trace/<traceId?>`. `isCaseRoute` accepts an optional trace id segment only for `trace`. The tab isn't added to the view switcher until 06 (MVP), so nothing half-built is reachable from the UI.
+`CaseView` gains `"trace"`: `/case/<id>/trace/<traceId?>`. `isCaseRoute` accepts an optional trace id segment only for `trace`.
+
+**Done early (2026-10-10, at the product owner's request):** `trace` is a `CaseView` and the **Trace** tab sits after Table in the view switcher, showing a "coming soon" placeholder (`src/app/case/trace/trace-view.tsx`). This sprint replaces the placeholder with the canvas and adds the optional trace id segment.
 
 ## Prerequisites and Dependencies
 
-02 (view model), 03 (fixtures for realistic views), 04 (pins; optional stub).
+02 (view and canvas model), 03 (fixtures for realistic views), 04 (saved positions; optional stub).
 
 ## Affected Modules and Proposed Files
 
-- **Existing:** `src/lib/routing/case-path.ts` (+ its tests if added), `src/app/case/case-shell.tsx` (render the trace view for `view === "trace"`)
-- **Proposed new:** `src/lib/trace/layout.ts`, `src/lib/trace/layout.test.ts`, `src/app/case/trace/trace-canvas.tsx`, `src/app/case/trace/trace-view.tsx` (container: reads the trace, builds the view, holds positions)
+- **Existing:** `src/lib/routing/case-path.ts` and `case-path.test.ts`, `src/app/case/case-shell.tsx` (render the trace view for `view === "trace"`)
+- **Proposed new:** `src/lib/trace/layout.ts`, `src/lib/trace/layout.test.ts`, `src/app/case/trace/trace-canvas.tsx`, `src/app/case/trace/trace-view.tsx` (container: reads the trace, builds the view, saves positions)
 
 ## Implementation Plan
 
-### Task Group A — Layout
+### Task Group A — Placement
 
-- [ ] `layoutTrace` with stable placement, pins, collision handling for new nodes only
-- [ ] `resetLayout` (barycentric sweeps, deterministic)
+- [ ] `autoPlace` (new nodes only; avoids placed nodes and obstacles), `snap`
+- [ ] `tidyLayout` (layered, barycentric sweeps, deterministic)
 - [ ] Tests (below)
 
 ### Task Group B — Canvas
 
 - [ ] Canvas sizing with `sizeCanvas`; zoom and pan with d3-zoom; wheel via `graphWheelAction`
-- [ ] Draw nodes, edges, bundled and return edges, conversions, boundaries, stale steps, the caption
+- [ ] Draw nodes (with `NodeStyle`), edges, bundled and return edges, conversions, boundaries, stale steps, grid, the caption
 - [ ] Hit testing for nodes and edges (reuse the approach in `wallet-graph.tsx`); hover card with the full label
-- [ ] Drag to pin; unpin
-- [ ] Fit to trace; reset layout button
+- [ ] Selection: click, Shift-click, marquee; drag and multi-drag; snap on drop; arrow-key nudge
+- [ ] Fit to trace; Tidy layout button; grid and snap toggles
 - [ ] Keyboard navigation and live region; reduced motion
-- [ ] Theme redraw
+- [ ] Theme redraw via `onThemeChange`
 
 ### Task Group C — Route
 
@@ -133,51 +151,56 @@ Keyboard: the canvas is focusable. Arrow keys move selection along edges (→ ne
 
 ## UI Behavior and Example Scenarios
 
-- F1: seed A in column 0, B in column 1, edge "12 SOL · 3 Mar 14:02", B shows "History not loaded".
-- F6 A→B→C→A: A(0), B(1), C(2); dashed return edge C→A under the columns.
+- F1: seed A at the origin, B auto-placed to its right, edge "12 SOL · 3 Mar 14:02", B shows "History not loaded". Drag B below A, reload: B is still below A.
+- F6 A→B→C→A: B and C placed right of A in turn; the C→A edge is labelled "returns".
 - F8 five A→B transfers added: one bundled edge "5 movements · 40 SOL total".
+- Marquee B and C, drag them down 200 px with snap on: both land on grid points, one save.
+- Tidy layout on a messy 20-node trace: layered left to right; Undo (08) restores every position.
 
 ## Evidence / Data Integrity Invariants
 
 - Arrow direction always equals `from → to` of the underlying movement, regardless of trace direction (a backward trace still points arrows toward the receiver).
 - Labels never show a total across different assets.
-- Layout and pins never alter steps.
+- Moving, styling or tidying never alters steps (positions and styles are presentation).
+- An auto-placed node never overlaps a placed node or annotation (test); a placed node never moves without a user action (test).
 
 ## Edge Cases and Failure Recovery
 
 - An empty trace (seed only): one node, centred; hint text "Add a movement to start" (06 wires the action).
 - Very long names: truncated with an ellipsis on canvas; full in hover and inspector.
-- A node pinned off-screen: fit includes pinned nodes.
-- A pin that refers to a node no longer in the view: ignored at draw; pruned on next save (04).
+- Fit includes every node and annotation, wherever placed.
+- A position for a node no longer in the view: ignored at draw; pruned on the next save that removes steps (04).
+- A node with no position (e.g. a trace from an older build or an import without a canvas block): auto-placed on open and saved.
 - Viewport resize: positions are in world coordinates, so only the transform changes.
 
 ## Performance Considerations
 
 - Draw only in `requestAnimationFrame` when something changed (the pattern in `timeline-canvas.tsx`).
-- Cull nodes and edges outside the viewport. Target **60 fps pan at 300 nodes / 600 edges** on the developer machine; record the measured number (10 refines).
-- Layout of 300 nodes incremental **< 5 ms**, reset **< 50 ms** (test with a synthetic labelled view).
+- Cull nodes, edges and annotations outside the viewport. Target **60 fps pan and drag at 300 nodes / 600 edges / 200 annotations** on the developer machine; record the measured number (10 refines).
+- `autoPlace` for 20 new nodes into a 300-node trace **< 5 ms**; `tidyLayout` of 300 nodes **< 50 ms** (test with a synthetic labelled view).
 
 ## Tests and Fixtures to Add
 
-- `layout.test.ts`: determinism; adding a branch leaves every existing node's position unchanged; pinned nodes never move (including on reset); backward nodes have negative x; return edges don't create new columns; collisions resolved only for new nodes.
+- `layout.test.ts`: determinism; adding nodes leaves every placed position unchanged; new nodes never overlap placed nodes or obstacles; forward children right of the parent, backward children left; several children stack in edge order; `tidyLayout` puts backward nodes left of the seed and is deterministic; `snap` rounds to the grid.
 - `case-path` tests: `/case/x/trace/` and `/case/x/trace/<id>/` parse; a trace id on other views is rejected.
-- Browser: F1, F6 and F8 synthetic traces render as described; keyboard navigation reaches every node; theme switch recolours; reduced motion has no tweening.
+- Browser: F1, F6 and F8 synthetic traces render as described; drag, multi-drag, marquee and snap persist across reload; keyboard navigation reaches every node; theme switch recolours; reduced motion has no tweening.
 
 ## Acceptance Criteria (observable and measurable)
 
 - [ ] No arrow points against its movement (test over generated views: every edge's arrow end = `to`).
-- [ ] Zero position change for existing nodes after an expansion (test).
+- [ ] Zero position change for placed nodes after adding movements (test).
+- [ ] Positions survive reload (browser).
 - [ ] Performance numbers recorded against the targets above.
 - [ ] Interaction Graph and Timeline unchanged (visual check; no edits to their files except `case-shell.tsx` routing).
 
 ## Definition of Done
 
-- [ ] Layout and canvas merged with tests; browser checks recorded; validation commands pass.
+- [ ] Placement and canvas merged with tests; browser checks recorded; validation commands pass.
 
 ## Known Risks / Open Decisions
 
-- Column-by-hop can put a later-in-time movement left of an earlier one across branches. The edge time labels and the caption carry chronology. Revisit with users after MVP.
+- Free placement doesn't encode time, so a later movement can sit left of an earlier one. Edge time labels and the caption carry chronology; Tidy layout gives an ordered starting point.
 
 ## Handoff Notes for the Next Sprint
 
-06 adds the toolbar, trace list, seed dialog, candidate panel and context menu around this canvas.
+05A adds notes, shapes, frames and user connectors to this canvas and its selection model. 06 adds the toolbar, trace list, seed dialog, candidate panel and context menu around it.

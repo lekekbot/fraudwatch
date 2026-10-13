@@ -32,7 +32,7 @@ Investigators who set a theme, address length or motion preference expect the Tr
 
 - The Trace Graph follows shared appearance preferences.
 - Optional trace defaults for new traces, global with case overrides.
-- Nothing investigator-authored (steps, pins, hidden branches, expanded services, scope of existing traces) is ever changed by a preference.
+- Nothing investigator-authored (steps, positions, styles, annotations, hidden branches, expanded services, scope of existing traces) is ever changed by a preference.
 
 ## In Scope
 
@@ -63,7 +63,7 @@ Investigators who set a theme, address length or motion preference expect the Tr
 |---|---|---|---|---|
 | `trace.direction` | forward, backward, both (**forward**) | case | Pre-fills the seed dialog | New traces only |
 | `trace.maxHops` | 3, **6**, 10, 20 | case | Pre-fills the seed dialog | New traces only |
-| `trace.columnSpacing` | compact, **normal**, wide | case | `layoutTrace` column width | Reset layout and newly placed nodes; never moves existing or pinned nodes |
+| `trace.spacing` | compact, **normal**, wide | case | Auto-place and Tidy layout spacing | Newly placed nodes and Tidy layout only; never moves a placed node |
 | `trace.servicesExpanded` | **collapsed**, expanded | case | Initial `expandedServices` for new traces | New traces only |
 | `trace.supportingMovements` | **hidden**, shown | case | Default of the candidate panel's "Fees, royalties, rent" toggle | Candidate panel |
 
@@ -71,7 +71,7 @@ Remove the provisional keys `depth`, `lowValue`, `edgeLabels`, `autoLanes`, `int
 
 ### Precedence
 
-Resolution is Global Preferences' own (`case > global > preset > default`). The trace adds one rule on top, inside the trace view: **values stored on a trace (its scope, direction, pins, hidden branches, expanded services) always win over preferences**, because they're investigator decisions about that trace, not defaults.
+Resolution is Global Preferences' own (`case > global > preset > default`). The trace adds one rule on top, inside the trace view: **values stored on a trace (its scope, direction, positions, styles, annotations, hidden branches, expanded services) always win over preferences**, because they're investigator decisions about that trace, not defaults.
 
 ### Fallback
 
@@ -112,7 +112,7 @@ Trace 06; Global Preferences 02 and 03 merged. Not a dependency of Trace 13.
 
 ## Evidence / Data Integrity Invariants
 
-- No preference change alters `steps`, pins, hidden branches or expanded services of any saved trace (test).
+- No preference change alters `steps`, positions, styles, annotations, hidden branches or expanded services of any saved trace (test).
 - No preference change causes an RPC request.
 
 ## Edge Cases and Failure Recovery
