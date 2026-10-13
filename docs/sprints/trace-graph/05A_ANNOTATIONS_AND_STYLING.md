@@ -1,6 +1,6 @@
 # Sprint 05A — Annotations and Styling
 
-**Status:** Planned (implemented on `trace-graph`; merge and full browser checks pending)
+**Status:** Core tools implemented on `trace-graph` at `4a66688`; small-zoom behavior, full browser checks and merge pending
 **Depends on:** 04 (updaters), 05 (canvas, selection, placement)
 
 *Added 2026-10-10 for D8: the trace canvas carries the investigator's own notes and drawings, like draw.io, kept visibly apart from evidence.*
@@ -152,7 +152,7 @@ The legend chip is always drawn (and drawn into PNG exports, 11).
 
 ## Known Risks / Open Decisions
 
-- Text editing over a zoomed canvas: the overlay is scaled with the transform; at very small zoom, editing zooms the view to 100% around the note first.
+- Text editing over a zoomed canvas uses a fixed-size screen overlay. Automatic zoom to 100% at very small zoom remains open.
 
 ## Handoff Notes for the Next Sprint
 

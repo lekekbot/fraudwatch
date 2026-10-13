@@ -1,6 +1,6 @@
 # Sprint 06 — Investigator-Guided Trace Building
 
-**Status:** Planned (implemented on `trace-graph`; merge and live-data browser checks pending). **MVP checkpoint** at the end of this sprint.
+**Status:** Implemented on `trace-graph` at `4a66688`; live-data browser checks and merge pending. **MVP checkpoint** remains open.
 **Depends on:** 03, 04, 05
 
 ## Summary and Why It Matters

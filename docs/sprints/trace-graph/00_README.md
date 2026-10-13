@@ -94,11 +94,11 @@ It **reads** the existing semantic model (`SemanticEvent.flows`). It never chang
 | 01 | [Repository Audit & Product Spec](01_REPOSITORY_AUDIT_AND_PRODUCT_SPEC.md) | Critical | Foundation | — | Done (decisions recorded 2026-10-10) |
 | 02 | [Trace Domain Model & Provenance](02_TRACE_DOMAIN_MODEL_AND_PROVENANCE.md) | Critical | Foundation | 01 | Implemented on `trace-graph`, awaiting review |
 | 03 | [Transaction & Movement Semantics](03_TRANSACTION_MOVEMENT_SEMANTICS.md) | Critical | Foundation | 02 | Implemented on `trace-graph`, awaiting review |
-| 04 | [Trace Workspace & Persistence](04_TRACE_WORKSPACE_AND_PERSISTENCE.md) | Critical | MVP | 02, 03 | Planned |
-| 05 | [Canvas & Free Placement](05_CANVAS_DIRECTIONAL_LAYOUT.md) | Critical | MVP | 02, 03 (04 for saved positions) | Planned |
-| 05A | [Annotations & Styling](05A_ANNOTATIONS_AND_STYLING.md) | Critical | MVP | 04, 05 | Planned |
-| 06 | [Guided Trace Building](06_GUIDED_TRACE_BUILDING.md) | Critical | MVP | 03, 04, 05 | Planned |
-| 07 | [Service, Protocol & Entity Integration](07_SERVICE_PROTOCOL_ENTITY_INTEGRATION.md) | High | Beta | 06 | Planned |
+| 04 | [Trace Workspace & Persistence](04_TRACE_WORKSPACE_AND_PERSISTENCE.md) | Critical | MVP | 02, 03 | Implemented on `trace-graph`; merge pending |
+| 05 | [Canvas & Free Placement](05_CANVAS_DIRECTIONAL_LAYOUT.md) | Critical | MVP | 02, 03 (04 for saved positions) | Implemented on `trace-graph`; browser checks and merge pending |
+| 05A | [Annotations & Styling](05A_ANNOTATIONS_AND_STYLING.md) | Critical | MVP | 04, 05 | Core tools on `trace-graph`; small-zoom behavior, browser checks and merge pending |
+| 06 | [Guided Trace Building](06_GUIDED_TRACE_BUILDING.md) | Critical | MVP | 03, 04, 05 | Implemented on `trace-graph`; live-data browser checks and merge pending |
+| 07 | [Service, Protocol & Entity Integration](07_SERVICE_PROTOCOL_ENTITY_INTEGRATION.md) | High | Beta | 06 | Core behavior on `trace-graph`; look-alike exemption, browser checks and merge pending |
 | 08 | [Branches, Cycles & Trace Operations](08_BRANCHES_CYCLES_AND_TRACE_OPERATIONS.md) | High | Beta | 06 | Planned |
 | 09 | [Inspector & Cross-View Navigation](09_INSPECTOR_AND_CROSS_VIEW_NAVIGATION.md) | High | Beta | 06 | Planned |
 | 10 | [Large-Case Performance](10_LARGE_CASE_PERFORMANCE.md) | High | Release | 06–09 | Planned |
@@ -106,9 +106,9 @@ It **reads** the existing semantic model (`SemanticEvent.flows`). It never chang
 | 12 | [Optional Global Preferences Add-On](12_OPTIONAL_GLOBAL_PREFERENCES_ADDON.md) | Optional | Add-on | 06 + Global Preferences 02/03 | Optional / Deferred |
 | 13 | [Validation, Accessibility & Release](13_VALIDATION_ACCESSIBILITY_AND_RELEASE.md) | Critical | Release | 01–11 | Planned |
 
-Change a status only when the sprint's code is merged and its Definition of Done has been checked, never because a plan exists.
+Branch status records code on the pushed branch, not completed acceptance. Mark a sprint "Done" only after merge and its Definition of Done checks.
 
-**Branch progress (2026-10-13):** Sprints 05A–07 have working code on `trace-graph`: annotation tools, guided trace creation and candidate selection, compact step details, and protocol folding with custody stops. Unit tests, typecheck, lint and a production build pass. A browser smoke test created an address trace, edited a note and reopened the trace in a local case. This browser had no RPC endpoint, so movement selection, map-to-continue, service expand/collapse and large-case performance still need live-data browser checks. Sprint statuses stay Planned until merge and Definition of Done checks.
+**Branch progress (2026-10-13):** Sprints 05A–07 were pushed to `trace-graph` in `4a66688`: annotation tools, guided trace creation and candidate selection, compact step details, and protocol folding with custody stops. Validation passed: `pnpm test` (34 files, 272 tests), `pnpm typecheck`, `pnpm lint` and `pnpm exec next build --webpack`. A browser smoke test created an address trace, edited a note and reopened the trace in a local case. This browser had no RPC endpoint, so movement selection, map-to-continue, service expand/collapse and large-case performance still need live-data browser checks. MVP and Beta milestones remain open.
 
 ## 6. Milestones
 

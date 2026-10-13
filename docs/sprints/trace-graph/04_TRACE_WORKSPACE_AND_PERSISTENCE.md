@@ -1,6 +1,6 @@
 # Sprint 04 — Trace Workspace and Persistence
 
-**Status:** Planned (code committed on `trace-graph` at `2fc512a`; merge pending)
+**Status:** Implemented on `trace-graph` at `2fc512a`; merge and Definition of Done pending
 **Depends on:** 02, 03
 
 ## Summary and Why It Matters

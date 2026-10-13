@@ -1,6 +1,6 @@
 # Sprint 07 — Service, Protocol, and Entity Integration
 
-**Status:** Planned (implemented on `trace-graph`; merge and live-data browser checks pending)
+**Status:** Core behavior implemented on `trace-graph` at `4a66688`; look-alike exemption, live-data browser checks and merge pending
 **Depends on:** 06
 
 ## Summary and Why It Matters
@@ -22,6 +22,7 @@ Investigators think in "Binance", "Magic Eden", "Jupiter", not in vault and fee-
 
 - Registry coverage of pools, vaults and authorities is thin (`CHRONOLOGY_OPEN_ISSUES.md` 5.1); exchange coverage depends on `centralized-vaults.json` (5.2).
 - No notion of "custodial" beyond category `exchange`.
+- Trace folding currently exempts user-labelled and mapped addresses. The Graph also exempts look-alike addresses; that shared predicate is still open in Task Group A.
 
 ### Custody decision
 
@@ -138,7 +139,7 @@ Folding is a map over steps (O(steps)). No measurable cost; covered by 02's view
 
 - [ ] F5 behaves as described in the browser (recorded).
 - [ ] Every folded edge's inspector shows the real address.
-- [ ] Graph tests unchanged and passing.
+- [x] Graph tests unchanged and passing.
 
 ## Definition of Done
 

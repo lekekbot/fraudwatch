@@ -1,6 +1,6 @@
 # Sprint 05 — Canvas and Free Placement
 
-**Status:** Planned (code committed on `trace-graph` at `2fc512a`; browser canvas check and merge pending)
+**Status:** Implemented on `trace-graph` at `2fc512a`; browser canvas checks and merge pending
 **Depends on:** 02, 03 (04 for saved positions; stub with in-memory positions if 04 isn't merged)
 
 *Revised 2026-10-10 for D9 (free placement). The original column-by-hop layout with pins is replaced; the file name is kept so links stay valid.*
