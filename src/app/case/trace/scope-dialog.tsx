@@ -7,6 +7,7 @@ import { datesFromRange, rangeFromDates } from "@/lib/case/range";
 import { formatBaseUnits, parseUnits } from "@/lib/solana/amount";
 import type { Trace, TraceDirection, TraceScope } from "@/lib/trace/model";
 import { assetLabel, type Assets } from "../asset-format";
+import { AssetMultiSelect } from "./asset-multi-select";
 
 export function ScopeDialog({ trace, assets, caseRange, onClose, onSave }: {
   trace: Trace; assets: Assets; caseRange: { start: string; end: string };
@@ -28,7 +29,7 @@ export function ScopeDialog({ trace, assets, caseRange, onClose, onSave }: {
   return <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}><DialogContent className="sm:max-w-lg">
     <DialogHeader><DialogTitle>Trace scope</DialogTitle></DialogHeader>
     <label>Direction<select className="w-full rounded border bg-background p-2" value={direction} onChange={(e) => setDirection(e.target.value as TraceDirection)}><option value="forward">Forward</option><option value="backward">Backward</option><option value="both">Both</option></select></label>
-    <fieldset className="max-h-28 overflow-auto rounded border p-2"><legend>Assets (none means any)</legend>{[...assets.keys()].map((id) => <label key={id} className="mr-3 inline-flex gap-1"><input type="checkbox" checked={selectedAssets.includes(id)} onChange={() => setSelectedAssets(selectedAssets.includes(id) ? selectedAssets.filter((a) => a !== id) : [...selectedAssets, id])} />{assetLabel(id, assets)}</label>)}</fieldset>
+    <AssetMultiSelect assets={assets} selected={selectedAssets} onChange={setSelectedAssets} />
     <div className="grid grid-cols-2 gap-2"><label>From<input type="date" className="w-full rounded border bg-background p-2" value={start} onChange={(e) => setStart(e.target.value)} /></label><label>To<input type="date" className="w-full rounded border bg-background p-2" value={end} onChange={(e) => setEnd(e.target.value)} /></label></div>
     <div className="grid grid-cols-2 gap-2"><label>Minimum asset<select className="w-full rounded border bg-background p-2" value={minAsset} onChange={(e) => setMinAsset(e.target.value)}><option value="">None</option>{[...assets.keys()].map((id) => <option key={id} value={id}>{assetLabel(id, assets)}</option>)}</select></label><label>Minimum amount<input className="w-full rounded border bg-background p-2" value={minText} onChange={(e) => setMinText(e.target.value)} /></label></div>
     <label>Max hops<input type="number" min={1} max={20} className="w-full rounded border bg-background p-2" value={maxHops} onChange={(e) => setMaxHops(Number(e.target.value))} /></label>

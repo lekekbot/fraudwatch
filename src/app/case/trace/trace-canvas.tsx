@@ -111,7 +111,7 @@ export function TraceCanvas({ view, presentation, steps, names, stateOf, assetTe
     observer.observe(box);
     resize();
     const offTheme = onThemeChange(requestDraw);
-    return () => { observer.disconnect(); offTheme(); if (frameRef.current) cancelAnimationFrame(frameRef.current); };
+    return () => { observer.disconnect(); offTheme(); if (frameRef.current) { cancelAnimationFrame(frameRef.current); frameRef.current = 0; } };
   }, [requestDraw, view.nodes]);
 
   const stepById = new Map(steps.map((s) => [s.id, s]));

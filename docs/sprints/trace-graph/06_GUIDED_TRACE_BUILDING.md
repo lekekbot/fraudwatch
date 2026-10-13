@@ -66,9 +66,9 @@ This is where the Trace Graph becomes usable: start a trace from something alrea
 
 ### Seed and scope dialog
 
-- **Seed:** pre-filled when started from an inspector; otherwise an address field (validated with `isValidSolanaAddress`) or a signature field.
+- **Seed:** choose Address, Transaction or Movement with tab-style buttons. Address offers a mapped case wallet (primary selected by default) or a custom Solana address, validated with `isValidSolanaAddress`. An inspector entry preselects its address, including an observed address outside the mapped list. Transaction and movement seeds use a loaded signature.
 - **Direction:** Forward / Backward / Both.
-- **Assets:** "Any", or a multi-select of assets in the case (from `walletStates.assets`, labelled with `assetLabel`).
+- **Assets:** a multi-select dropdown of assets in the case (from `walletStates.assets`, labelled with `assetLabel`). No selection means any asset; the scope dialog uses the same control.
 - **Time:** defaults to the case range; can only narrow it (wider needs context transactions, which aren't available).
 - **Minimum amount:** optional, per asset.
 - **Max hops:** default 6, 1–20.
@@ -209,5 +209,7 @@ Candidate queries run synchronously on the in-memory index (03 budgets). The pan
 ## Implementation Record — 2026-10-13
 
 The branch adds a Trace view, saved trace management, address/transaction/movement seed dialog, scope dialog, paginated candidate panel, compact per-movement summary, map-to-continue action, and entry actions in address, transaction and graph-edge inspectors. Candidate rows keep hidden and already-added movements visible. Adding steps is explicit, limited by hops, and offers Undo for the exact new step ids. Removing a bundled edge can remove one step or all. New traces save chosen seed steps and scope atomically; invalid initial steps are rejected before storage.
+
+The address seed now offers the case's mapped wallets by name and full address, plus a custom address option. Changing wallets clears any preselected graph-connection movements that belong to a different seed.
 
 `pnpm test`, `pnpm typecheck`, `pnpm lint` and `next build --webpack` pass. Browser smoke check created and reopened an address trace and saved a note. The browser had no RPC endpoint, so F1–F3/F7 with loaded movements, map-to-continue, failed-load behavior, and cross-view regression checks remain. The MVP acceptance box stays open until those checks pass.

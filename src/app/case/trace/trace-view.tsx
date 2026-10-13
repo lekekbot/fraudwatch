@@ -23,12 +23,12 @@ import { ScopeDialog } from "./scope-dialog";
 import { StepSummary } from "./step-summary";
 import { TraceCanvas, type TraceSelection } from "./trace-canvas";
 
-export function TraceView({ caseId, traceId, evidence, index, caseRange, loadedRange, hiddenReason, names, assets, requestedSeed, onSeedHandled, onMapWallet, onOpenTransaction, loadStatus, loadError }: {
+export function TraceView({ caseId, traceId, evidence, index, caseRange, loadedRange, hiddenReason, wallets, names, assets, requestedSeed, onSeedHandled, onMapWallet, onOpenTransaction, loadStatus, loadError }: {
   caseId: string; traceId: string | null; evidence: TraceEvidence; index: MovementIndex | null;
   caseRange: { start: string; end: string };
   loadedRange: (address: string) => { start: string; end: string } | null;
   hiddenReason: (signature: string) => "manual" | "rule" | null;
-  names: Names; assets: Assets; requestedSeed: TraceStartRequest | null; onSeedHandled: () => void;
+  wallets: readonly string[]; names: Names; assets: Assets; requestedSeed: TraceStartRequest | null; onSeedHandled: () => void;
   onMapWallet: (address: string) => void;
   onOpenTransaction: (signature: string, from: string | null, to: string | null) => void;
   loadStatus: string;
@@ -91,7 +91,7 @@ export function TraceView({ caseId, traceId, evidence, index, caseRange, loadedR
     return setScope(next, { ...next.scope, assets: [...accepted] });
   });
   const startDialog = (seed: TraceSeed | null = null) => { setNewSeed(seed); setNewOpen(true); };
-  const dialog = (requestedSeed || newOpen) && <SeedDialog key={JSON.stringify(requestedSeed ?? newSeed)} initialSeed={requestedSeed?.seed ?? newSeed} initialRefs={requestedSeed?.refs} index={index} assets={assets} caseRange={caseRange} onClose={closeNew} onCreate={create} />;
+  const dialog = (requestedSeed || newOpen) && <SeedDialog key={JSON.stringify(requestedSeed ?? newSeed)} initialSeed={requestedSeed?.seed ?? newSeed} initialRefs={requestedSeed?.refs} wallets={wallets} names={names} index={index} assets={assets} caseRange={caseRange} onClose={closeNew} onCreate={create} />;
   if (!traceId) return <section className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-6">
     <h2 className="text-base font-semibold">Trace Graph</h2><p className="max-w-xl text-sm text-muted-foreground">Build a saved diagram from movements you select. Lines show observed transfers, not proof that the same funds continued.</p>
     <Button className="self-start" onClick={() => startDialog()}>Start a trace</Button>
