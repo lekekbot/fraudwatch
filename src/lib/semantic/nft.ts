@@ -1,7 +1,61 @@
+import { NATIVE_SOL } from "@/lib/assets/assets";
+import { bytesOf, discriminator } from "@/lib/solana/anchor";
 import type { EffectSummary } from "@/lib/state/summarize";
 import type { EvidenceRef, FlowRole, Infrastructure, NftDetail, SemanticFlow } from "./events";
 import { netByAddress, netOf, withSettlement } from "./flows";
-import type { Interpretation, TransactionContext } from "./interpret";
+import type { Interpretation, Interpreter, TransactionContext } from "./interpret";
+import { protocolOf } from "./reading";
+
+const CORE = "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d";
+const MMM = "mmm3XBJg5gk8XJxEKBvdgptZz6SgK4tXvn36sodowMc";
+const MMM_CORE = new Map([
+  ["171,167,34,193,112,21,142,89", "SELL"], // sol_mpl_core_fulfill_buy
+  ["252,231,201,176,30,213,118,18", "BUY"], // sol_mpl_core_fulfill_sell
+]);
+
+/** Core assets have no token balances. MMM's decoded accounts supply the economic buyer and seller. */
+export const coreNft: Interpreter = {
+  id: "metaplex-core",
+  interpret: (ctx) => {
+    const transfers = ctx.instructions.filter(({ ix }) => ix.programId === CORE && bytesOf(ix.data)?.[0] === 14 && ix.accounts.length >= 5);
+    const transfer = transfers[0];
+    if (!transfer) return null;
+    const assetId = transfer.ix.accounts[0];
+    const recipient = transfer.ix.accounts[4];
+    const market = ctx.instructions.find(({ ix }) => ix.programId === MMM && MMM_CORE.has(discriminator(bytesOf(ix.data)) ?? "") && ix.accounts[6] === assetId);
+    const action = market && MMM_CORE.get(discriminator(bytesOf(market.ix.data)) ?? "");
+    const payer = market?.ix.accounts[0];
+    const owner = market?.ix.accounts[1];
+    const pool = market?.ix.accounts[4];
+    const escrow = market?.ix.accounts[5];
+    if (market && action && payer && owner && pool && escrow && (action === "SELL" ? recipient === owner || recipient === pool : recipient === payer)) {
+      const buyer = action === "SELL" ? owner : payer;
+      const seller = action === "SELL" ? payer : owner;
+      const source = action === "SELL" ? escrow : buyer;
+      const destination = action === "SELL" ? seller : [pool, escrow].find((a) => a !== source) ?? pool;
+      const payment = ctx.tx.innerInstructions.find((ix) => ix.type === "transfer" && ix.info && typeof ix.info === "object" && (ix.info as { source?: string }).source === source && (ix.info as { destination?: string }).destination === destination);
+      const amount = payment && (payment.info as { lamports?: number }).lamports;
+      const flows: SemanticFlow[] = [{ assetId, amount: "1", from: seller, to: buyer, source: "core_nft", role: "nft" }];
+      if (typeof amount === "number" && amount > 0) flows.push({ assetId: NATIVE_SOL, amount: String(amount), from: source, to: destination, source: "balance", role: "payment" });
+      const settled = withSettlement(ctx.deltas, flows);
+      return {
+        category: "NFT_TRADE", action, actor: payer, confidence: amount ? "HIGH" : "MEDIUM",
+        protocol: protocolOf(ctx, MMM), evidence: [market.ref, transfer.ref],
+        ...settled,
+        warnings: [...(amount ? [] : ["MMM's Core transfer was decoded, but its SOL payment was not found."]), ...settled.warnings],
+        infrastructure: [{ address: pool, role: "POOL", label: "MMM pool" }, { address: escrow, role: "ESCROW", label: "MMM SOL escrow" }],
+        nft: { assets: [assetId], buyer, seller, price: null, bundle: false, compressed: false },
+      };
+    }
+    const flow: SemanticFlow = { assetId, amount: "1", from: null, to: recipient, source: "core_nft", role: "nft" };
+    return {
+      category: "NFT_TRANSFER", action: "TRANSFER", confidence: "MEDIUM", evidence: [transfer.ref],
+      ...withSettlement(ctx.deltas, [flow]),
+      warnings: ["The previous Metaplex Core owner is not recorded in this transaction."],
+      nft: { assets: [assetId], buyer: null, seller: null, price: null, bundle: false, compressed: false },
+    };
+  },
+};
 
 function categoryAndAction(summary: EffectSummary) {
   switch (summary.kind) {

@@ -3,6 +3,7 @@ import { bytesOf, discriminator, hex, reader } from "@/lib/solana/anchor";
 import type { CanonicalInstruction } from "@/lib/solana/canonical";
 import { MEMO_PROGRAMS } from "@/lib/solana/programs";
 import type { BridgeEnvelope, EventCategory, EvidenceRef } from "./events";
+import { netByAddress, netOf, withSettlement } from "./flows";
 import type { Interpretation, Interpreter, TransactionContext } from "./interpret";
 import { actorFlows, moved, protocolOf, receivedAny, spentAny, stakeAccount } from "./reading";
 
@@ -175,6 +176,43 @@ function lending(id: string, programId: string, ops: ReadonlyMap<string, string>
 }
 
 export const kaminoLending = lending("kamino-lending", KAMINO, KAMINO_OPS);
+
+// Drift v2 spot deposits and withdrawals. Account order follows Drift's public IDL.
+const DRIFT = "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH";
+const DRIFT_OPS = new Map([
+  ["242,35,198,137,82,225,242,182", { action: "DEPOSIT", token: 5 }],
+  ["183,18,70,156,148,109,161,34", { action: "WITHDRAW", token: 6 }],
+]);
+
+export const driftSpot: Interpreter = {
+  id: "drift-spot",
+  interpret: (ctx) => {
+    const [call] = decoded(ctx, DRIFT, DRIFT_OPS, true);
+    const actor = call?.ix.accounts[3];
+    const vault = call?.ix.accounts[4];
+    const tokenAccount = call?.ix.accounts[call.op.token];
+    const amount = call && reader(call.bytes).u64(10);
+    if (!call || !actor || !vault || !tokenAccount || amount === null) return null;
+    const change = ctx.tx.tokenChanges.find((t) => t.account === tokenAccount && t.owner === actor);
+    const agrees = !!change && BigInt(change.delta) === (call.op.action === "WITHDRAW" ? amount : -amount);
+    const net = netByAddress(ctx.deltas);
+    const flows = [...new Set(ctx.deltas.map((d) => d.assetId))].flatMap((assetId) => {
+      const delta = netOf(net, assetId, actor);
+      return delta === 0n ? [] : [{ assetId, amount: (delta < 0n ? -delta : delta).toString(), from: delta < 0n ? actor : null, to: delta > 0n ? actor : null, source: "balance" as const, role: delta < 0n ? "spent" as const : "received" as const }];
+    });
+    const settled = withSettlement(ctx.deltas, flows);
+    return {
+      category: "LENDING", action: call.op.action, actor, protocol: protocolOf(ctx, DRIFT), evidence: [call.ref],
+      confidence: agrees ? "HIGH" : "MEDIUM",
+      flows: settled.flows,
+      warnings: [...(agrees ? [] : ["Drift's spot instruction amount doesn't match the wallet's token balance change."]), ...settled.warnings],
+      infrastructure: [
+        { address: vault, role: "VAULT", label: "Drift spot market vault" },
+        ...(call.op.action === "WITHDRAW" && call.ix.accounts[5] ? [{ address: call.ix.accounts[5], role: "PDA" as const, label: "Drift signer" }] : []),
+      ],
+    };
+  },
+};
 
 // marginfi v2.
 const MARGINFI = "MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA";

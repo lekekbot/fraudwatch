@@ -13,6 +13,8 @@ Each entry gives:
 
 Nothing here is a known crash or data-loss bug. Every item either shows less than it could, or shows something correct but imprecise. The model's rules (stay uncertain, never guess, keep everything traceable) hold throughout.
 
+**2026-10-13 high-priority pass:** Sections 1.1, 1.6, and 5.1 below describe the original findings. Drift spot deposits/withdrawals now use decoded account roles, and the vault is infrastructure; this is covered by a synthetic withdrawal test, but still needs a real case fixture and verification of `AVzP…QK49`. Metaplex Core transfers and Magic Eden MMM Core fills now produce NFT events, verified against the existing real MMM fixture. Magic Eden `CoreExecuteSaleV2` still needs a fixture and decoder. The registry now names Drift spot vault 0 and MMM; other case-specific pools, reserves, and custody accounts remain open under 5.1.
+
 ---
 
 ## Contents

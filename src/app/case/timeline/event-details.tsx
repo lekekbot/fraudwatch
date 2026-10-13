@@ -78,7 +78,7 @@ function sentence({ event, state, assets, names }: Omit<Props, "onSelectAddress"
       }
       return `${who(actor)} ${event.category === "STAKE" ? "staked" : "unstaked"} ${amount(flow("spent")) || "a stake account"}${flow("received") ? ` for ${amount(flow("received"))}` : ""}${via}.`;
     case "LENDING":
-      return `${who(actor)}: ${eventLabel(event).toLowerCase()} ${amount(flow("spent") ?? flow("received"))}${event.protocol ? ` on ${event.protocol.name}` : ""}.`;
+      return `${who(actor)}: ${eventLabel(event).toLowerCase()} ${amount((event.action === "WITHDRAW" || event.action === "BORROW" || event.action === "REMOVE_COLLATERAL" ? flow("received") : flow("spent")) ?? flow("received") ?? flow("spent"))}${event.protocol ? ` on ${event.protocol.name}` : ""}.`;
     case "BRIDGE":
       return event.bridge
         ? `${who(actor)} bridged ${amount(event.bridge.asset)} from ${chainName(event.bridge.sourceChain)} to ${chainName(event.bridge.destinationChain)}${via}.`

@@ -41,7 +41,7 @@ const RECORDED: [file: string, category: string, action: string, interpreter: st
   ["defi/relay-swap-deposit-token.json", "BRIDGE", "BRIDGE_OUT", "relay-bridge", "HIGH"],
   ["cnft/mint-v2.json", "NFT_MINT", "MINT", "generic-nft", "MEDIUM"],
   ["cnft/transfer.json", "NFT_TRANSFER", "SEND", "generic-nft", "MEDIUM"],
-  ["magic-eden-core/transaction.json", "TRANSFER", "RECEIVE", "generic-transfer", "LOW"],
+  ["magic-eden-core/transaction.json", "NFT_TRADE", "SELL", "metaplex-core", "HIGH"],
 ];
 
 const sale = read<{ buyer: string; seller: string; mint: string; response: RawParsedTransaction }>("magic-eden-sale/transaction.json");
