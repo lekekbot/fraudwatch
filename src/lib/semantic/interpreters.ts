@@ -8,7 +8,7 @@ import {
 } from "@/lib/solana/programs";
 import { cctpBridge, driftWithdraw, jupiterSwap, kaminoLending, marginfiLending, marinadeStake, relayBridge, sanctumUnstake, splStakePool } from "./defi";
 import type { Interpreter } from "./interpret";
-import { readNft } from "./nft";
+import { coreNft, readNft } from "./nft";
 import { actionName, actorFlows, kindIs, knownProgram, protocolOf, receivedAny, refsWhere, stakeAccount, summaryRef } from "./reading";
 
 const failed: Interpreter = {
@@ -150,6 +150,7 @@ const unknown: Interpreter = {
 export const INTERPRETERS: readonly Interpreter[] = [
   failed,
   marketplaceNftTrade,
+  coreNft,
   cctpBridge,
   relayBridge,
   driftWithdraw,

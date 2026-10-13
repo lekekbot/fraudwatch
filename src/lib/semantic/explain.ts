@@ -58,7 +58,7 @@ export function explainEvent(event: SemanticEvent, o: ExplainOptions): Statement
     return `${o.name(f.to!)} received ${amount}`;
   };
   const main = event.flows.filter((f) => !SUPPORTING.has(f.role));
-  for (const f of main.slice(0, MAX_FLOWS)) add("fact", "met", `${f.source === "compressed_nft" ? "Bubblegum leaf event" : "Balance change"}: ${flowText(f)}.`);
+  for (const f of main.slice(0, MAX_FLOWS)) add("fact", "met", `${f.source === "compressed_nft" ? "Bubblegum leaf event" : f.source === "core_nft" ? "Metaplex Core transfer" : "Balance change"}: ${flowText(f)}.`);
   if (main.length > MAX_FLOWS) add("fact", "met", `And ${main.length - MAX_FLOWS} more balance changes.`);
   for (const e of event.evidence) {
     if (e.kind === "ASSET_METADATA") add("fact", "met", `On-chain metadata says ${o.asset(e.assetId)} is an NFT.`);
@@ -77,7 +77,7 @@ export function explainEvent(event: SemanticEvent, o: ExplainOptions): Statement
   for (const f of event.flows.filter((x) => x.role === "royalty" && x.to)) {
     add("derived", "met", `Royalty of ${o.amount(f.amount, f.assetId)} to ${o.name(f.to!)}, a creator in the NFT's metadata.`);
   }
-  if (event.nft?.buyer && event.nft.seller) add("derived", "met", `The NFT parser names ${o.name(event.nft.buyer)} as buyer and ${o.name(event.nft.seller)} as seller.`);
+  if (event.nft?.buyer && event.nft.seller) add("derived", "met", `${event.interpreter.id === "metaplex-core" ? "The decoded Core instruction" : "The NFT parser"} names ${o.name(event.nft.buyer)} as buyer and ${o.name(event.nft.seller)} as seller.`);
 
   // Heuristics and gaps.
   const unidentified = event.flows.filter((f) => f.role === "unidentified");

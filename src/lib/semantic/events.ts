@@ -3,7 +3,7 @@
  * are computed on read from canonical transactions and never stored, so nothing
  * stale can be reused yet; a store for them must check it (see `DERIVED_CACHES`).
  */
-export const SEMANTIC_VERSION = 10;
+export const SEMANTIC_VERSION = 11;
 
 /**
  * Broad kinds of meaningful action. `action` carries the finer meaning (BUY,
@@ -60,8 +60,8 @@ export type SemanticFlow = {
   amount: string;
   from: string | null;
   to: string | null;
-  /** balance: paired from pre/post balances. compressed_nft: a Bubblegum leaf event. */
-  source: "balance" | "compressed_nft";
+  /** Balance changes, a Bubblegum leaf event, or a decoded Metaplex Core transfer. */
+  source: "balance" | "compressed_nft" | "core_nft";
   /** What the movement is for, when an interpreter knows; see `FlowRole`. */
   role?: FlowRole;
 };

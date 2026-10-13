@@ -86,7 +86,7 @@ These protocols are in the registry (so they're named and attributed), but nothi
 - **Where:** `src/lib/state/summarize.ts` (`nftTrade` only reads token balances and Bubblegum moves); `src/lib/semantic/nft.ts`.
 - **Why it matters:** modern NFT scams increasingly use Core collections. Those trades show up as anonymous SOL movements.
 - **Next step:** decode Metaplex Core (`CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d`) `transfer_v1` and the marketplace Core instructions (`CoreExecuteSaleV2`, MMM `SolMplCoreFulfillBuy`/`Sell`) into `CnftMove`-style moves. The NFT reading already handles moves without balances, so this mostly needs a decoder.
-- **Status (2026-10-13):** Open. The real Core sale fixture still pins a LOW-confidence transfer with no NFT detail; no Core transfer or marketplace sale decoder exists.
+- **Status (2026-10-13):** Partially resolved. Metaplex Core `transfer_v1` and MMM `sol_mpl_core_fulfill_buy` / `sol_mpl_core_fulfill_sell` are decoded. The recorded MMM Core sale now reads as a high-confidence NFT trade with buyer, seller, asset, and escrow payment. Magic Eden `CoreSell`, `CoreExecuteSaleV2`, and other marketplace variants remain open; no buyer-price estimate is claimed for them.
 
 ---
 
@@ -312,7 +312,7 @@ These protocols are in the registry (so they're named and attributed), but nothi
 - **Today:** events are worked out in memory (`case-shell.tsx`, `semanticEvents` memo) every time a case opens, and again when NFT metadata arrives. That's about 0.08 ms per transaction, so about 0.6 s for 7,842 transactions. `SEMANTIC_VERSION` (now 4) and each interpreter's `version` are stamped on events. No IndexedDB table holds events, so nothing in `DERIVED_CACHES` invalidates them (the comment in `src/lib/db/derived.ts` says a table must register there).
 - **Why it matters:** fine at today's case sizes. Very large cases (50k+ transactions) would spend a few seconds on each open and each metadata update.
 - **Next step:** if needed, cache events keyed by signature plus `analysisFingerprint()` (C8, `src/lib/semantic/versions.ts`: parser, reconstruction, semantic, each interpreter, registry and behaviour versions) plus an NFT-metadata fingerprint, and register the table in `DERIVED_CACHES`. C8's tests (`src/lib/db/derived.test.ts`) lock in that nothing semantic is stored today.
-- **Status (2026-10-13):** Open. Events still recompute in memory and have no IndexedDB cache; SEMANTIC_VERSION is now 10, so the old version number is stale.
+- **Status (2026-10-13):** Open. Events still recompute in memory and have no IndexedDB cache; SEMANTIC_VERSION is now 11, so the old version number is stale.
 
 ### 7.2 One event per transaction is baked into the UI — Medium
 - **Origin:** C1/C5.
@@ -440,7 +440,7 @@ These protocols are in the registry (so they're named and attributed), but nothi
 
 ### 11.3 Fixture gaps — Medium
 No real fixture yet for:
-- a Metaplex Core sale with a decoder to test it (1.6), beyond the one "stays a transfer" fixture;
+- a Magic Eden `CoreExecuteSaleV2` or other Core marketplace sale beyond the recorded MMM pool fill (1.6);
 - an accepted bid (3.3);
 - a standalone Kamino borrow or withdraw (2.1);
 - Jupiter v2 routes (2.5);
@@ -448,7 +448,7 @@ No real fixture yet for:
 - CCTP v1 bridge-in (2.7); v2 with hook was added in C8;
 - the specific Drift receipt-burn withdrawal behind `AVzP…QK49` (1.1); a real SOL withdrawal from the supplied wallet is now recorded;
 - any non-CCTP bridge (1.2), stake pool (1.3) or liquidity action (1.4).
-- **Status (2026-10-13):** Partially resolved. Real SPL stake-pool, Sanctum, marginfi, Relay, and Drift SOL-withdrawal fixtures now exist; the specific Drift receipt-burn case, Core, accepted-bid, standalone Kamino, and other listed gaps remain.
+- **Status (2026-10-13):** Partially resolved. Real SPL stake-pool, Sanctum, marginfi, Relay, Drift SOL-withdrawal, and MMM Core-sale fixtures now exist; the specific Drift receipt-burn case, other Core marketplace variants, accepted-bid, standalone Kamino, and other listed gaps remain.
 
 ### 11.4 Browser verification depends on local cases — Low
 - **Origin:** C5–C7.

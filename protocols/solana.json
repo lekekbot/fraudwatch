@@ -1,6 +1,6 @@
 {
   "$schema": "./schema.json",
-  "version": 13,
+  "version": 14,
   "protocols": {
     "solana": {
       "name": "Solana",
@@ -229,6 +229,7 @@
       "name": "Magic Eden",
       "category": "nft_marketplace",
       "addresses": {
+        "mmm3XBJg5gk8XJxEKBvdgptZz6SgK4tXvn36sodowMc": { "role": "program", "label": "Magic Eden MMM" },
         "M2mx93ekt1fmXSVkTrUL9xVFHkmME8HTUi5Cyc5aF7K": { "role": "program", "label": "Magic Eden v2" },
         "M3mxk5W2tt27WGT7THox7PmgRDp4m6NEhL5xvxrBfS1": { "role": "program", "label": "Magic Eden cNFT" },
         "MEisE1HzehtrDpAAT8PnLHjpSSkRYakotTuJRPjTpo8": { "role": "program", "label": "Magic Eden Marketplace (legacy)" },

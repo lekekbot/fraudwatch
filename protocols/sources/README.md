@@ -1,11 +1,15 @@
 # Protocol registry sources
 
+Raw third-party inputs for the Sprint 06 protocol registry (`protocols/solana.json`).
+Files here are snapshots, unmodified except where noted below. Convert them into the versioned registry schema; never load them into the app directly.
+
+## Magic Eden MMM
+
+Registry v14 adds MMM program `mmm3XBJg5gk8XJxEKBvdgptZz6SgK4tXvn36sodowMc`, verified against [Magic Eden's MMM Anchor configuration](https://github.com/me-foundation/mmm/blob/main/Anchor.toml) and its [Core fulfill-buy instruction](https://github.com/me-foundation/mmm/blob/main/programs/mmm/src/instructions/mpl_core_asset/sol_mpl_core_fulfill_buy.rs).
+
 ## Drift program-derived accounts
 
 Registry v13 adds Drift's spot market 0 and 1 vaults and signer. They are derived from the [Drift SDK PDA seeds](https://github.com/drift-labs/protocol-v2/blob/master/sdk/src/addresses/pda.ts) with program `dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH`: `spot_market_vault` plus little-endian market index 0 or 1, and `drift_signer`. The market 1 vault also appears in `fixtures/solana/defi/drift-withdraw-sol.json`. Other markets are identified from each decoded withdrawal's accounts.
-
-Raw third-party inputs for the Sprint 06 protocol registry (`protocols/solana.json`).
-Files here are snapshots, unmodified except where noted below. Convert them into the versioned registry schema; never load them into the app directly.
 
 ## tribixbite-solana-programs.json
 

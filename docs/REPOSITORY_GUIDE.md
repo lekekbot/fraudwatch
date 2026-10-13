@@ -583,7 +583,7 @@ The cache stores the full reconstructed state and a computation timestamp. Failu
 | `PARSER_VERSION` | 2 | Canonical cache invalidated and rebuilt from stored raw data |
 | `RECONSTRUCTION_VERSION` | 1 | Wallet states rebuilt |
 | `SEMANTIC_VERSION` | 9 | Semantic readings change on recomputation |
-| Runtime registry version | 13 | Attribution changes on recomputation |
+| Runtime registry version | 14 | Attribution changes on recomputation |
 | `BEHAVIOR_VERSION` | 1 | Observation rules change on recomputation |
 
 `DERIVED_CACHES` currently registers parser and reconstruction caches. `ensureDerivedCachesCurrent()` runs invalidation once per database connection. Raw data is not a derived cache and is retained.
@@ -718,7 +718,7 @@ This look-alike dust rule uses less than 0.01 SOL, or less than one whole token 
 
 The runtime object merges `solana.json` protocol entries with `centralized-vaults.json`, with the latter taking precedence for overlapping protocol IDs. At this snapshot:
 
-- `solana.json`: version 13, 146 protocol entries, 328 addresses.
+- `solana.json`: version 14, 146 protocol entries, 329 addresses.
 - `centralized-vaults.json`: version 1, 14 service entries, 32 addresses.
 - Merged runtime registry: 159 protocol/service entries, 355 addresses.
 - `community-labels.json`: 1,300 unverified display names.

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decodeMetaplexMetadata, NATIVE_SOL } from "@/lib/assets/assets";
+import { buildInteractionGraph } from "@/lib/graph/build";
 import type { RawParsedTransaction } from "@/lib/rpc/generic-adapter";
 import { canonicalize } from "@/lib/solana/canonical";
 import { TOKEN_PROGRAM } from "@/lib/solana/programs";
@@ -134,9 +135,28 @@ describe("a real Magic Eden v2 sale (deposit, buy and execute in one transaction
 });
 
 describe("a real Magic Eden pool fill of a Metaplex Core asset", () => {
-  it("stays a low-confidence transfer: Core assets have no token balances to read an NFT from", () => {
-    const e = only(interpretTransaction(canonicalize(read("magic-eden-core/transaction.json"))));
-    expect([e.category, e.confidence, e.nft]).toEqual(["TRANSFER", "LOW", null]);
+  it("reads the Core sale, its buyer and seller, and the escrow payment", () => {
+    const tx = canonicalize(read("magic-eden-core/transaction.json"));
+    const e = only(interpretTransaction(tx));
+    expect([e.category, e.action, e.interpreter.id, e.confidence, e.protocol?.id]).toEqual(["NFT_TRADE", "SELL", "metaplex-core", "HIGH", "magic_eden"]);
+    expect(e.nft).toMatchObject({ assets: ["7n8shwGeS1EaxDtxgrdawdxsP1g8KykguBJ7k4fz2HFL"], buyer: "EcvXEE4Z8PEexQWQ3Wq1owpd6pKXqSGGsNEs9m897wMW", seller: "BYTak8a2aQXF3DMThvEYB1GfFtQ4bKxAt41GDvNVxwZE", compressed: false });
+    expect(e.flows).toContainEqual(expect.objectContaining({ assetId: e.nft!.assets[0], source: "core_nft", role: "nft", from: e.nft!.seller, to: e.nft!.buyer }));
+    expect(e.flows).toContainEqual(expect.objectContaining({ assetId: NATIVE_SOL, amount: "27317757", role: "payment" }));
+    expect(roles(e)).toContain(`${e.nft!.buyer}:BUYER`);
+    expect(roles(e)).toContain(`${e.nft!.seller}:SELLER`);
+    expect(e.infrastructure).toContainEqual(expect.objectContaining({ address: "FQV448rvMmAvMxTgKwzruU8ANq1uXGykQZdF3tssNbs7", role: "ESCROW" }));
+    expect(projectEvent(e, e.nft!.buyer!)?.action).toBe("BUY");
+    const state = reconstructWalletState(e.nft!.seller!, [tx], { historyComplete: true });
+    const graph = buildInteractionGraph([{ wallet: e.nft!.seller!, effects: state.effects, summaries: state.effects.map((effect) => summarizeEffect(effect, tx)), events: [e] }]);
+    expect(graph.edges.filter((edge) => edge.kind === "interaction").map((edge) => [edge.a, edge.b].sort())).toEqual([[e.nft!.buyer, e.nft!.seller].sort()]);
+  });
+
+  it("keeps a plain Core transfer's previous owner unknown when no sale instruction supports it", () => {
+    const tx = canonicalize(read("magic-eden-core/transaction.json"));
+    tx.instructions = tx.instructions.filter((ix) => ix.programId !== "mmm3XBJg5gk8XJxEKBvdgptZz6SgK4tXvn36sodowMc");
+    const e = only(interpretTransaction(tx));
+    expect([e.category, e.action, e.interpreter.id, e.confidence]).toEqual(["NFT_TRANSFER", "TRANSFER", "metaplex-core", "MEDIUM"]);
+    expect(e.flows).toContainEqual(expect.objectContaining({ source: "core_nft", from: null, to: "EcvXEE4Z8PEexQWQ3Wq1owpd6pKXqSGGsNEs9m897wMW" }));
   });
 });
 
