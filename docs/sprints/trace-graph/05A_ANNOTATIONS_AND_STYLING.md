@@ -17,7 +17,7 @@ Investigators reason on the diagram itself: "same operator?", a box around the w
 - Annotation and style types, `resolveEnd`, `detachEnds` (02 `src/lib/trace/presentation.ts`); updaters `addAnnotation`, `updateAnnotation`, `removeAnnotations`, `reorderAnnotation`, `setNodeStyle` with size caps (04).
 - UI kit: `src/components/ui/` has button, dialog, input, textarea, popover, segmented and switch (popover/segmented/switch added by Global Preferences).
 
-**Working-tree status (2026-10-13):** Sprint 02 defines annotation and style data; Sprint 04 adds validated updaters; Sprint 05 draws stored node colours, sizes and note markers. The canvas does not draw annotations or provide tools to create, edit, move or style them. None of this sprint's acceptance criteria is complete.
+**Branch status (2026-10-13):** Sprint 02 defines annotation and style data; Sprint 04 adds validated updaters; Sprint 05 draws stored node colours, sizes and note markers. The canvas does not draw annotations or provide tools to create, edit, move or style them. None of this sprint's acceptance criteria is complete.
 
 ### Gaps and limitations
 

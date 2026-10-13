@@ -157,7 +157,7 @@ The event inspector's **Developer details** shows, for the selected transaction:
 
 ## Trace Graph model (`src/lib/trace/`)
 
-A trace reads the semantic model and stores only the investigator's decisions. The model and movement index exist; the current working tree adds storage and an evidence canvas. Trace creation and candidate selection remain planned for Sprint 06. See `docs/sprints/trace-graph/` for status and remaining checks.
+A trace reads the semantic model and stores only the investigator's decisions. The `trace-graph` branch contains the model, movement index, local storage and evidence canvas. Trace creation and candidate selection remain planned for Sprint 06. See `docs/sprints/trace-graph/` for status and remaining checks.
 
 - **Steps reference movements by content** (`movementKey`, `keyedFlows` in `model.ts`): signature, event index, asset, owners, amount and an occurrence counter. Nothing from the transaction is copied. `buildTraceView` (`view.ts`) re-resolves every step against the current events each time; a step whose movement is gone or changed is reported stale and kept, never re-pointed.
 - **Classification** (`classifyEvent`, `movements.ts`): each flow is a primary or supporting movement, part of a conversion, a boundary, or excluded (settlement, zero, bridge cost). The network fee is never a flow. `buildMovementIndex` builds per-address chronological lists once; `candidates` filters and pages them.

@@ -1,6 +1,6 @@
 # Sprint 04 — Trace Workspace and Persistence
 
-**Status:** Planned (implementation in working tree; merge pending)
+**Status:** Planned (code committed on `trace-graph` at `2fc512a`; merge pending)
 **Depends on:** 02, 03
 
 ## Summary and Why It Matters

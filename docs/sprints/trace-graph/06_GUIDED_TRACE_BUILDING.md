@@ -1,6 +1,6 @@
 # Sprint 06 — Investigator-Guided Trace Building
 
-**Status:** Planned. **MVP checkpoint** at the end of this sprint. Core storage and canvas code from Sprints 04 and 05 is in the current working tree; their merge and final browser checks remain pending.
+**Status:** Planned. **MVP checkpoint** at the end of this sprint. Core storage and canvas code from Sprints 04 and 05 is committed on `trace-graph`; their merge and final browser checks remain pending.
 **Depends on:** 03, 04, 05
 
 ## Summary and Why It Matters
