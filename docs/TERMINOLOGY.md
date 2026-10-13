@@ -80,7 +80,7 @@ See `ARCHITECTURE.md` → Semantic model for how these fit together.
 
 ## Trace Graph
 
-See `docs/sprints/trace-graph/` and `src/lib/trace/`. The `trace-graph` branch contains the model, movement index, local storage and evidence canvas. Trace creation, candidate selection and annotation UI remain planned.
+See `docs/sprints/trace-graph/` and `src/lib/trace/`. The `trace-graph` branch contains trace creation, candidate selection, annotation tools and service folding. Full browser checks with loaded transactions remain pending.
 
 - **Trace:** a named, saved, investigator-built set of steps within one case, plus how the investigator arranged and annotated it.
 - **Seed:** where a trace starts: an address, a transaction, or one movement.

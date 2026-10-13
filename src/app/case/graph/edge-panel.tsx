@@ -50,6 +50,7 @@ export function EdgePanel({
   onViewAll,
   onOpenInTimeline,
   onClose,
+  onTrace,
 }: {
   edge: GraphEdge;
   focusWallet: string;
@@ -67,6 +68,7 @@ export function EdgePanel({
   /** The Timeline, narrowed to exactly this connection's transactions. */
   onOpenInTimeline: () => void;
   onClose: () => void;
+  onTrace?: () => void;
 }) {
   // The burn node has nothing to inspect.
   const name = (address: string, className?: string) =>
@@ -111,6 +113,8 @@ export function EdgePanel({
           </p>
         )}
       </PanelSection>
+
+      {onTrace && !program && <Button variant="outline" size="sm" className="mx-3" onClick={onTrace}>Trace these movements</Button>}
 
       {!program && (
         <PanelSection title="Relationship">

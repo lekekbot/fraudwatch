@@ -47,6 +47,7 @@ export function AddressPanel({
   verdictOf,
   onHideDecoys,
   onSelectAddress,
+  onTrace,
 }: {
   caseId: string;
   address: string;
@@ -72,6 +73,7 @@ export function AddressPanel({
   verdictOf?: (address: string) => LookalikeVerdict | undefined;
   onHideDecoys?: () => void;
   onSelectAddress?: (address: string) => void;
+  onTrace?: () => void;
 }) {
   const [name, setName] = useState(label?.name ?? "");
   const [note, setNote] = useState(label?.note ?? "");
@@ -163,6 +165,7 @@ export function AddressPanel({
             In {transactionCount.toLocaleString()} of this wallet&apos;s transactions.
           </p>
         )}
+        {onTrace && <Button variant="outline" size="sm" className="self-start" onClick={onTrace}>Trace from this address</Button>}
         {onFilterTo && (
           <Button variant={onFilterTo.active ? "secondary" : "outline"} size="sm" className="self-start" onClick={onFilterTo.toggle}>
             <FilterIcon />

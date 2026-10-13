@@ -1,6 +1,7 @@
 import type { AddressState } from "@/lib/case/address-state";
 import type { IngestionCoverage } from "@/lib/ingest/ingest";
 import type { SemanticEvent } from "@/lib/semantic/events";
+import type { RegistryEntry } from "@/lib/protocols/registry";
 import { type Amount, type BoundaryKind, compareRefs, type EdgeProvenance, keyedFlows, type MovementRef, type Trace, type TraceStep } from "./model";
 
 /** What `buildTraceView` reads; all of it already exists in the case workspace. */
@@ -11,6 +12,8 @@ export type TraceEvidence = {
   coverage: (address: string) => IngestionCoverage | null;
   addressState: (address: string) => AddressState;
   isCustodial: (address: string) => boolean;
+  serviceOf?: (address: string) => RegistryEntry | undefined;
+  hasUserLabel?: (address: string) => boolean;
 };
 
 export type TraceNode = {
@@ -23,6 +26,9 @@ export type TraceNode = {
   boundaries: BoundaryKind[];
   /** Conversion steps on this address. */
   conversions: string[];
+  service?: { id: string; name: string; category: string };
+  memberServiceId?: string;
+  internalMovements?: string[];
 };
 
 export type TraceEdge = {
@@ -39,6 +45,8 @@ export type TraceEdge = {
   lastTime: number | null;
   /** Points back toward the seed (a cycle or return). */
   returns: boolean;
+  /** Real endpoints for every step, even when a service node is collapsed. */
+  via?: { stepId: string; from: string; to: string }[];
 };
 
 export type TraceIssue =
@@ -55,7 +63,7 @@ type MovementStep = Extract<TraceStep, { kind: "movement" }>;
  * The trace as nodes and edges, read against current evidence. Pure: nothing
  * is dropped, merged into another movement or re-pointed. A step whose
  * movement is gone or changed is reported stale and still drawn from its
- * stored reference. Presentation (positions, styles, annotations) isn't read.
+ * stored reference. Service expansion reads presentation; positions, styles and annotations do not affect evidence.
  */
 export function buildTraceView(trace: Trace, evidence: TraceEvidence): TraceView {
   const issues: TraceIssue[] = [];
@@ -146,7 +154,55 @@ export function buildTraceView(trace: Trace, evidence: TraceEvidence): TraceView
     const reason = outOfScope(trace, ref, Math.max(Math.abs(depth.get(ref.from!) ?? 0), Math.abs(depth.get(ref.to!) ?? 0)));
     if (reason) issues.push({ kind: "out_of_scope", stepId: step.id, reason });
   }
-  return { nodes, edges, issues };
+  return { ...foldServices(nodes, edges, trace, evidence), issues };
+}
+
+function foldServices(nodes: TraceNode[], edges: TraceEdge[], trace: Trace, evidence: TraceEvidence): Pick<TraceView, "nodes" | "edges"> {
+  if (!evidence.serviceOf) return { nodes, edges };
+  const expanded = new Set(trace.presentation.expandedServices);
+  const idOf = (address: string) => {
+    const entry = evidence.serviceOf?.(address);
+    return entry && !expanded.has(entry.protocolId) && !evidence.hasUserLabel?.(address) && !["PRIMARY", "MAPPED"].includes(evidence.addressState(address)) ? `entity:${entry.protocolId}` : address;
+  };
+  const groupedNodes = new Map<string, TraceNode>();
+  for (const node of nodes) {
+    const id = idOf(node.id);
+    const entry = id !== node.id ? evidence.serviceOf(node.id) : undefined;
+    const previous = groupedNodes.get(id);
+    if (!previous) groupedNodes.set(id, { ...node, id, service: entry ? { id: entry.protocolId, name: entry.protocolName, category: entry.category } : undefined, memberServiceId: evidence.serviceOf(node.id)?.protocolId, internalMovements: [] });
+    else {
+      previous.addresses.push(...node.addresses);
+      previous.isSeed ||= node.isSeed;
+      if (node.depth !== null && (previous.depth === null || Math.abs(node.depth) < Math.abs(previous.depth))) previous.depth = node.depth;
+      previous.boundaries = [...new Set([...previous.boundaries, ...node.boundaries])];
+      previous.conversions.push(...node.conversions);
+    }
+  }
+  const groupedEdges = new Map<string, TraceEdge>();
+  for (const edge of edges) {
+    const from = idOf(edge.from), to = idOf(edge.to);
+    if (from === to) { groupedNodes.get(from)?.internalMovements?.push(...edge.steps); continue; }
+    const id = `${from}->${to}`;
+    const via = edge.steps.map((stepId) => ({ stepId, from: edge.from, to: edge.to }));
+    const previous = groupedEdges.get(id);
+    if (!previous) groupedEdges.set(id, { ...edge, id, from, to, provenance: from !== edge.from || to !== edge.to ? "service" : edge.provenance, via });
+    else {
+      previous.steps.push(...edge.steps);
+      previous.via?.push(...via);
+      for (const total of edge.totals) {
+        const existing = previous.totals.find((item) => item.assetId === total.assetId);
+        if (existing) existing.amount = (BigInt(existing.amount) + BigInt(total.amount)).toString();
+        else previous.totals.push({ ...total });
+      }
+      const times = [previous.firstTime, edge.firstTime].filter((time): time is number => time !== null);
+      previous.firstTime = times.length ? Math.min(...times) : null;
+      const last = [previous.lastTime, edge.lastTime].filter((time): time is number => time !== null);
+      previous.lastTime = last.length ? Math.max(...last) : null;
+      previous.returns ||= edge.returns;
+      if (from !== edge.from || to !== edge.to) previous.provenance = "service";
+    }
+  }
+  return { nodes: [...groupedNodes.values()], edges: [...groupedEdges.values()] };
 }
 
 /**
@@ -206,7 +262,7 @@ function depths(roots: readonly string[], resolved: readonly { ref: MovementRef 
  */
 function boundaries(address: string, frontier: boolean, evidence: TraceEvidence): BoundaryKind[] {
   const out: BoundaryKind[] = [];
-  if (evidence.isCustodial(address)) out.push("custodial");
+  if (evidence.isCustodial(address)) return ["custodial"];
   if (!frontier) return out;
   const coverage = evidence.coverage(address);
   if (coverage) out.push(coverage.complete ? "end_of_history" : "partial_history");

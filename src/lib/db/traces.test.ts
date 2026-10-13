@@ -34,6 +34,18 @@ function stubDb() {
 }
 
 describe("trace database lifecycle", () => {
+  it("creates selected seed movements and scope in one write", async () => {
+    const { db, rows } = stubDb();
+    const step = stepOf(event("seed", [{ assetId: "SOL", from: "A", to: "B", amount: "5" }]));
+    if (step.kind !== "movement") throw new Error("Expected movement fixture.");
+    const scope = { assets: ["SOL"], start: "2026-01-01T00:00:00.000Z", end: "2026-01-31T23:59:59.999Z", minAmount: null, maxHops: 4 };
+    const saved = await createTrace(db, { caseId: "c1", name: "Seeded", seed: { kind: "transaction", signature: "seed" }, direction: "both", scope, steps: [step] }, { id: "seeded" });
+    expect(rows.get("seeded")).toMatchObject({ steps: [step], scope, direction: "both" });
+    expect(saved.steps).toEqual([step]);
+    await expect(createTrace(db, { caseId: "c1", name: "Invalid", seed: { kind: "transaction", signature: "seed" }, steps: [{ ...step, id: "bad", ref: { ...step.ref, amount: "1.5" } }] }, { id: "invalid" })).rejects.toThrow();
+    expect(rows.has("invalid")).toBe(false);
+  });
+
   it("creates, reads, lists by case, renames, and deletes", async () => {
     const { db } = stubDb();
     const a = await createTrace(db, { caseId: "c1", name: " First ", seed: { kind: "address", address: "A" } }, { id: "a" });

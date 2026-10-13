@@ -1,6 +1,6 @@
 # Sprint 07 — Service, Protocol, and Entity Integration
 
-**Status:** Planned
+**Status:** Planned (implemented on `trace-graph`; merge and live-data browser checks pending)
 **Depends on:** 06
 
 ## Summary and Why It Matters
@@ -23,9 +23,9 @@ Investigators think in "Binance", "Magic Eden", "Jupiter", not in vault and fee-
 - Registry coverage of pools, vaults and authorities is thin (`CHRONOLOGY_OPEN_ISSUES.md` 5.1); exchange coverage depends on `centralized-vaults.json` (5.2).
 - No notion of "custodial" beyond category `exchange`.
 
-### Assumptions requiring confirmation
+### Custody decision
 
-- Treat registry category `exchange` (and any `bridge`-category deposit addresses) as custodial; everything else non-custodial.
+- Treat verified registry category `exchange` as custodial for this beta. Bridge deposits need separate evidence before the same rule applies.
 
 ## Objectives and User Outcomes
 
@@ -96,14 +96,14 @@ This is the same exemption logic as the Graph's `clusterOf` in `case-shell.tsx` 
 ### Task Group A — Model
 
 - [ ] Extract or reuse the "keeps its own node" predicate (labelled, look-alike, mapped); verify Graph output unchanged with an existing graph test
-- [ ] Folding in `buildTraceView` with `via` per step and `addresses` per node
-- [ ] Custody check; forward candidates suppressed from custodial nodes; boundary attached
+- [x] Folding in `buildTraceView` with `via` per step and `addresses` per node
+- [x] Custody check; forward candidates suppressed from custodial nodes; boundary attached
 
 ### Task Group B — UI
 
-- [ ] Entity node drawing; expand and collapse actions writing `setServiceExpanded`
-- [ ] Hover and inspector "via" display
-- [ ] Candidate rows with service names and custodial marker
+- [x] Entity node drawing; expand and collapse actions writing `setServiceExpanded`
+- [x] Hover and inspector "via" display
+- [x] Candidate rows with service names and custodial marker
 
 ## UI Behavior and Example Scenarios
 
@@ -151,3 +151,9 @@ Folding is a map over steps (O(steps)). No measurable cost; covered by 02's view
 ## Handoff Notes for the Next Sprint
 
 08 hides and focuses branches; collapsed services count as a single node for branch operations.
+
+## Implementation Record — 2026-10-13
+
+`buildTraceView` folds registry addresses into protocol nodes by default, keeps labelled and mapped addresses separate, records real endpoints in `via`, and lists internal service movements on the node. Expanding displays individual addresses while stored steps and entity positions remain intact; connectors attached to a hidden entity use its first visible address. Candidate rows show registry names and custodial markers. Verified exchange addresses stop forward candidate continuation, while backward deposit candidates remain available. Custody uses `exchange` only for this beta; bridge treatment needs separate evidence.
+
+`services.test.ts` covers folding, expansion, preserved endpoints, separate protocols, mapped and labelled exemptions, internal movements and custody direction. Existing Graph tests pass unchanged. The browser had no loaded transactions or service addresses, so F5, marketplace fee folding and service hover remain to be checked with a suitable case before this sprint is marked done.

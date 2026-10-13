@@ -1,6 +1,6 @@
 # Sprint 06 — Investigator-Guided Trace Building
 
-**Status:** Planned. **MVP checkpoint** at the end of this sprint. Core storage and canvas code from Sprints 04 and 05 is committed on `trace-graph`; their merge and final browser checks remain pending.
+**Status:** Planned (implemented on `trace-graph`; merge and live-data browser checks pending). **MVP checkpoint** at the end of this sprint.
 **Depends on:** 03, 04, 05
 
 ## Summary and Why It Matters
@@ -21,9 +21,9 @@ This is where the Trace Graph becomes usable: start a trace from something alrea
 - Toasts with Undo actions are used for reversible changes (`sonner`, e.g. unmap undo).
 - Ingestion state: `idle | running | done | error` (`src/hooks/use-ingestion.ts`).
 
-### Gaps and limitations
+### Remaining gaps and limitations
 
-- No menu or popover components in `src/components/ui/` yet (add via shadcn, or wrap Base UI directly).
+- Trace controls use direct buttons, and node and edge context menus live in the canvas. They do not depend on a shared menu component.
 
 ### Assumptions requiring confirmation
 
@@ -134,27 +134,27 @@ Node: Next movements · Earlier movements · Map wallet (if OBSERVED) · Colour 
 
 ### Task Group A — Shell
 
-- [ ] Add "Trace" to the view switcher; route `/case/<id>/trace/<traceId?>`; an unknown trace id shows "Trace not found" with the list
-- [ ] Movement index memo in `CaseWorkspace`, built only for `view === "trace"`
-- [ ] Trace menu: list, new, rename, duplicate, delete with confirm
+- [x] Add "Trace" to the view switcher; route `/case/<id>/trace/<traceId?>`; an unknown trace id shows "Trace not found" with the list
+- [x] Movement index memo in `CaseWorkspace`, built only for `view === "trace"`
+- [x] Trace controls: list, new, rename, duplicate, delete with confirm
 
 ### Task Group B — Seed
 
-- [ ] Seed dialog with validation, direction, assets, time, min amount, hops
-- [ ] Seed-by-transaction movement picker
-- [ ] Entry actions in the three inspectors
+- [x] Seed dialog with validation, direction, assets, time, min amount, hops
+- [x] Seed-by-transaction movement picker
+- [x] Entry actions in the three inspectors
 
 ### Task Group C — Candidates
 
-- [ ] Candidate panel with grouping, filters, paging (50), toggles, completeness header, hidden marking, conversions and boundaries
-- [ ] Add selected; Undo toast; > 25 confirmation; max-hops refusal
-- [ ] Remove steps (edge menu, Delete key, bundled chooser)
+- [x] Candidate panel with grouping, filters, paging (50), toggles, completeness header, hidden marking, conversions and boundaries
+- [x] Add selected; Undo toast; > 25 confirmation; max-hops refusal
+- [x] Remove steps (edge menu, Delete key, bundled chooser)
 
 ### Task Group D — Continue and states
 
-- [ ] Map-to-continue with the existing dialog; loading, done and error states in the panel
-- [ ] Empty, loading (ingestion running), and error (IndexedDB, ingestion) states for the view
-- [ ] Step summary panel (MVP inspector)
+- [x] Map-to-continue with the existing dialog; loading, done and error states in the panel
+- [x] Empty, loading (ingestion running), and error (IndexedDB, ingestion) states for the view
+- [x] Step summary panel (MVP inspector)
 
 ## UI Behavior and Example Scenarios
 
@@ -205,3 +205,9 @@ Candidate queries run synchronously on the in-memory index (03 budgets). The pan
 ## Handoff Notes for the Next Sprint
 
 07 changes how service addresses appear in nodes and candidates; 08 adds undo and branch tools on top of the same updaters; 09 replaces the step summary with the full inspector.
+
+## Implementation Record — 2026-10-13
+
+The branch adds a Trace view, saved trace management, address/transaction/movement seed dialog, scope dialog, paginated candidate panel, compact per-movement summary, map-to-continue action, and entry actions in address, transaction and graph-edge inspectors. Candidate rows keep hidden and already-added movements visible. Adding steps is explicit, limited by hops, and offers Undo for the exact new step ids. Removing a bundled edge can remove one step or all. New traces save chosen seed steps and scope atomically; invalid initial steps are rejected before storage.
+
+`pnpm test`, `pnpm typecheck`, `pnpm lint` and `next build --webpack` pass. Browser smoke check created and reopened an address trace and saved a note. The browser had no RPC endpoint, so F1–F3/F7 with loaded movements, map-to-continue, failed-load behavior, and cross-view regression checks remain. The MVP acceptance box stays open until those checks pass.

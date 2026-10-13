@@ -51,7 +51,7 @@ It **reads** the existing semantic model (`SemanticEvent.flows`). It never chang
 | Graph narrowed to signatures | Existing | `TxFilter.relationship`, `case-shell.tsx` `onShowInGraph` |
 | History for an observed address | **Missing by design**: only PRIMARY and MAPPED wallets are loaded (`docs/TERMINOLOGY.md`) | "Map wallet" (`mapWallet`, `useIngestion.start`) |
 | Context transactions outside the case range | Missing (planned in MVP Sprint 10, not built) | — |
-| Trace storage, layout, UI | Partly implemented on `trace-graph`: Dexie v7 storage, placement, evidence canvas and read-only list; trace creation and candidate UI remain planned | `src/lib/db/traces.ts`, `src/lib/trace/layout.ts`, `src/app/case/trace/` |
+| Trace storage, layout, UI | Implemented on `trace-graph`: Dexie v7 storage, placement, evidence and annotation canvas, guided creation, candidates and service folding; live-data browser checks remain | `src/lib/db/traces.ts`, `src/lib/trace/layout.ts`, `src/app/case/trace/` |
 | Case export/import | Missing | MVP Sprint 10 |
 | Global Preferences | Planned separately (`docs/sprints/global-preferences/`) | optional Sprint 12 here |
 
@@ -108,7 +108,7 @@ It **reads** the existing semantic model (`SemanticEvent.flows`). It never chang
 
 Change a status only when the sprint's code is merged and its Definition of Done has been checked, never because a plan exists.
 
-**Branch progress (2026-10-13, `2fc512a`):** Sprint 04 storage, validation, edit updaters and case deletion cascade are committed and tested; the Storage page count was checked in a clean browser session. Sprint 05 placement, routing and evidence canvas are committed and tested, but live canvas drag and frame rate remain unverified. Their status stays Planned until the code is merged and browser checks are complete. Sprint 05A annotations and Sprint 06 trace creation and candidate selection have not been built.
+**Branch progress (2026-10-13):** Sprints 05A–07 have working code on `trace-graph`: annotation tools, guided trace creation and candidate selection, compact step details, and protocol folding with custody stops. Unit tests, typecheck, lint and a production build pass. A browser smoke test created an address trace, edited a note and reopened the trace in a local case. This browser had no RPC endpoint, so movement selection, map-to-continue, service expand/collapse and large-case performance still need live-data browser checks. Sprint statuses stay Planned until merge and Definition of Done checks.
 
 ## 6. Milestones
 

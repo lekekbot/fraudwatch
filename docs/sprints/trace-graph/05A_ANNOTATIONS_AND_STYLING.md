@@ -1,6 +1,6 @@
 # Sprint 05A — Annotations and Styling
 
-**Status:** Planned (model and updaters exist; annotation UI is not implemented)
+**Status:** Planned (implemented on `trace-graph`; merge and full browser checks pending)
 **Depends on:** 04 (updaters), 05 (canvas, selection, placement)
 
 *Added 2026-10-10 for D8: the trace canvas carries the investigator's own notes and drawings, like draw.io, kept visibly apart from evidence.*
@@ -17,11 +17,11 @@ Investigators reason on the diagram itself: "same operator?", a box around the w
 - Annotation and style types, `resolveEnd`, `detachEnds` (02 `src/lib/trace/presentation.ts`); updaters `addAnnotation`, `updateAnnotation`, `removeAnnotations`, `reorderAnnotation`, `setNodeStyle` with size caps (04).
 - UI kit: `src/components/ui/` has button, dialog, input, textarea, popover, segmented and switch (popover/segmented/switch added by Global Preferences).
 
-**Branch status (2026-10-13):** Sprint 02 defines annotation and style data; Sprint 04 adds validated updaters; Sprint 05 draws stored node colours, sizes and note markers. The canvas does not draw annotations or provide tools to create, edit, move or style them. None of this sprint's acceptance criteria is complete.
+**Branch status (2026-10-13):** The canvas now draws and edits notes, shapes, frames and dashed connectors. Tools, resize handles, text editing, styling, duplication, z-order and deletion use the Sprint 04 updaters. Browser checks covered note editing and reload; the other annotation kinds still need browser checks.
 
-### Gaps and limitations
+### Remaining gaps and limitations
 
-- No text editing on any canvas; no resize handles; no colour picker component.
+- The inline style controls use palette keys; there is no separate colour picker component. Automatic zoom to 100% before editing at very small zoom remains open.
 
 ### Assumptions requiring confirmation
 
@@ -92,19 +92,19 @@ The legend chip is always drawn (and drawn into PNG exports, 11).
 
 ### Task Group A — Geometry
 
-- [ ] `geometry.ts`: item bounds, border attachment point, hit tests, frame containment, resize with handles and aspect lock
-- [ ] Tests
+- [x] `geometry.ts`: item bounds, border attachment point, hit tests, frame containment, resize with handles and aspect lock
+- [x] Tests
 
 ### Task Group B — Canvas
 
-- [ ] Draw notes, shapes, frames, connectors with the visual rules above; legend chip
-- [ ] Selection, move, resize handles, z-order, duplicate, delete
-- [ ] Connector tool with attach/detach; label editing
-- [ ] Text editing overlay
+- [x] Draw notes, shapes, frames, connectors with the visual rules above; legend chip
+- [x] Selection, move, resize handles, z-order, duplicate, delete
+- [x] Connector tool with attach/detach; label editing
+- [x] Text editing overlay
 
 ### Task Group C — Styling
 
-- [ ] Style popover for nodes and annotations; node note
+- [x] Style controls for nodes and annotations; node note (inline toolbar rather than a popover)
 
 ## UI Behavior and Example Scenarios
 
@@ -143,7 +143,7 @@ The legend chip is always drawn (and drawn into PNG exports, 11).
 ## Acceptance Criteria (observable and measurable)
 
 - [ ] Every annotation kind can be created, moved, resized, restyled, edited and deleted, and survives reload (browser).
-- [ ] Evidence/annotation separation tests pass.
+- [x] Evidence/annotation separation tests pass.
 - [ ] Legend chip visible at every zoom.
 
 ## Definition of Done
@@ -157,3 +157,9 @@ The legend chip is always drawn (and drawn into PNG exports, 11).
 ## Handoff Notes for the Next Sprint
 
 08 wraps these updaters in undo/redo. 09 shows annotations in the inspector. 11 exports them in the `canvas` block and draws them, with the legend, in the PNG.
+
+## Implementation Record — 2026-10-13
+
+The branch adds `src/lib/trace/geometry.ts` and canvas tools for notes, rectangles, ellipses, frames and user connectors. Connector endpoints attach to node or annotation borders and can be dragged back to free points or another item. Frame drags save contained node and annotation movement together. The inline style toolbar changes node colour, size and note, and annotation colour, fill, arrow and order. The legend stays in HTML over the canvas at every zoom. `view.test.ts` proves presentation edits do not change evidence output; `geometry.test.ts` covers border, handles, resizing and hit maths.
+
+Browser smoke check: an address trace was created, a note was edited and its text survived reload. Shape, connector, frame, shortcut and reduced-motion checks remain. At very small zoom, text editing uses a fixed-size screen overlay; the planned automatic zoom to 100% is not implemented. Canvas frame-rate measurement remains Sprint 10 work.

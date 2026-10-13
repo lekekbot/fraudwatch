@@ -157,13 +157,14 @@ The event inspector's **Developer details** shows, for the selected transaction:
 
 ## Trace Graph model (`src/lib/trace/`)
 
-A trace reads the semantic model and stores only the investigator's decisions. The `trace-graph` branch contains the model, movement index, local storage and evidence canvas. Trace creation and candidate selection remain planned for Sprint 06. See `docs/sprints/trace-graph/` for status and remaining checks.
+A trace reads the semantic model and stores only the investigator's decisions. The `trace-graph` branch now includes guided creation, candidate selection, annotations, and service folding. Live transaction and service browser checks remain pending. See `docs/sprints/trace-graph/` for status.
 
 - **Steps reference movements by content** (`movementKey`, `keyedFlows` in `model.ts`): signature, event index, asset, owners, amount and an occurrence counter. Nothing from the transaction is copied. `buildTraceView` (`view.ts`) re-resolves every step against the current events each time; a step whose movement is gone or changed is reported stale and kept, never re-pointed.
 - **Classification** (`classifyEvent`, `movements.ts`): each flow is a primary or supporting movement, part of a conversion, a boundary, or excluded (settlement, zero, bridge cost). The network fee is never a flow. `buildMovementIndex` builds per-address chronological lists once; `candidates` filters and pages them.
-- **Presentation is separate** (`presentation.ts`): node positions, styles and annotations (notes, shapes, user connectors) are the investigator's diagram, never evidence. `buildTraceView` doesn't read them.
+- **Presentation is separate** (`presentation.ts`): node positions, styles and annotations (notes, shapes, user connectors) are the investigator's diagram, never evidence. `buildTraceView` reads only the service expansion flag from presentation; positions, styles and annotations cannot change movements or totals.
 - **Local storage** (`src/lib/db/traces.ts`, Dexie v7): each trace is a separate case-scoped record. `parseTrace` validates reads, preserves unreadable items for review and migrates older records; saves for one trace are serialized. Case deletion removes its traces, while clearing transaction cache keeps them.
-- **Canvas** (`layout.ts`, `src/app/case/trace/`): missing nodes are auto-placed without moving placed nodes; drag and Tidy layout save presentation positions. The current UI lists saved traces and renders their evidence canvas. Trace creation and movement selection have no UI yet.
+- **Canvas and workflow** (`layout.ts`, `src/app/case/trace/`): missing nodes are auto-placed without moving placed nodes; drag and Tidy layout save positions. The UI creates and manages traces, picks movements from paginated candidates, shows compact step details, and saves notes, shapes, frames and user connectors. Solid lines are observed evidence; dashed lines are user annotations.
+- **Service nodes** (`view.ts`): registry addresses fold by protocol unless labelled, mapped or expanded. Every folded edge retains the real endpoints in `via`. Verified exchange nodes are custodial boundaries, so forward candidates stop there.
 - No trace operation issues an RPC request; continuing past an unloaded address means mapping it.
 
 ## Where work runs

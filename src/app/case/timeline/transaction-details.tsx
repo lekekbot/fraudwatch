@@ -76,6 +76,7 @@ export function TransactionDetails({
   bookmarked,
   onToggleBookmark,
   onShowInGraph,
+  onTrace,
   observations = [],
 }: {
   effect: WalletTransactionEffect;
@@ -101,6 +102,7 @@ export function TransactionDetails({
   onToggleBookmark: () => void;
   /** The Graph, narrowed to the wallets in this event. */
   onShowInGraph?: () => void;
+  onTrace?: () => void;
   /** Behaviour observations this transaction is part of. */
   observations?: readonly BehaviorObservation[];
 }) {
@@ -142,6 +144,7 @@ export function TransactionDetails({
               <WaypointsIcon />
             </Button>
           )}
+          {onTrace && <Button variant="ghost" size="sm" onClick={onTrace}>Trace transaction</Button>}
           <Button variant="ghost" size="icon-sm" aria-label="Hide from map" title="Hide from map" onClick={onHide}>
             <EyeOffIcon />
           </Button>

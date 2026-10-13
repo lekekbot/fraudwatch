@@ -7,12 +7,14 @@ const validPoint = (p: Point) => Number.isFinite(p.x) && Number.isFinite(p.y);
 
 export function addSteps(trace: Trace, steps: readonly TraceStep[], now = new Date()): Trace {
   const keys = new Set(trace.steps.filter((s) => s.kind === "movement").map((s) => s.ref.key));
+  const conversions = new Set(trace.steps.filter((s) => s.kind === "conversion").map((s) => `${s.signature}:${s.address}`));
   const ids = new Set(trace.steps.map((s) => s.id));
   const added: TraceStep[] = [];
   for (const step of steps) {
-    if (ids.has(step.id) || (step.kind === "movement" && keys.has(step.ref.key))) continue;
+    if (ids.has(step.id) || (step.kind === "movement" && keys.has(step.ref.key)) || (step.kind === "conversion" && conversions.has(`${step.signature}:${step.address}`))) continue;
     ids.add(step.id);
     if (step.kind === "movement") keys.add(step.ref.key);
+    else conversions.add(`${step.signature}:${step.address}`);
     added.push(step);
   }
   return added.length ? stamp(trace, { steps: [...trace.steps, ...added] }, now) : trace;
@@ -36,10 +38,10 @@ export function removeSteps(trace: Trace, stepIds: ReadonlySet<string>, now = ne
   if (steps.length === trace.steps.length) return trace;
   const remaining = { ...trace, steps };
   const nodes = activeNodes(remaining);
-  const removed = new Set(Object.keys(trace.presentation.positions).filter((id) => !nodes.has(id)));
+  const removed = new Set(Object.keys(trace.presentation.positions).filter((id) => !nodes.has(id) && !id.startsWith("entity:")));
   const detached = detachEnds(trace.presentation, removed);
-  const positions = Object.fromEntries(Object.entries(detached.positions).filter(([id]) => nodes.has(id)));
-  const nodeStyles = Object.fromEntries(Object.entries(detached.nodeStyles).filter(([id]) => nodes.has(id)));
+  const positions = Object.fromEntries(Object.entries(detached.positions).filter(([id]) => nodes.has(id) || id.startsWith("entity:")));
+  const nodeStyles = Object.fromEntries(Object.entries(detached.nodeStyles).filter(([id]) => nodes.has(id) || id.startsWith("entity:")));
   return stamp(trace, { steps, presentation: { ...detached, positions, nodeStyles } }, now);
 }
 

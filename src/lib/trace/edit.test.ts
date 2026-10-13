@@ -18,6 +18,14 @@ describe("pure trace edits", () => {
     expect(duplicateTrace(added, { id: "copy", now }).id).toBe("copy");
   });
 
+  it("adds one conversion per signature and address and keeps service placement", () => {
+    const conversion = { id: "swap", kind: "conversion" as const, signature: "s", address: "A", spent: [{ assetId: "SOL", amount: "5" }], received: [{ assetId: "USDC", amount: "10" }], addedAt: now.toISOString() };
+    const saved = addSteps(base(), [conversion, { ...conversion, id: "swap-again" }], now);
+    expect(saved.steps).toEqual([conversion]);
+    const positioned = setPositions(addSteps(saved, [step], now), { "entity:binance": { x: 30, y: 40 }, B: { x: 100, y: 20 } }, now);
+    expect(removeSteps(positioned, new Set([step.id]), now).presentation.positions).toEqual({ "entity:binance": { x: 30, y: 40 } });
+  });
+
   it("prunes removed nodes but detaches connector ends", () => {
     const added = addSteps(base(), [step], now);
     const positioned = setPositions(added, { A: { x: 0, y: 0 }, B: { x: 200, y: 0 } }, now);

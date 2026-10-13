@@ -71,6 +71,10 @@ import { copy } from "./timeline/inspector-ui";
 import { TransactionDetails } from "./timeline/transaction-details";
 import { TraceView } from "./trace/trace-view";
 import type { TraceEvidence } from "@/lib/trace/view";
+import { buildMovementIndex, chronologicalOrder } from "@/lib/trace/movements";
+import { classifyEvent } from "@/lib/trace/movements";
+import type { MovementRef, TraceSeed } from "@/lib/trace/model";
+import type { TraceStartRequest } from "./trace/seed-dialog";
 import { type TableNav, type TableSide, WalletStateSummary, WalletStateTable } from "./wallet-state-view";
 
 /** Most counterparties whose .sol names are looked up per case, busiest first. */
@@ -184,6 +188,7 @@ function CaseWorkspace({ c, prefs, rpc, rpcKnown }: { c: FraudWatchCase; prefs: 
   const [graphEntities, setGraphEntities] = useState<ReadonlySet<string>>(new Set());
   /** Observed address the Map wallet dialog is open for. */
   const [mapTarget, setMapTarget] = useState<string | null>(null);
+  const [traceSeed, setTraceSeed] = useState<TraceStartRequest | null>(null);
   /** The "Add wallet" dialog, for an address the map hasn't met. */
   const [addingWallet, setAddingWallet] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -256,6 +261,11 @@ function CaseWorkspace({ c, prefs, rpc, rpcKnown }: { c: FraudWatchCase; prefs: 
     for (const [signature, tx] of transactions ?? []) out.set(signature, interpretTransaction(tx, { nfts })[0]);
     return out;
   }, [transactions, nfts]);
+  const traceIndex = useMemo(() => {
+    if (view !== "trace") return null;
+    const order = chronologicalOrder(transactions?.values() ?? []);
+    return buildMovementIndex(semanticEvents.values(), (signature) => order.get(signature));
+  }, [view, transactions, semanticEvents]);
   // Summaries once per wallet (the costly part); filtering below is plain comparisons on them.
   const summariesByWallet = useMemo(() => {
     const out = new Map<string, EffectSummary[]>();
@@ -453,7 +463,10 @@ function CaseWorkspace({ c, prefs, rpc, rpcKnown }: { c: FraudWatchCase; prefs: 
     coverage: (address) => state.status === "done" ? state.result.wallets.find((w) => w.wallet === address)?.coverage ?? null : null,
     addressState: (address) => addressState(address, c, registry, programs),
     isCustodial: (address) => registry.lookup(address)?.category === "exchange",
-  }), [semanticEvents, state, c, programs]);
+    serviceOf: (address) => registry.lookup(address),
+    hasUserLabel: (address) => Boolean(names.label(address)),
+  }), [semanticEvents, state, c, programs, names]);
+  const startTrace = (seed: TraceSeed, refs?: MovementRef[]) => { setTraceSeed({ seed, refs }); routeTo("trace"); };
   const shareSearch = buildMapSearch({ wallet: c.primaryWallet, range: c.range });
 
   // Lane order: saved order, else primary then first appearance. Focus narrows without changing it.
@@ -777,6 +790,7 @@ function CaseWorkspace({ c, prefs, rpc, rpcKnown }: { c: FraudWatchCase; prefs: 
         verdictOf={names.verdict}
         onHideDecoys={decoysHidden ? undefined : hideDecoys}
         onSelectAddress={setSelectedAddress}
+        onTrace={() => startTrace({ kind: "address", address })}
         transactionCount={address === selectedWallet ? undefined : counterparties.find((r) => r.address === address)?.count}
         beforeAnnotations={
           <>
@@ -977,6 +991,7 @@ function CaseWorkspace({ c, prefs, rpc, rpcKnown }: { c: FraudWatchCase; prefs: 
         effect={effect}
         summary={table.summaries[index]}
         event={semanticEvents.get(effect.signature)}
+        onTrace={() => startTrace({ kind: "transaction", signature: effect.signature })}
         wallet={tableTx!.wallet}
         observations={observations.filter((o) => o.events.some((e) => e.signature === effect.signature))}
         tx={state.result.transactions.get(effect.signature)}
@@ -1003,7 +1018,7 @@ function CaseWorkspace({ c, prefs, rpc, rpcKnown }: { c: FraudWatchCase; prefs: 
 
   let center: React.ReactNode;
   if (view === "trace") {
-    center = <TraceView caseId={c.id} traceId={route.traceId} evidence={traceEvidence} names={canvasNames} assets={walletStates?.assets ?? EMPTY_ASSETS} />;
+    center = <TraceView caseId={c.id} traceId={route.traceId} evidence={traceEvidence} index={traceIndex} caseRange={c.range} loadedRange={(address) => { const wallet = c.mappedWallets.find((item) => item.address === address); return wallet ? walletRange(c, wallet) : null; }} hiddenReason={(signature) => reasons.get(signature) === "manual" ? "manual" : reasons.get(signature) ? "rule" : null} names={canvasNames} assets={walletStates?.assets ?? EMPTY_ASSETS} requestedSeed={traceSeed} onSeedHandled={() => setTraceSeed(null)} onMapWallet={(address) => { setMapError(null); setMapTarget(address); }} onOpenTransaction={(signature, from, to) => goToTransaction(signature, c.mappedWallets.find((wallet) => wallet.address === from || wallet.address === to)?.address)} loadStatus={state.status} loadError={state.status === "error" ? state.error : null} />;
   } else if (state.status === "done" && walletStates && walletState && visible && visibleState) {
     center =
       view === "graph" && graph ? (
@@ -1089,6 +1104,16 @@ function CaseWorkspace({ c, prefs, rpc, rpcKnown }: { c: FraudWatchCase; prefs: 
                     }}
                     onOpenInTimeline={() => openInTimeline(`${graphNames.of(edge.a)} ↔ ${graphNames.of(edge.b)}`, [edge])}
                     onClose={() => setSelectedEdge(null)}
+                    onTrace={() => {
+                      const signatures = new Set(edge.interactions.map((item) => item.signature));
+                      const side = (address: string) => { const entry = registry.lookup(address); return entry && entry.category !== "core" && !c.mappedWallets.some((wallet) => wallet.address === address) ? entityNodeId(entry.protocolId) : address; };
+                      const refs = [...signatures].flatMap((signature) => {
+                        const event = semanticEvents.get(signature);
+                        return event ? classifyEvent(event).flatMap((item) => item.kind === "movement" && item.ref.from && item.ref.to && ((side(item.ref.from) === edge.a && side(item.ref.to) === edge.b) || (side(item.ref.from) === edge.b && side(item.ref.to) === edge.a)) ? [item.ref] : []) : [];
+                      });
+                      if (refs.length) startTrace({ kind: "address", address: refs[0].from! }, refs);
+                      else toast.info("No traceable movements on this connection.");
+                    }}
                   />
                   {/* An endpoint's Assets would repeat the connection's Assets above it. */}
                   {selectedAddress && (selectedEntity ? addressPanel : panelFor(selectedAddress, undefined, selectedAddress !== edge.a && selectedAddress !== edge.b))}
@@ -1244,7 +1269,7 @@ function CaseWorkspace({ c, prefs, rpc, rpcKnown }: { c: FraudWatchCase; prefs: 
           <span className="hidden truncate text-xs text-muted-foreground md:inline">{formatRange(c.range)}</span>
         </div>
 
-        {walletState && (
+        {(
           <div className="absolute left-1/2 flex -translate-x-1/2 rounded-lg border p-0.5" role="group" aria-label="View">
             {(["timeline", "graph", "table", "trace"] as const).map((v) => (
               <Button

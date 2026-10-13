@@ -130,6 +130,8 @@ export function buildMovementIndex(events: Iterable<SemanticEvent>, orderOf: (si
 export type CandidateQuery = {
   node: string;
   direction: "forward" | "backward";
+  /** Custodial deposits cannot be linked to later withdrawals on-chain. */
+  custodial?: boolean;
   /** Forward: only movements at or after this order (the arrival into the node). */
   after?: number;
   /** Backward: only movements at or before this order (the departure from the node). */
@@ -138,6 +140,7 @@ export type CandidateQuery = {
   /** Already in the trace. */
   exclude: ReadonlySet<MovementKey>;
   includeSupporting: boolean;
+  counterpartySearch?: string;
   hiddenReason: (signature: string) => "manual" | "rule" | null;
   /** The node's loaded history and the range it was loaded for; null when it isn't a mapped wallet (only movements touching mapped wallets are known). */
   loaded: { complete: IngestionCoverage["complete"]; start: string; end: string } | null;
@@ -169,6 +172,7 @@ export type CandidatePage = {
  * says how much of the node's history these can be.
  */
 export function candidates(index: MovementIndex, q: CandidateQuery, page: { cursor?: number; limit: number }): CandidatePage {
+  if (q.direction === "forward" && q.custodial) return { items: [], total: 0, completeness: completeness(q), nextCursor: null };
   const list = (q.direction === "forward" ? index.outgoing : index.incoming).get(q.node) ?? [];
   const { assets, start, end, minAmount } = q.scope;
   const [startMs, endMs] = [start ? Date.parse(start) : null, end ? Date.parse(end) : null];
@@ -179,6 +183,7 @@ export function candidates(index: MovementIndex, q: CandidateQuery, page: { curs
     if (q.after !== undefined && m.order < q.after) return false;
     if (q.before !== undefined && m.order > q.before) return false;
     if (assets && !assets.includes(ref.assetId)) return false;
+    if (q.counterpartySearch && !(q.direction === "forward" ? ref.to : ref.from)?.toLowerCase().includes(q.counterpartySearch.toLowerCase())) return false;
     // A movement without a block time can't be placed in the range; it stays, and the UI marks it.
     if (ref.time !== null && ((startMs !== null && ref.time < startMs) || (endMs !== null && ref.time > endMs))) return false;
     if (minAmount && ref.assetId === minAmount.assetId && BigInt(ref.amount) < BigInt(minAmount.amount)) return false;
