@@ -119,28 +119,6 @@ describe("Kamino lending", () => {
   });
 });
 
-describe("Drift spot withdrawals", () => {
-  it("reads the withdrawal amount and keeps the vault out of counterparties when a receipt token burns", () => {
-    const actor = "Actor";
-    const vault = "DriftVault";
-    const signer = "DriftSigner";
-    const data = getBase58Decoder().decode(new Uint8Array([183, 18, 70, 156, 148, 109, 161, 34, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0]));
-    const call = { ...ix("dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH", null), accounts: ["State", "User", "Stats", actor, vault, signer, "ActorUsdc", "TokenProgram"], data };
-    const tx = makeTx({
-      native: { [actor]: [SOL, SOL - FEE] },
-      tokens: [token("ActorUsdc", actor, USDC, 0, 100), token(vault, signer, USDC, 1000, 900), token("Receipt", actor, "ReceiptMint", 1, 0)],
-      instructions: [call],
-    });
-    tx.innerInstructions.push({ ...ix("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "burn", { account: "Receipt", mint: "ReceiptMint" }), outerIndex: 0 });
-    const e = only(interpretTransaction(tx));
-    expect([e.category, e.action, e.interpreter.id, e.confidence, e.protocol?.id]).toEqual(["LENDING", "WITHDRAW", "drift-spot", "HIGH", "drift"]);
-    expect(e.flows).toContainEqual(expect.objectContaining({ assetId: USDC, amount: "100", to: actor, role: "received" }));
-    expect(e.infrastructure).toContainEqual({ address: vault, role: "VAULT", label: "Drift spot market vault" });
-    expect(e.participants.some((p) => p.address === vault || p.address === signer)).toBe(false);
-    reconciles(e, tx);
-  });
-});
-
 describe("CCTP bridge envelopes", () => {
   it("keeps a v1 burn's destination, recipient, nonce and message account", () => {
     const { e } = event("cctp-v1-burn");

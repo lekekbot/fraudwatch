@@ -185,14 +185,18 @@ function participantsOf(
     roled.add(primary);
   }
   const nft = nftCategory ? ctx.nft?.summary.nft : undefined;
-  if (detail) {
-    if (detail.buyer) { add(detail.buyer, "BUYER"); roled.add(detail.buyer); }
-    if (detail.seller) { add(detail.seller, "SELLER"); roled.add(detail.seller); }
-  }
   if (nft) {
     // The other side: seller of a buy, buyer of a sale, payee of a mint, the other end of a transfer.
     const partyRole: ParticipantRole =
       action === "BUY" ? "SELLER" : action === "SELL" ? "BUYER" : category === "NFT_TRADE" ? "TRADER" : action === "RECEIVE" ? "SENDER" : "RECEIVER";
+    for (const [address, role] of [
+      [detail?.buyer, "BUYER"],
+      [detail?.seller, "SELLER"],
+    ] as const) {
+      if (!address) continue;
+      add(address, role);
+      roled.add(address);
+    }
     if (nft.party && !infrastructure.has(nft.party) && !roled.has(nft.party)) add(nft.party, partyRole);
     for (const o of nft.others) {
       if (o.role === "royalty") add(o.address, "ROYALTY_RECIPIENT");
@@ -292,11 +296,7 @@ export function interpretTransaction(
   const seen = new Set<string>();
   const flows = reading.flows ?? ctx.flows;
   const infrastructure = [...ctx.resolution.infrastructure];
-  for (const extra of reading.infrastructure ?? []) {
-    const existing = infrastructure.findIndex((i) => i.address === extra.address);
-    if (existing < 0) infrastructure.push(extra);
-    else if (infrastructure[existing].role === "TOKEN_ACCOUNT") infrastructure[existing] = extra;
-  }
+  for (const extra of reading.infrastructure ?? []) if (!infrastructure.some((i) => i.address === extra.address)) infrastructure.push(extra);
 
   return [
     {

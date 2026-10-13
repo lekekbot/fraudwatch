@@ -1,6 +1,6 @@
 {
   "$schema": "./schema.json",
-  "version": 13,
+  "version": 12,
   "protocols": {
     "solana": {
       "name": "Solana",
@@ -165,7 +165,6 @@
       "category": "perps",
       "addresses": {
         "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH": { "role": "program", "label": "Drift v2" },
-        "GXWqPpjQpdz7KZw9p7f5PX2eGxHAhvpNXiviFkAB8zXg": { "role": "vault", "label": "Drift spot market vault 0" },
         "dammHkt7jmytvbS3nHTxQNEcP59aE57nxwV21YdqEDN": { "role": "program", "label": "Drift Protocol Clearing House" }
       }
     },
@@ -229,7 +228,6 @@
       "addresses": {
         "M2mx93ekt1fmXSVkTrUL9xVFHkmME8HTUi5Cyc5aF7K": { "role": "program", "label": "Magic Eden v2" },
         "M3mxk5W2tt27WGT7THox7PmgRDp4m6NEhL5xvxrBfS1": { "role": "program", "label": "Magic Eden cNFT" },
-        "mmm3XBJg5gk8XJxEKBvdgptZz6SgK4tXvn36sodowMc": { "role": "program", "label": "Magic Eden MMM" },
         "MEisE1HzehtrDpAAT8PnLHjpSSkRYakotTuJRPjTpo8": { "role": "program", "label": "Magic Eden Marketplace (legacy)" },
         "rFqFJ9g7TGBD8Ed7TPDnvGKZ5pWLPDyxLcvcH2eRCtt": { "role": "fee_account", "label": "Magic Eden Treasury" },
         "1BWutmTvYPwDtmw9abTkS4Ssr8no61spGAvW1X6NDix": { "role": "authority", "label": "Magic Eden v2 Escrow Authority" }

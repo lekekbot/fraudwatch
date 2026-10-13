@@ -39,10 +39,6 @@ Snapshot checked against [Solscan's token leaderboard](https://solscan.io/leader
 
 ## Explorer-verified labels
 
-Magic Eden MMM program `mmm3XBJg5gk8XJxEKBvdgptZz6SgK4tXvn36sodowMc` and its Core sale account layouts are documented in the [MMM source](https://github.com/me-foundation/mmm/tree/main/programs/mmm/src/instructions/mpl_core_asset).
-
-Drift spot market vault 0 is the PDA derived from `spot_market_vault` and little-endian market index 0 under Drift v2. The [Drift account definitions](https://github.com/drift-labs/protocol-v2/blob/master/programs/drift/src/instructions/user.rs) specify those seeds and the withdrawal account order.
-
 Checked against Solscan's public labels on 2026-10-04:
 
 - Coinbase: `H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS`, `2AQdpHJ2JpcEgPiATUXjQxA8QmafFegfQwSLWSprPicm`, `GJRs4FwHtemZ5ZE9x3FNvJ8TMwitKTh21yxdRPqn7npE`

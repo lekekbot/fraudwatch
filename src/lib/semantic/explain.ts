@@ -58,7 +58,7 @@ export function explainEvent(event: SemanticEvent, o: ExplainOptions): Statement
     return `${o.name(f.to!)} received ${amount}`;
   };
   const main = event.flows.filter((f) => !SUPPORTING.has(f.role));
-  for (const f of main.slice(0, MAX_FLOWS)) add("fact", "met", `${f.source === "compressed_nft" ? "Bubblegum leaf event" : f.source === "core_nft" ? "Metaplex Core transfer" : "Balance change"}: ${flowText(f)}.`);
+  for (const f of main.slice(0, MAX_FLOWS)) add("fact", "met", `${f.source === "compressed_nft" ? "Bubblegum leaf event" : "Balance change"}: ${flowText(f)}.`);
   if (main.length > MAX_FLOWS) add("fact", "met", `And ${main.length - MAX_FLOWS} more balance changes.`);
   for (const e of event.evidence) {
     if (e.kind === "ASSET_METADATA") add("fact", "met", `On-chain metadata says ${o.asset(e.assetId)} is an NFT.`);
