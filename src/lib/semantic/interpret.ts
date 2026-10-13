@@ -296,7 +296,11 @@ export function interpretTransaction(
   const seen = new Set<string>();
   const flows = reading.flows ?? ctx.flows;
   const infrastructure = [...ctx.resolution.infrastructure];
-  for (const extra of reading.infrastructure ?? []) if (!infrastructure.some((i) => i.address === extra.address)) infrastructure.push(extra);
+  for (const extra of reading.infrastructure ?? []) {
+    const index = infrastructure.findIndex((i) => i.address === extra.address);
+    if (index < 0) infrastructure.push(extra);
+    else if (infrastructure[index].role === "TOKEN_ACCOUNT") infrastructure[index] = extra;
+  }
 
   return [
     {

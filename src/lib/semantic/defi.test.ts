@@ -1,8 +1,12 @@
 import { getBase58Decoder } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import { NATIVE_SOL } from "@/lib/assets/assets";
+import { buildInteractionGraph } from "@/lib/graph/build";
+import { registry } from "@/lib/protocols/registry";
 import type { RawParsedTransaction } from "@/lib/rpc/generic-adapter";
 import { canonicalize } from "@/lib/solana/canonical";
+import { reconstructWalletState } from "@/lib/state/reconstruct";
+import { summarizeEffect } from "@/lib/state/summarize";
 import { interpretTransaction } from "./interpret";
 import { projectEvent } from "./projection";
 import { FEE, ix, makeTx, only, read, reconciles, roles, SOL, token, USDC } from "./testing";
@@ -18,6 +22,57 @@ const main = (e: ReturnType<typeof event>["e"]) => e.flows.filter((f) => f.role 
 const REAL_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const MSOL = "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So";
 const JUPITER = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
+const DRIFT = "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH";
+
+describe("Drift withdrawals", () => {
+  it("reads a real wrapped SOL withdrawal after the temporary token account closes", () => {
+    const { tx, e } = event("drift-withdraw-sol");
+    const wallet = "HkGz4KmoZ7Zmk7HN6ndJ31UJ1qZ2qgwQxgVqQwovpZES";
+    const vault = "DfYCNezifxAEsQbAJ1b3j6PX3JVBe8fu11KBhxsbw5d2";
+    expect([e.category, e.action, e.interpreter.id, e.confidence, e.protocol?.id]).toEqual(["LENDING", "WITHDRAW", "drift-withdraw", "HIGH", "drift"]);
+    expect(main(e)).toEqual([["received", NATIVE_SOL, "30000030", null, wallet]]);
+    expect(roles(e)).toEqual([`${wallet}:WITHDRAWER`]);
+    expect(e.infrastructure.find((i) => i.address === vault)?.role).toBe("VAULT");
+    expect(registry.lookup(vault)?.role).toBe("vault");
+    reconciles(e, tx);
+  });
+
+  it("reads funds received from a Drift vault despite a receipt-token burn", () => {
+    const withdraw = getBase58Decoder().decode(new Uint8Array([183, 18, 70, 156, 148, 109, 161, 34, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0]));
+    const tx = makeTx({
+      native: { A: [SOL, SOL - FEE] },
+      tokens: [
+        token("driftVault", "driftSigner", USDC, 1000, 900),
+        token("userUsdc", "A", USDC, 0, 100),
+        token("receipt", "A", "ReceiptMint", 10, 0),
+      ],
+      instructions: [{ ...ix(DRIFT, null), data: withdraw, accounts: ["state", "user", "stats", "A", "driftVault", "driftSigner", "userUsdc"] }],
+    });
+    tx.innerInstructions.push(ix("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "burn", { account: "receipt", mint: "ReceiptMint" }));
+
+    const e = only(interpretTransaction(tx));
+    expect([e.category, e.action, e.interpreter.id, e.confidence, e.protocol?.id]).toEqual(["LENDING", "WITHDRAW", "drift-withdraw", "HIGH", "drift"]);
+    expect(main(e)).toEqual([["received", USDC, "100", null, "A"]]);
+    expect(roles(e)).toEqual(["A:WITHDRAWER"]);
+    expect(e.infrastructure).toContainEqual({ address: "driftVault", role: "VAULT", label: "Drift spot market vault" });
+    expect(e.infrastructure).toContainEqual({ address: "driftSigner", role: "PDA", label: "Drift signer" });
+    reconciles(e, tx);
+    const effects = reconstructWalletState("A", [tx], { historyComplete: true }).effects;
+    const summaries = effects.map((effect) => summarizeEffect(effect, tx));
+    expect(summaries[0].kind).toBe("BURN");
+    const graph = buildInteractionGraph([{ wallet: "A", effects, summaries, events: [e] }]);
+    expect(graph.edges.filter((edge) => edge.kind === "interaction")).toEqual([]);
+
+    tx.innerInstructions.unshift(tx.instructions[0]);
+    tx.instructions = [ix("Router1111", null)];
+    const routed = only(interpretTransaction(tx));
+    expect([routed.category, routed.action, routed.confidence]).toEqual(["LENDING", "WITHDRAW", "MEDIUM"]);
+    expect(routed.warnings).toContain("Drift withdrawal was called from inside another program.");
+
+    tx.innerInstructions[0] = { ...tx.innerInstructions[0], data: null };
+    expect(only(interpretTransaction(tx)).interpreter.id).not.toBe("drift-withdraw");
+  });
+});
 
 describe("Jupiter swaps", () => {
   it("reads a two-pool route as one swap for the trader, with the pools as evidence", () => {

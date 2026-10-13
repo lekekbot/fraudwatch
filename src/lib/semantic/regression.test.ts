@@ -37,6 +37,7 @@ const RECORDED: [file: string, category: string, action: string, interpreter: st
   ["defi/spl-stake-pool-deposit-sol.json", "STAKE", "LIQUID_STAKE", "spl-stake-pool", "HIGH"],
   ["defi/sanctum-router-deposit.json", "STAKE", "LIQUID_STAKE", "spl-stake-pool", "HIGH"],
   ["defi/marginfi-borrow.json", "LENDING", "BORROW", "marginfi-lending", "HIGH"],
+  ["defi/drift-withdraw-sol.json", "LENDING", "WITHDRAW", "drift-withdraw", "HIGH"],
   ["defi/pump-fun-sell.json", "SWAP", "SWAP", "known-dex-swap", "MEDIUM"],
   ["defi/relay-swap-deposit-token.json", "BRIDGE", "BRIDGE_OUT", "relay-bridge", "HIGH"],
   ["cnft/mint-v2.json", "NFT_MINT", "MINT", "generic-nft", "MEDIUM"],

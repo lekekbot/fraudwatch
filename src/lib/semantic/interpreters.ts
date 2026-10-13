@@ -6,7 +6,7 @@ import {
   SYSTEM_PROGRAM,
   TOKEN_PROGRAMS,
 } from "@/lib/solana/programs";
-import { cctpBridge, jupiterSwap, kaminoLending, marginfiLending, marinadeStake, relayBridge, sanctumUnstake, splStakePool } from "./defi";
+import { cctpBridge, driftWithdraw, jupiterSwap, kaminoLending, marginfiLending, marinadeStake, relayBridge, sanctumUnstake, splStakePool } from "./defi";
 import type { Interpreter } from "./interpret";
 import { readNft } from "./nft";
 import { actionName, actorFlows, kindIs, knownProgram, protocolOf, receivedAny, refsWhere, stakeAccount, summaryRef } from "./reading";
@@ -152,6 +152,7 @@ export const INTERPRETERS: readonly Interpreter[] = [
   marketplaceNftTrade,
   cctpBridge,
   relayBridge,
+  driftWithdraw,
   kaminoLending,
   marginfiLending,
   marinadeStake,

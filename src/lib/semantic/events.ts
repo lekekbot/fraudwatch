@@ -3,7 +3,7 @@
  * are computed on read from canonical transactions and never stored, so nothing
  * stale can be reused yet; a store for them must check it (see `DERIVED_CACHES`).
  */
-export const SEMANTIC_VERSION = 9;
+export const SEMANTIC_VERSION = 10;
 
 /**
  * Broad kinds of meaningful action. `action` carries the finer meaning (BUY,

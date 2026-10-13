@@ -1,6 +1,6 @@
 {
   "$schema": "./schema.json",
-  "version": 12,
+  "version": 13,
   "protocols": {
     "solana": {
       "name": "Solana",
@@ -165,6 +165,9 @@
       "category": "perps",
       "addresses": {
         "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH": { "role": "program", "label": "Drift v2" },
+        "GXWqPpjQpdz7KZw9p7f5PX2eGxHAhvpNXiviFkAB8zXg": { "role": "vault", "label": "Drift spot market 0 vault" },
+        "DfYCNezifxAEsQbAJ1b3j6PX3JVBe8fu11KBhxsbw5d2": { "role": "vault", "label": "Drift spot market 1 vault" },
+        "JCNCMFXo5M5qwUPg2Utu1u6YWp3MbygxqBsBeXXJfrw": { "role": "authority", "label": "Drift signer" },
         "dammHkt7jmytvbS3nHTxQNEcP59aE57nxwV21YdqEDN": { "role": "program", "label": "Drift Protocol Clearing House" }
       }
     },

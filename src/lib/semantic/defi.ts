@@ -1,8 +1,9 @@
-import { NATIVE_SOL } from "@/lib/assets/assets";
+import { NATIVE_SOL, WRAPPED_SOL_MINT } from "@/lib/assets/assets";
 import { bytesOf, discriminator, hex, reader } from "@/lib/solana/anchor";
 import type { CanonicalInstruction } from "@/lib/solana/canonical";
 import { MEMO_PROGRAMS } from "@/lib/solana/programs";
 import type { BridgeEnvelope, EventCategory, EvidenceRef } from "./events";
+import { netByAddress, netOf, withSettlement } from "./flows";
 import type { Interpretation, Interpreter, TransactionContext } from "./interpret";
 import { actorFlows, moved, protocolOf, receivedAny, spentAny, stakeAccount } from "./reading";
 
@@ -188,6 +189,42 @@ export const marginfiLending = lending(
     ["79,209,172,177,222,51,173,151", "REPAY"], // lending_account_repay
   ]),
 );
+
+const DRIFT = "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH";
+const DRIFT_WITHDRAW = new Map([["183,18,70,156,148,109,161,34", "WITHDRAW"]]);
+
+/** Drift withdraw accounts: authority 3, spot vault 4, signer 5, user token account 6. */
+export const driftWithdraw: Interpreter = {
+  id: "drift-withdraw",
+  interpret: (ctx) => {
+    const calls = decoded(ctx, DRIFT, DRIFT_WITHDRAW);
+    if (calls.length !== 1 || calls[0].bytes.length < 19) return null;
+    const call = calls[0];
+    const [authority, vault, signer, userToken] = call.ix.accounts.slice(3, 7);
+    if (!authority || !vault || !signer || !userToken) return null;
+    const received = ctx.tx.tokenChanges.find((t) => t.account === userToken && t.owner && BigInt(t.delta) > 0n);
+    const native = netOf(netByAddress(ctx.deltas), NATIVE_SOL, authority);
+    const unwrapped = !received && native > 0n && ctx.tx.tokenChanges.some((t) => t.account === vault && t.mint === WRAPPED_SOL_MINT && BigInt(t.delta) === -native);
+    if (!received && !unwrapped) return null;
+    const actor = received?.owner ?? authority;
+    const movement = { assetId: received?.mint ?? NATIVE_SOL, amount: received?.delta ?? native.toString(), from: null, to: actor, source: "balance" as const, role: "received" as const };
+    const { flows, warnings } = withSettlement(ctx.deltas, [movement]);
+    return {
+      category: "LENDING", action: "WITHDRAW", actor,
+      confidence: actor === authority && call.ref.kind === "OUTER_INSTRUCTION" ? "HIGH" : "MEDIUM",
+      protocol: protocolOf(ctx, DRIFT), evidence: [call.ref], flows,
+      warnings: [
+        ...(actor === authority ? [] : ["Drift's withdrawal authority differs from the receiving token account owner."]),
+        ...(call.ref.kind === "OUTER_INSTRUCTION" ? [] : ["Drift withdrawal was called from inside another program."]),
+        ...warnings,
+      ],
+      infrastructure: [
+        { address: vault, role: "VAULT", label: "Drift spot market vault" },
+        { address: signer, role: "PDA", label: "Drift signer" },
+      ],
+    };
+  },
+};
 
 // SPL stake pools: the SPL program and Sanctum's single- and multi-validator deployments of it.
 // Not Anchor: the first data byte is the instruction's index.

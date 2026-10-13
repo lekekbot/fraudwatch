@@ -406,7 +406,7 @@ export function buildInteractionGraph(
       const event = events?.[i];
       if (event) fromEvent(wallet, e, s, event);
       else fromSummary(wallet, e, s);
-      if (s.kind === "BURN") {
+      if (s.kind === "BURN" && (!event || event.category === "BURN")) {
         for (const out of s.outflows) move(e, s, { from: wallet, to: BURNED_NODE_ID, assetId: out.assetId, amount: abs(BigInt(out.delta)).toString() });
       }
       // Program calls connect the wallet to the program only, never to other wallets.
