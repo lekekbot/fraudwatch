@@ -96,6 +96,13 @@ describe("buildTraceView", () => {
     expect([end.nodes[1].boundaries, partial.nodes[1].boundaries]).toEqual([["end_of_history"], ["partial_history"]]);
   });
 
+  it("shows missing history on a mapped frontier after its cache is cleared", () => {
+    const ab = transfer("s1", "A", "B", 1);
+    const source = evidence([ab]);
+    const v = buildTraceView(trace({ seed: { kind: "address", address: "A" }, steps: [stepOf(ab)] }), { ...source, addressState: (address) => address === "B" ? "MAPPED" : "PRIMARY" });
+    expect(v.nodes.find((n) => n.id === "B")?.boundaries).toEqual(["history_not_loaded"]);
+  });
+
   it("keeps steps that leave the scope, reporting why", () => {
     const usdc = event("s1", [{ assetId: "USDC", from: "A", to: "B", amount: "5" }]);
     const small = transfer("s2", "B", "C", 1, 2);

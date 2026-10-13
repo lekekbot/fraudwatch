@@ -11,10 +11,13 @@ describe("where a case opens", () => {
 });
 
 describe("the trace view", () => {
-  it("is a case view with no wallet segment", () => {
+  it("accepts an optional trace id but no id on other views", () => {
     expect(isCaseRoute(["c", "trace"])).toBe(true);
-    expect(isCaseRoute(["c", "trace", "W"])).toBe(false);
-    expect(parseCasePath("/case/c/trace/")).toEqual({ caseId: "c", view: "trace", wallet: null });
+    expect(isCaseRoute(["c", "trace", "t1"])).toBe(true);
+    expect(isCaseRoute(["c", "graph", "t1"])).toBe(false);
+    expect(parseCasePath("/case/c/trace/")).toEqual({ caseId: "c", view: "trace", wallet: null, traceId: null });
+    expect(parseCasePath("/case/c/trace/t1/")).toEqual({ caseId: "c", view: "trace", wallet: null, traceId: "t1" });
     expect(buildCasePath("c", "trace")).toBe("/case/c/trace");
+    expect(buildCasePath("c", "trace", "t1")).toBe("/case/c/trace/t1");
   });
 });

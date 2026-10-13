@@ -1,6 +1,6 @@
 # Sprint 05 — Canvas and Free Placement
 
-**Status:** Planned
+**Status:** Planned (implementation in working tree; browser canvas check and merge pending)
 **Depends on:** 02, 03 (04 for saved positions; stub with in-memory positions if 04 isn't merged)
 
 *Revised 2026-10-10 for D9 (free placement). The original column-by-hop layout with pins is replaced; the file name is kept so links stay valid.*
@@ -9,7 +9,7 @@
 
 The trace is the investigator's diagram. Like draw.io, whatever they arrange stays exactly where they put it, and nothing they've read moves on its own. This sprint builds the renderer and editing basics for evidence: auto-placing new nodes beside their source, dragging, multi-select, grid and snap, Tidy layout on request, and the visual language that keeps the picture honest about what it shows. Annotations (notes, shapes, connectors) are 05A, on this canvas.
 
-## Verified Current Repository Findings
+## Repository findings at the original audit
 
 ### Existing capabilities
 
@@ -131,23 +131,24 @@ Keyboard: the canvas is focusable. Without edit focus, arrow keys move selection
 
 ### Task Group A — Placement
 
-- [ ] `autoPlace` (new nodes only; avoids placed nodes and obstacles), `snap`
-- [ ] `tidyLayout` (layered, barycentric sweeps, deterministic)
-- [ ] Tests (below)
+- [x] `autoPlace` (new nodes only; avoids placed nodes and obstacles), `snap`
+- [x] `tidyLayout` (layered, barycentric sweeps, deterministic ordering)
+- [x] Tests (below)
 
 ### Task Group B — Canvas
 
-- [ ] Canvas sizing with `sizeCanvas`; zoom and pan with d3-zoom; wheel via `graphWheelAction`
-- [ ] Draw nodes (with `NodeStyle`), edges, bundled and return edges, conversions, boundaries, stale steps, grid, the caption
-- [ ] Hit testing for nodes and edges (reuse the approach in `wallet-graph.tsx`); hover card with the full label
-- [ ] Selection: click, Shift-click, marquee; drag and multi-drag; snap on drop; arrow-key nudge
-- [ ] Fit to trace; Tidy layout button; grid and snap toggles
-- [ ] Keyboard navigation and live region; reduced motion
-- [ ] Theme redraw via `onThemeChange`
+- [x] Canvas sizing with `sizeCanvas`; zoom and pan with d3-zoom; wheel via `graphWheelAction`
+- [x] Draw nodes (with `NodeStyle`), edges, bundled and return edges, conversions, boundaries, stale steps, grid, the caption
+- [x] Hit testing for nodes and edges; hover card with the full label
+- [x] Selection: click, Shift-click, marquee; drag and multi-drag; snap on drop; arrow-key nudge
+- [x] Fit to trace; Tidy layout button; grid and snap toggles
+- [x] Basic arrow-key navigation and selection live region
+- [ ] Enter-to-inspector, context menu and full keyboard accessibility remain for Sprints 09, 06 and 13
+- [x] Theme redraw via `onThemeChange`; no motion effects are used
 
 ### Task Group C — Route
 
-- [ ] `trace` view in `case-path.ts`; `CaseShell` renders `TraceView` (reachable by URL only until 06)
+- [x] `trace` view in `case-path.ts`; `CaseShell` renders `TraceView` and accepts an optional trace id
 
 ## UI Behavior and Example Scenarios
 
@@ -188,7 +189,7 @@ Keyboard: the canvas is focusable. Without edit focus, arrow keys move selection
 ## Acceptance Criteria (observable and measurable)
 
 - [ ] No arrow points against its movement (test over generated views: every edge's arrow end = `to`).
-- [ ] Zero position change for placed nodes after adding movements (test).
+- [x] Zero position change for placed nodes after adding movements (`autoPlace` test).
 - [ ] Positions survive reload (browser).
 - [ ] Performance numbers recorded against the targets above.
 - [ ] Interaction Graph and Timeline unchanged (visual check; no edits to their files except `case-shell.tsx` routing).
@@ -203,4 +204,8 @@ Keyboard: the canvas is focusable. Without edit focus, arrow keys move selection
 
 ## Handoff Notes for the Next Sprint
 
-05A adds notes, shapes, frames and user connectors to this canvas and its selection model. 06 adds the toolbar, trace list, seed dialog, candidate panel and context menu around it.
+05A adds notes, shapes, frames and user connectors to this canvas and its selection model. 06 expands the read-only trace list with creation and editing, then adds the seed dialog, candidate panel and context menu around the existing canvas toolbar.
+
+## Implementation record (2026-10-13)
+
+Added deterministic placement, a Canvas 2D evidence renderer, pan/zoom, fit, node and edge selection, marquee, drag and multi-drag, snap and grid, tidy layout, hover detail, basic keyboard navigation and a live region. Saved traces open at `/case/<caseId>/trace/<traceId>` even when transaction history is unavailable. Creating traces through the UI and adding candidates remain Sprint 06, so the browser session without cases could verify the Storage count but not a live canvas drag. Pure layout tests cover placement, determinism and snapping. On a local synthetic 300-node/600-edge graph with 20 new nodes, 20-run medians were 0.09 ms for `autoPlace` and 0.46 ms for `tidyLayout`; pan/draw frame rate remains unmeasured. Full validation: `pnpm test` 32 files / 264 tests, `pnpm typecheck`, `pnpm lint`, and `next build --webpack` pass.

@@ -66,10 +66,11 @@ import { IngestionPanel } from "./ingestion-panel";
 import { PanelSection, ShowMoreList, SidePanel } from "./panel";
 import { type WalletLane, WalletTimeline, type WalletTimelineHandle } from "./timeline/wallet-timeline";
 import { SearchDialog } from "./search-dialog";
-import { assetLabel, assetLogo, formatAssetAmount, formatUtcMinute } from "./asset-format";
+import { assetLabel, assetLogo, formatAssetAmount, formatUtcMinute, type Assets } from "./asset-format";
 import { copy } from "./timeline/inspector-ui";
 import { TransactionDetails } from "./timeline/transaction-details";
 import { TraceView } from "./trace/trace-view";
+import type { TraceEvidence } from "@/lib/trace/view";
 import { type TableNav, type TableSide, WalletStateSummary, WalletStateTable } from "./wallet-state-view";
 
 /** Most counterparties whose .sol names are looked up per case, busiest first. */
@@ -78,6 +79,7 @@ const SNS_LOOKUP_LIMIT = 300;
 const DECOY_RULE_ID = "lookalike-decoys";
 const SHOWN_WALLETS = 50;
 const NO_ADDRESSES: string[] = [];
+const EMPTY_ASSETS: Assets = new Map();
 /** Above this many addresses, drawing all of them asks first (`graph.confirmLarge`). */
 const LARGE_GRAPH = 200;
 const TIMELINE_VIEW_KEYS: SettingKey[] = ["timeline.density", "timeline.connectors", "timeline.programInteractions", "timeline.nft"];
@@ -446,6 +448,12 @@ function CaseWorkspace({ c, prefs, rpc, rpcKnown }: { c: FraudWatchCase; prefs: 
     for (const tx of transactions?.values() ?? []) for (const ix of [...tx.instructions, ...tx.innerInstructions]) ids.add(ix.programId);
     return ids;
   }, [transactions]);
+  const traceEvidence = useMemo<TraceEvidence>(() => ({
+    events: semanticEvents,
+    coverage: (address) => state.status === "done" ? state.result.wallets.find((w) => w.wallet === address)?.coverage ?? null : null,
+    addressState: (address) => addressState(address, c, registry, programs),
+    isCustodial: (address) => registry.lookup(address)?.category === "exchange",
+  }), [semanticEvents, state, c, programs]);
   const shareSearch = buildMapSearch({ wallet: c.primaryWallet, range: c.range });
 
   // Lane order: saved order, else primary then first appearance. Focus narrows without changing it.
@@ -994,7 +1002,9 @@ function CaseWorkspace({ c, prefs, rpc, rpcKnown }: { c: FraudWatchCase; prefs: 
   };
 
   let center: React.ReactNode;
-  if (state.status === "done" && walletStates && walletState && visible && visibleState) {
+  if (view === "trace") {
+    center = <TraceView caseId={c.id} traceId={route.traceId} evidence={traceEvidence} names={canvasNames} assets={walletStates?.assets ?? EMPTY_ASSETS} />;
+  } else if (state.status === "done" && walletStates && walletState && visible && visibleState) {
     center =
       view === "graph" && graph ? (
         <>
@@ -1140,8 +1150,6 @@ function CaseWorkspace({ c, prefs, rpc, rpcKnown }: { c: FraudWatchCase; prefs: 
           onDateRangeChange={(dateRange) => updateFilter({ ...filter, dateRange })}
           overviewTimes={overviewTimes}
         />
-      ) : view === "trace" ? (
-        <TraceView />
       ) : (
         // Every shown lane, like the timeline and graph, through the same filters.
       <WalletStateTable

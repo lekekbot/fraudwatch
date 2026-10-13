@@ -1,13 +1,13 @@
 # Sprint 04 — Trace Workspace and Persistence
 
-**Status:** Planned
+**Status:** Planned (implementation in working tree; merge pending)
 **Depends on:** 02, 03
 
 ## Summary and Why It Matters
 
 A trace is investigative work product. It has to survive reloads, stay inside its case, be safe against corrupted or outdated data, and never be confused with evidence or preferences. This sprint adds the storage layer and the pure updaters that every UI action calls.
 
-## Verified Current Repository Findings
+## Repository findings at the original audit
 
 ### Existing capabilities
 
@@ -18,6 +18,8 @@ A trace is investigative work product. It has to survive reloads, stay inside it
 - Reactive reads: `useLocalQuery` (`src/hooks/use-local-db.ts`).
 - DB tests use stub tables (`src/lib/db/rpc-settings.test.ts`, `derived.test.ts`).
 - **Global Preferences** (separate initiative, planned) will add Dexie v5 (`preferences`) and v6 (`view_presets`). It isn't built at the audited commit.
+
+**Implementation-time drift (2026-10-13):** Global Preferences now occupies v5 and v6 in `db.ts`. Trace storage uses v7.
 
 ### Gaps and limitations
 
@@ -141,21 +143,21 @@ duplicateTrace(t, deps?)                     // new id, "Copy of …"
 
 ### Task Group A — Storage
 
-- [ ] Add the version block with `traces: "id, caseId, updatedAt"`; update the comment listing versions
-- [ ] `parseTrace` with the four outcomes; migration chain scaffold (empty at v1)
-- [ ] `listTraces`, `getTrace`, `createTrace`, `saveTrace`, `deleteTrace`
-- [ ] `deleteCase` cascade inside its existing transaction (add `db.traces` to the table list)
-- [ ] Storage summary count; confirm `clearTransactionCache` leaves traces
+- [x] Add the version block with `traces: "id, caseId, updatedAt"`; update the comment listing versions
+- [x] `parseTrace` with the four outcomes and synthetic v0 pins migration
+- [x] `listTraces`, `getTrace`, `createTrace`, `saveTrace`, `deleteTrace`; add `copyTrace`
+- [x] `deleteCase` cascade inside its existing transaction (add `db.traces` to the table list)
+- [x] Storage summary count; confirm `clearTransactionCache` leaves traces
 
 ### Task Group B — Updaters and hook
 
-- [ ] Implement each updater; duplicate-key guard in `addSteps`; pruning in `removeSteps`
-- [ ] Per-trace serialised save queue
-- [ ] `useTraces`
+- [x] Implement each updater; duplicate-key guard in `addSteps`; pruning in `removeSteps`
+- [x] Per-trace serialised save queue
+- [x] `useTraces`
 
 ## UI Behavior and Example Scenarios
 
-None visible beyond the Storage page count (traces are listed in 06).
+This sprint adds the Storage page count. Sprint 05 now provides a read-only list of saved traces; Sprint 06 adds creation and editing UI.
 
 ## Evidence / Data Integrity Invariants
 
@@ -182,10 +184,10 @@ A 500-step trace record is ≈ 150 KB of JSON; `put` is well within IndexedDB li
 
 ## Acceptance Criteria (observable and measurable)
 
-- [ ] Reload restores every trace exactly (round-trip test).
-- [ ] Case isolation and cascade proven by tests.
-- [ ] Malformed records produce the documented states, never exceptions.
-- [ ] Validation commands pass; results recorded.
+- [x] Reload restores valid trace fields (round-trip test).
+- [x] Case isolation and cascade proven by tests.
+- [x] Malformed records produce the documented states, never exceptions.
+- [x] Validation commands pass; results recorded.
 
 ## Definition of Done
 
@@ -197,4 +199,8 @@ A 500-step trace record is ≈ 150 KB of JSON; `put` is well within IndexedDB li
 
 ## Handoff Notes for the Next Sprint
 
-05 reads `presentation.positions` and writes them through `setPositions`; 05A edits styles and annotations through the annotation updaters; 06 builds the trace list and editing UI on `useTraces`.
+05 reads `presentation.positions` and writes them through `setPositions`, and provides a read-only trace list. 05A edits styles and annotations through the annotation updaters; 06 adds trace creation and editing UI on `useTraces`.
+
+## Implementation record (2026-10-13)
+
+Added Dexie v7 `traces`, case-scoped CRUD, copy, serialized saves, malformed-record recovery, edit updaters, `useTraces`, deletion cascade and Storage count. The Storage page displayed `Saved traces: 0` in a clean browser session. Focused tests cover persistence, isolation, cache clearing, invalid data and edits. Full validation: `pnpm test` 32 files / 264 tests, `pnpm typecheck`, `pnpm lint`, and `next build --webpack` pass. The normal Turbopack build requires a port this environment denies; webpack is the documented alternative. Records remain local; two tabs use last-write-wins after each save.

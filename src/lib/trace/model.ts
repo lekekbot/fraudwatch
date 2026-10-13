@@ -65,6 +65,9 @@ export type Trace = {
   direction: TraceDirection;
   scope: TraceScope;
   steps: TraceStep[];
+  /** Damaged saved items remain available for review and removal, never silently discarded. */
+  invalidSteps?: unknown[];
+  invalidAnnotations?: unknown[];
   /** Positions, styles and annotations: presentation, never evidence. */
   presentation: TracePresentation;
   analysisAtSave: { semantic: number; registry: number };

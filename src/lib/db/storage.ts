@@ -6,16 +6,18 @@ export type StorageSummary = {
   transactions: number;
   walletIndexEntries: number;
   walletsWithCoverage: number;
+  traces: number;
 };
 
 export async function getStorageSummary(db: FraudWatchDB): Promise<StorageSummary> {
-  const [cases, transactions, walletIndexEntries, walletsWithCoverage] = await Promise.all([
+  const [cases, transactions, walletIndexEntries, walletsWithCoverage, traces] = await Promise.all([
     db.cases.count(),
     db.raw_transactions.count(),
     db.wallet_transactions.count(),
     db.coverage.count(),
+    db.traces.count(),
   ]);
-  return { cases, transactions, walletIndexEntries, walletsWithCoverage };
+  return { cases, transactions, walletIndexEntries, walletsWithCoverage, traces };
 }
 
 /** Whole-origin usage and quota from the browser, when it reports them. */
@@ -26,7 +28,7 @@ export async function getStorageEstimate(): Promise<{ usageBytes: number; quotaB
   return { usageBytes: estimate.usage, quotaBytes: estimate.quota };
 }
 
-/** Drop all fetched chain data. Cases, labels, and RPC settings are kept. */
+/** Drop all fetched chain data. Cases, traces, labels, and RPC settings are kept. */
 export async function clearTransactionCache(db: FraudWatchDB): Promise<void> {
   await db.transaction(
     "rw",

@@ -157,11 +157,13 @@ The event inspector's **Developer details** shows, for the selected transaction:
 
 ## Trace Graph model (`src/lib/trace/`)
 
-A trace reads the semantic model and stores only the investigator's decisions. Planned in `docs/sprints/trace-graph/`; the model (Sprint 02) and movement index (Sprint 03) exist, with no UI or storage yet.
+A trace reads the semantic model and stores only the investigator's decisions. The model and movement index exist; the current working tree adds storage and an evidence canvas. Trace creation and candidate selection remain planned for Sprint 06. See `docs/sprints/trace-graph/` for status and remaining checks.
 
 - **Steps reference movements by content** (`movementKey`, `keyedFlows` in `model.ts`): signature, event index, asset, owners, amount and an occurrence counter. Nothing from the transaction is copied. `buildTraceView` (`view.ts`) re-resolves every step against the current events each time; a step whose movement is gone or changed is reported stale and kept, never re-pointed.
 - **Classification** (`classifyEvent`, `movements.ts`): each flow is a primary or supporting movement, part of a conversion, a boundary, or excluded (settlement, zero, bridge cost). The network fee is never a flow. `buildMovementIndex` builds per-address chronological lists once; `candidates` filters and pages them.
 - **Presentation is separate** (`presentation.ts`): node positions, styles and annotations (notes, shapes, user connectors) are the investigator's diagram, never evidence. `buildTraceView` doesn't read them.
+- **Local storage** (`src/lib/db/traces.ts`, Dexie v7): each trace is a separate case-scoped record. `parseTrace` validates reads, preserves unreadable items for review and migrates older records; saves for one trace are serialized. Case deletion removes its traces, while clearing transaction cache keeps them.
+- **Canvas** (`layout.ts`, `src/app/case/trace/`): missing nodes are auto-placed without moving placed nodes; drag and Tidy layout save presentation positions. The current UI lists saved traces and renders their evidence canvas. Trace creation and movement selection have no UI yet.
 - No trace operation issues an RPC request; continuing past an unloaded address means mapping it.
 
 ## Where work runs

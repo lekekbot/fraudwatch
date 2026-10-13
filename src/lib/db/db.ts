@@ -10,6 +10,7 @@ import type { CanonicalTransaction } from "@/lib/solana/canonical";
 import type { GlobalPreferencesRecord } from "./preferences";
 import type { ViewPresetRecord } from "./view-presets";
 import type { WalletState } from "@/lib/state/reconstruct";
+import type { Trace } from "@/lib/trace/model";
 
 export const DB_NAME = "fraudwatch";
 
@@ -66,6 +67,7 @@ export type MetaRecord = { key: string; value: unknown };
  * v4 (Sprint 06): address_labels; case labels/tags move out of the case record.
  * v5 (Global Preferences 02): preferences, one row of display preferences for every case.
  * v6 (Global Preferences 09): view_presets, presets the user saved.
+ * v7 (Trace Graph 04): traces, investigator work product per case.
  */
 export class FraudWatchDB extends Dexie {
   cases!: EntityTable<FraudWatchCase, "id">;
@@ -81,6 +83,7 @@ export class FraudWatchDB extends Dexie {
   address_labels!: Dexie.Table<AddressLabel, [string, string]>;
   preferences!: EntityTable<GlobalPreferencesRecord, "id">;
   view_presets!: EntityTable<ViewPresetRecord, "id">;
+  traces!: EntityTable<Trace, "id">;
 
   constructor(name = DB_NAME) {
     super(name);
@@ -125,6 +128,7 @@ export class FraudWatchDB extends Dexie {
       });
     this.version(5).stores({ preferences: "id" });
     this.version(6).stores({ view_presets: "id, name" });
+    this.version(7).stores({ traces: "id, caseId, updatedAt" });
   }
 }
 

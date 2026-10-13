@@ -24,7 +24,7 @@ This sprint decides which movements in a case can be traced, and what each one m
 ### Gaps and limitations
 
 - There's no per-address index of flows. The graph builds relationships from `WalletSide` summaries and events, not a reusable movement index.
-- Known decoder gaps that will surface in traces (`docs/CHRONOLOGY_OPEN_ISSUES.md`): Drift withdrawals read as Burn (1.1); unpaired multi-party flows (4.2); approximate settlement (4.3); thin pool/vault registry (5.1), so some pools look like wallets.
+- Known decoder gaps that will surface in traces (`docs/CHRONOLOGY_OPEN_ISSUES.md`): unpaired multi-party flows (4.2); approximate settlement (4.3); thin pool/vault registry (5.1), so some pools look like wallets. Drift withdrawal decoding (1.1) is partially fixed; the original hacker transactions remain unverified.
 
 ### Assumptions requiring confirmation
 
@@ -62,7 +62,8 @@ export function classifyEvent(event: SemanticEvent): Classified[];
 | Event / flow | Classification | Why |
 |---|---|---|
 | `TRANSFER`, flow with no role, both sides known | movement, primary | Observed wallet-to-wallet movement |
-| `NFT_TRANSFER` / `NFT_MINT` `nft` leg | movement, primary | The NFT itself moved |
+| `NFT_TRANSFER` `nft` leg with both sides known | movement, primary | The NFT itself moved |
+| `NFT_MINT` `nft` leg without a sender | boundary `entered_supply` | No earlier owner exists |
 | `NFT_TRADE` `payment` (buyer → seller) and `nft` (seller → buyer) | movement, primary | The two sides of the trade |
 | `NFT_TRADE` `royalty`, `marketplace_fee`, `rent`, `unidentified` | movement, supporting | Real movements, listed under the trade, never offered first |
 | `spent` + `received` by one actor (`SWAP`, `UNSTAKE`, `LENDING` withdraw/borrow, `LIQUIDITY` remove) | conversion on the actor | The asset changed; nobody else received it as a counterparty |
@@ -179,7 +180,7 @@ None visible. Example query: forward from B after the step A→B at order 1,204,
 | Transaction with no block time | Ordered by slot; `time: null`; time filters treat it as unknown and include it with a marker |
 | Same wallet on both sides after owner resolution | Can't come from net-per-owner flows; skip defensively |
 | Interpreter threw (event warnings) | Uses the generic reading the pipeline already falls back to; warnings shown in 09 |
-| Drift withdrawal misread as Burn (open issue 1.1) | Shows `left_supply`; inspector shows confidence and warnings; documented limitation |
+| NFT transfer with unknown sender | Shows `ambiguous`, not `entered_supply`; only `NFT_MINT` enters supply |
 | A pool not in the registry looks like a wallet | It appears as a counterparty; the user can label it; documented limitation (5.1) |
 | Wallet with 5,000 outgoing movements | Paging; no full render; query under budget |
 

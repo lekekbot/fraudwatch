@@ -210,7 +210,7 @@ function boundaries(address: string, frontier: boolean, evidence: TraceEvidence)
   if (!frontier) return out;
   const coverage = evidence.coverage(address);
   if (coverage) out.push(coverage.complete ? "end_of_history" : "partial_history");
-  else if (evidence.addressState(address) === "OBSERVED") out.push("history_not_loaded");
+  else if (evidence.addressState(address) !== "INFRASTRUCTURE") out.push("history_not_loaded");
   return out;
 }
 

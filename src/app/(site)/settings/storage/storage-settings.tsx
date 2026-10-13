@@ -63,6 +63,7 @@ export function StorageSettings() {
           ["Cached transactions", summary.data.transactions],
           ["Wallet history index entries", summary.data.walletIndexEntries],
           ["Wallets with cached coverage", summary.data.walletsWithCoverage],
+          ["Saved traces", summary.data.traces],
         ]
       : [];
 
@@ -115,7 +116,7 @@ export function StorageSettings() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-sm">
               <p className="font-medium">Clear transaction cache</p>
-              <p className="text-muted-foreground">Keeps cases, labels, settings and your RPC endpoint. History is refetched on next load.</p>
+              <p className="text-muted-foreground">Keeps cases, saved traces, labels, settings and your RPC endpoint. History is refetched on next load.</p>
             </div>
             <Button variant="outline" onClick={() => setPending("cache")}>
               Clear cache
