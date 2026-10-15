@@ -41,7 +41,9 @@ function edgeEnds(a: Point, b: Point, aw: number, bw: number, ah: number, bh: nu
   return { from: { x: a.x, y: a.y + down * ah / 2 }, to: { x: b.x, y: b.y - down * bh / 2 } };
 }
 
-export function TraceCanvas({ initialSelection, initialTransform, onTransform, view, hidden, onBranchHidden, presentation, steps, names, stateOf, assetText, assetName, onMove, onOptions, onSelection, onCandidateDirection, onStartAtNode, onMapWallet, onRemoveEvidence, onAddAnnotation, onUpdateAnnotation, onRemoveAnnotations, onReorderAnnotation, onNodeStyle }: {
+export function TraceCanvas({ onCanvas, initialSelection, initialTransform, onTransform, view, hidden, onBranchHidden, presentation, steps, names, stateOf, assetText, assetName, onMove, onOptions, onSelection, onCandidateDirection, onStartAtNode, onMapWallet, onRemoveEvidence, onAddAnnotation, onUpdateAnnotation, onRemoveAnnotations, onReorderAnnotation, onNodeStyle }: {
+  /** Receives the canvas element, for snapshots. */
+  onCanvas?: (canvas: HTMLCanvasElement | null) => void;
   /** Restored when returning to this trace from another view. */
   initialSelection?: TraceSelection; initialTransform?: { x: number; y: number; k: number }; onTransform?: (t: { x: number; y: number; k: number }) => void;
   view: TraceView; hidden: Pick<HiddenBranches, "counts" | "anchors">; onBranchHidden: (id: string, hidden: boolean) => void; presentation: TracePresentation; steps: readonly TraceStep[]; names: Names;
@@ -73,6 +75,7 @@ export function TraceCanvas({ initialSelection, initialTransform, onTransform, v
   const spaceRef = useRef(false);
   const frameRef = useRef<number>(0);
   const drawRef = useRef<() => void>(() => {});
+  useEffect(() => { onCanvas?.(canvasRef.current); return () => onCanvas?.(null); }, [onCanvas]);
   const onTransformRef = useRef(onTransform);
   useEffect(() => { onTransformRef.current = onTransform; });
   const [selection, setSelection] = useState<TraceSelection>(initialSelection ?? { nodes: [], edges: [], annotations: [] });

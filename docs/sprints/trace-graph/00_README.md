@@ -51,7 +51,7 @@ It **reads** the existing semantic model (`SemanticEvent.flows`). It never chang
 | Graph narrowed to signatures | Existing | `TxFilter.relationship`, `case-shell.tsx` `onShowInGraph` |
 | History for an observed address | **Missing by design**: only PRIMARY and MAPPED wallets are loaded (`docs/TERMINOLOGY.md`) | "Map wallet" (`mapWallet`, `useIngestion.start`) |
 | Context transactions outside the case range | Missing (planned in MVP Sprint 10, not built) | — |
-| Trace storage, layout, UI | Implemented on `trace-graph`: Dexie v7 storage, placement, evidence and annotation canvas, guided creation, candidates, service folding, branches and undo (08), inspector and cross-view navigation (09); remaining browser checks are listed per sprint | `src/lib/db/traces.ts`, `src/lib/trace/`, `src/app/case/trace/` |
+| Trace storage, layout, UI | Implemented on `trace-graph`: Dexie v7 storage, placement, evidence and annotation canvas, guided creation, candidates, service folding, branches and undo (08), inspector and cross-view navigation (09), measured performance (10), JSON/PNG export and import (11); remaining browser checks are listed per sprint | `src/lib/db/traces.ts`, `src/lib/trace/`, `src/app/case/trace/` |
 | Case export/import | Missing | MVP Sprint 10 |
 | Global Preferences | Planned separately (`docs/sprints/global-preferences/`) | optional Sprint 12 here |
 
@@ -102,7 +102,7 @@ It **reads** the existing semantic model (`SemanticEvent.flows`). It never chang
 | 08 | [Branches, Cycles & Trace Operations](08_BRANCHES_CYCLES_AND_TRACE_OPERATIONS.md) | High | Beta | 06 | Implemented on `trace-graph`; browser checks recorded, merge pending |
 | 09 | [Inspector & Cross-View Navigation](09_INSPECTOR_AND_CROSS_VIEW_NAVIGATION.md) | High | Beta | 06 | Implemented on `trace-graph`; merge pending |
 | 10 | [Large-Case Performance](10_LARGE_CASE_PERFORMANCE.md) | High | Release | 06–09 | Implemented on `trace-graph`; merge pending |
-| 11 | [Export & Reproducibility](11_EXPORT_AND_REPRODUCIBILITY.md) | Medium | Release | 04, 09 | Planned |
+| 11 | [Export & Reproducibility](11_EXPORT_AND_REPRODUCIBILITY.md) | Medium | Release | 04, 09 | Implemented on `trace-graph`; merge pending |
 | 12 | [Optional Global Preferences Add-On](12_OPTIONAL_GLOBAL_PREFERENCES_ADDON.md) | Optional | Add-on | 06 + Global Preferences 02/03 | Optional / Deferred |
 | 13 | [Validation, Accessibility & Release](13_VALIDATION_ACCESSIBILITY_AND_RELEASE.md) | Critical | Release | 01–11 | Planned |
 
@@ -112,7 +112,7 @@ Branch status records code on the pushed branch, not completed acceptance. Mark 
 
 **Branch progress (2026-10-15):** Sprint 08 added branch hide/show with "N movements hidden" chips, focus path, branch summaries, observations on the node panel, session undo/redo (buttons and Cmd/Ctrl+Z), the visible-item banner and the 100-children confirmation; `removeSteps` now prunes hidden branches. A failed automatic placement save is no longer retried on every render. Validation: `pnpm test` (36 files, 284 tests), `pnpm typecheck`, `pnpm lint`, and a live-data browser check recorded in the sprint file.
 
-Sprint 09 (same day) replaced the step summary with a full inspector (step evidence, bundled-edge table, other legs, stale replacements, node trace section with boundary explanations, the shell's `AddressPanel`), wired Open in Timeline (with a no-lane message) and Show in Graph through the shell's existing paths, and kept selection and zoom per trace across view switches. The Trace tab now returns to the trace last open. With 07–09 all on the branch, the Beta milestone waits on merge and the remaining browser checks listed in each sprint file. Sprint 10 measured every trace stage (all far under target at 10 wallets / 5,000 transactions and 300 nodes; canvas at display rate), fixed a cubic slowdown in automatic placement on large fan-outs and fan-ins with output proven unchanged, kept the movement index across view switches, added the 10,000-candidate filter rule, and recorded an RPC audit with no requests from trace actions.
+Sprint 09 (same day) replaced the step summary with a full inspector (step evidence, bundled-edge table, other legs, stale replacements, node trace section with boundary explanations, the shell's `AddressPanel`), wired Open in Timeline (with a no-lane message) and Show in Graph through the shell's existing paths, and kept selection and zoom per trace across view switches. The Trace tab now returns to the trace last open. With 07–09 all on the branch, the Beta milestone waits on merge and the remaining browser checks listed in each sprint file. Sprint 10 measured every trace stage (all far under target at 10 wallets / 5,000 transactions and 300 nodes; canvas at display rate), fixed a cubic slowdown in automatic placement on large fan-outs and fan-ins with output proven unchanged, kept the movement index across view switches, added the 10,000-candidate filter rule, and recorded an RPC audit with no requests from trace actions. Sprint 11 added JSON export of every step with its on-chain reference and full disclosures (labels opt-in, diagram on by default), PNG snapshots with a disclosure footer, and import as a new trace validated by the same parser as stored traces.
 
 ## 6. Milestones
 

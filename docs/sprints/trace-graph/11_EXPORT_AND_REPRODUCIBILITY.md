@@ -1,6 +1,6 @@
 # Sprint 11 — Export and Reproducibility
 
-**Status:** Planned
+**Status:** Implemented on `trace-graph` (2026-10-15); merge pending
 **Depends on:** 04, 09
 
 ## Summary and Why It Matters
@@ -16,6 +16,12 @@ Traces get shared with colleagues, exchanges and law enforcement. An export has 
 - `analysisVersions()` and `analysisFingerprint()` (`src/lib/semantic/versions.ts`).
 - Canvas elements support `toBlob` natively (no dependency needed for PNG).
 - Privacy rule: the RPC URL is never included in exports (`docs/00_README.md`, `docs/TERMINOLOGY.md`).
+
+**Re-checked 2026-10-15.** Drift and decisions:
+
+- There's no `trace-menu.tsx`; Export and Import are buttons in the trace header, and Import is also on the trace list.
+- This plan both includes the `canvas` block and lists "include layout (off)". Resolved: a checkbox, **on** by default, because without it an import loses the investigator's diagram. Labels stay opt-in, off by default, and label notes are never exported.
+- A file download helper already exists in the settings export (`saved-presets.tsx`); the same Blob-and-anchor approach is used.
 
 ### Gaps and limitations
 
@@ -109,15 +115,15 @@ Traces get shared with colleagues, exchanges and law enforcement. An export has 
 
 ### Task Group A — Document
 
-- [ ] `exportTrace(trace, evidence, options)` → document; decimals from asset metadata; statuses; disclosures computed from the view
-- [ ] `parseTraceImport(json)` → `{ ok, trace, missing } | { ok: false, error }`
-- [ ] Tests
+- [x] `exportTrace(trace, evidence, options)` → document; decimals from asset metadata; statuses; disclosures computed from the view
+- [x] `parseTraceImport(json)` → `{ ok, trace, missing } | { ok: false, error }`
+- [x] Tests
 
 ### Task Group B — UI
 
-- [ ] Export dialog: include labels (off), include layout (off), Download JSON
-- [ ] Import: file input, preview, confirm
-- [ ] Snapshot: PNG with footer; dialog note
+- [x] Export dialog: include labels (off), include layout (off), Download JSON
+- [x] Import: file input, preview, confirm
+- [x] Snapshot: PNG with footer; dialog note
 
 ## UI Behavior and Example Scenarios
 
@@ -147,9 +153,18 @@ Export is O(steps). A 500-step document is ≈ 300 KB. Snapshot rendering at 2×
 
 ## Acceptance Criteria (observable and measurable)
 
-- [ ] Round-trip test passes; every disclosure test passes.
-- [ ] A reviewer can take the JSON and find every step's signature and movement on-chain (manual check of one F1 and one F3 export, recorded).
-- [ ] PNG includes the footer disclosures (browser check).
+- [x] Round-trip test passes; every disclosure test passes.
+- [x] A reviewer can take the JSON and find every step's signature and movement on-chain (manual check of one F1 and one F3 export, recorded).
+- [x] PNG includes the footer disclosures (browser check).
+
+## Implementation Notes (2026-10-15)
+
+- `src/lib/trace/export.ts`: `exportTrace(trace, view, evidence, options)` builds the document from the built view, so statuses and disclosures match what the canvas shows. Every step is exported with its id, signature, event index, movement key, asset, exact base-unit amount, decimals (asset metadata, else 9 for SOL, else `null`), role, UTC time, slot, current category and confidence, and `status` (`stale` › `hidden_branch` › `ok`). Conversion steps carry spent and received amounts with decimals. Disclosures: the attribution sentence, hidden branches, collapsed services with their real addresses, boundaries, stale steps, out-of-scope steps (added: the plan didn't list them) and addresses with incomplete loaded history. Registry names appear under `attribution` with the registry version.
+- `parseTraceImport(text)`: rejects files over 5 MB, invalid JSON, other formats and newer format versions (naming the version). Steps are rebuilt into trace steps and passed through `parseTrace`, the same gate as stored traces, so a step whose movement key doesn't match its fields is set aside and counted, never imported.
+- Import creates a new trace (new id; "(imported)", then "(imported 2)"… on a name clash) through `createTrace`, which now accepts the imported diagram. Steps not in this case's loaded data become stale steps. The preview says how many steps were found, whether a diagram is included, and what couldn't be read.
+- PNG: the on-screen canvas at device resolution (2× on a Retina display; lower on a 1× display), with a footer: trace name and export time, scope, the attribution sentence, disclosure counts and the line legend. It captures the current view, so the dialog says to use Fit first.
+
+**Validation (2026-10-15):** `pnpm test` (39 files, 301 tests), `pnpm typecheck`, `pnpm lint` pass. Browser check on the local case, with the download intercepted in the page (no files written): the JSON for a 6-step trace had every step with exact amounts, decimals, categories and `ok` statuses, 5 `history_not_loaded` boundaries, the analysis fingerprint, the `canvas` block, no `labels`, and no URLs at all; the PNG was 2464×1510 with the footer. Re-importing that JSON previewed "6 of 6 steps found" and created "Sprint 08 check (imported)" with the same diagram and no evidence issues. A reviewer check against Solscan for signature `58hyE6JP…bVe6`: slot 444268305, 14:30:11 UTC, 6LQ6…RBF9 → Jitotip 2 for 0.000006 SOL, matching the exported step (`amount: "6000"`, `decimals: 9`). The other leg exported as 0.05 SOL to Fnca…ktLj matches Solscan's balance changes (−0.050006 / +0.04999 after the 0.00001 fee); Solscan's instruction summary shows 0.020540632 for a Phantom program instruction, which isn't the net movement. Not checked in the browser: an F3 NFT sale export (covered by `export.test.ts`) and importing into a case missing a wallet (covered by the stale-step rules and tests).
 
 ## Definition of Done
 

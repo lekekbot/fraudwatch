@@ -1,12 +1,12 @@
 import type { FraudWatchDB } from "./db";
 import { DEFAULT_MAX_HOPS, TRACE_SCHEMA_VERSION, type Trace, type TraceDirection, type TraceScope, type TraceSeed, type TraceStep } from "@/lib/trace/model";
-import { emptyPresentation } from "@/lib/trace/presentation";
+import { emptyPresentation, type TracePresentation } from "@/lib/trace/presentation";
 import { parseTrace, type LoadedTrace } from "@/lib/trace/storage";
 import { analysisVersions } from "@/lib/semantic/versions";
 import { duplicateTrace } from "@/lib/trace/edit";
 
 export type TraceListItem = { id: string; name: string; steps: number; updatedAt: string; valid: boolean; reason?: "invalid" | "newer_version" };
-export type NewTraceInput = { caseId: string; name: string; seed: TraceSeed; direction?: TraceDirection; scope?: TraceScope; steps?: TraceStep[] };
+export type NewTraceInput = { caseId: string; name: string; seed: TraceSeed; direction?: TraceDirection; scope?: TraceScope; steps?: TraceStep[]; presentation?: TracePresentation };
 
 export async function listTraces(db: FraudWatchDB, caseId: string): Promise<TraceListItem[]> {
   const rows = await db.traces.where("caseId").equals(caseId).toArray();
@@ -59,7 +59,7 @@ export async function createTrace(db: FraudWatchDB, input: NewTraceInput, deps: 
   const trace: Trace = {
     id: deps.id ?? crypto.randomUUID(), caseId: input.caseId, name, schemaVersion: TRACE_SCHEMA_VERSION,
     seed: input.seed, direction: input.direction ?? "forward", scope: input.scope ?? { assets: null, start: null, end: null, minAmount: null, maxHops: DEFAULT_MAX_HOPS },
-    steps: input.steps ?? [], presentation: emptyPresentation(), analysisAtSave: { semantic: versions.semantic, registry: versions.registry },
+    steps: input.steps ?? [], presentation: input.presentation ?? emptyPresentation(), analysisAtSave: { semantic: versions.semantic, registry: versions.registry },
     createdAt: now, updatedAt: now,
   };
   const parsed = parseTrace(trace);

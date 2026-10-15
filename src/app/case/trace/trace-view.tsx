@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useLocalQuery } from "@/hooks/use-local-db";
@@ -15,6 +15,7 @@ import { buildCasePath } from "@/lib/routing/case-path";
 import { formatBaseUnits } from "@/lib/solana/amount";
 import { addAnnotation, addSteps, removeAnnotations, removeInvalidItems, removeSteps, renameTrace, reorderAnnotation, setCanvasOptions, setDirection, setNodeStyle, setBranchHidden, setPositions, setScope, setServiceExpanded, updateAnnotation } from "@/lib/trace/edit";
 import { hideBranches } from "@/lib/trace/branches";
+import { parseTraceImport, type TraceImport } from "@/lib/trace/export";
 import { emptyHistory, type History, push, redo, undo } from "@/lib/trace/history";
 import { autoPlace } from "@/lib/trace/layout";
 import type { MovementRef, Trace, TraceSeed, TraceStep } from "@/lib/trace/model";
@@ -24,6 +25,7 @@ import { buildTraceView, type TraceEvidence } from "@/lib/trace/view";
 import { assetLabel, type Assets } from "../asset-format";
 import { BranchPanel } from "./branch-panel";
 import { CandidatePanel } from "./candidate-panel";
+import { ExportDialog, ImportDialog } from "./export-dialog";
 import { SeedDialog, type NewTraceConfig, type TraceStartRequest } from "./seed-dialog";
 import { ScopeDialog } from "./scope-dialog";
 import { TraceCanvas, type TraceSelection } from "./trace-canvas";
@@ -79,6 +81,11 @@ export function TraceView({ caseId, traceId, evidence, index, caseRange, loadedR
   const setSelection = (value: TraceSelection) => { setSelectionState(value); setAddressFocus(null); if (traceId) ui.set(traceId, { selection: value }); };
   /** An address picked from evidence (not a trace node) shown in the side panel. */
   const [addressFocus, setAddressFocus] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [importing, setImporting] = useState<{ imported: TraceImport; found: number } | null>(null);
+  const importRef = useRef<HTMLInputElement>(null);
+  const canvasHandle = useRef<HTMLCanvasElement | null>(null);
+  const setCanvas = useCallback((el: HTMLCanvasElement | null) => { canvasHandle.current = el; }, []);
   const [candidateDirection, setCandidateDirection] = useState<"forward" | "backward" | null>(null);
   useEffect(() => {
     if (loaded && latest.current?.id !== loaded.id) latest.current = loaded;
@@ -134,6 +141,26 @@ export function TraceView({ caseId, traceId, evidence, index, caseRange, loadedR
   }, [active, missing]);
   const shown = useMemo(() => view && active ? hideBranches(view, active.presentation.hiddenBranches) : null, [view, active]);
   const open = (id: string | null) => { latest.current = null; placementFailed.current = false; setHistory(emptyHistory()); setOptimistic(null); setSelectionState((id && ui.get(id)?.selection) || NO_SELECTION); setAddressFocus(null); window.history.pushState(null, "", buildCasePath(caseId, "trace", id)); };
+  const readImport = async (file: File) => {
+    const result = parseTraceImport(await file.text());
+    if (!result.ok) { toast.error(result.error); return; }
+    const found = result.trace.steps.filter((s) => evidence.events.has(s.kind === "movement" ? s.ref.signature : s.signature)).length;
+    setImporting({ imported: result.trace, found });
+  };
+  const confirmImport = async () => {
+    if (!importing) return;
+    const { imported } = importing;
+    const taken = new Set(traces.list.status === "ready" ? traces.list.data.map((t) => t.name) : []);
+    let name = imported.name;
+    for (let n = 1; taken.has(name); n++) name = `${imported.name.slice(0, 64)} (imported${n > 1 ? ` ${n}` : ""})`;
+    const trace = await traces.create({ name, seed: imported.seed, direction: imported.direction, scope: imported.scope, steps: imported.steps, presentation: imported.presentation });
+    setImporting(null);
+    open(trace.id);
+  };
+  const importControls = <>
+    <input ref={importRef} type="file" accept="application/json,.json" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void readImport(file); }} />
+    {importing && <ImportDialog imported={importing.imported} found={importing.found} onClose={() => setImporting(null)} onConfirm={confirmImport} />}
+  </>;
   const closeNew = () => { setNewOpen(false); setNewSeed(null); onSeedHandled(); };
   const create = async (config: NewTraceConfig) => {
     const steps: TraceStep[] = config.refs.map((ref) => ({ id: crypto.randomUUID(), kind: "movement", ref, direction: config.direction === "backward" ? "backward" : "forward", addedAt: new Date().toISOString() }));
@@ -161,11 +188,11 @@ export function TraceView({ caseId, traceId, evidence, index, caseRange, loadedR
   const dialog = (requestedSeed || newOpen) && <SeedDialog key={JSON.stringify(requestedSeed ?? newSeed)} initialSeed={requestedSeed?.seed ?? newSeed} initialRefs={requestedSeed?.refs} wallets={wallets} names={names} index={index} assets={assets} caseRange={caseRange} onClose={closeNew} onCreate={create} />;
   if (!traceId) return <section className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-6">
     <h2 className="text-base font-semibold">Trace Graph</h2><p className="max-w-xl text-sm text-muted-foreground">Build a saved diagram from movements you select. Lines show observed transfers, not proof that the same funds continued.</p>
-    <Button className="self-start" onClick={() => startDialog()}>Start a trace</Button>
+    <div className="flex gap-2"><Button onClick={() => startDialog()}>Start a trace</Button><Button variant="outline" onClick={() => importRef.current?.click()}>Import a trace</Button></div>
     {traces.list.status === "loading" && <p className="text-sm">Loading saved traces…</p>}
     {traces.list.status === "error" && <p className="text-sm text-destructive">{traces.list.error}</p>}
     {traces.list.status === "ready" && (traces.list.data.length ? <ul className="max-w-xl space-y-2">{traces.list.data.map((item) => <li key={item.id}><button type="button" className="w-full rounded-md border p-3 text-left hover:bg-accent" onClick={() => open(item.id)}><span className="font-medium">{item.name}</span><span className="ml-2 text-xs text-muted-foreground">{item.valid ? `${item.steps} steps` : item.reason === "newer_version" ? "Made by a newer FraudWatch; read-only" : "Couldn't read this trace"}</span></button></li>)}</ul> : <p className="text-sm text-muted-foreground">No traces saved for this case.</p>)}
-    {dialog}
+    {dialog}{importControls}
   </section>;
   if (selected.status === "loading") return <p className="flex flex-1 items-center justify-center text-sm">Loading trace…</p>;
   if (selected.status === "error") return <p className="flex flex-1 items-center justify-center text-sm text-destructive">{selected.error}</p>;
@@ -193,12 +220,12 @@ export function TraceView({ caseId, traceId, evidence, index, caseRange, loadedR
   };
   const removeEdge = (ids: Set<string>) => { if (window.confirm(`Remove ${ids.size} movement${ids.size === 1 ? "" : "s"} from this trace?`)) { persist((trace) => removeSteps(trace, ids)); if (edge && ids.size === edge.steps.length) setSelection({ nodes: [], edges: [], annotations: [] }); } };
   return <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-3">
-    <div className="flex flex-wrap items-center gap-2 text-sm"><Button variant="outline" size="xs" onClick={() => open(null)}>Traces</Button><strong className="truncate">{active.name}</strong><span className="text-xs text-muted-foreground">{shown.view.nodes.length} nodes · {shown.view.edges.length} observed edges{shown.counts.size ? ` · ${shown.counts.size} branch${shown.counts.size === 1 ? "" : "es"} hidden` : ""}</span><Button variant="outline" size="xs" disabled={history.past.at(-1)?.id !== active.id} onClick={() => travel("undo")} title="Undo (Ctrl/Cmd+Z)">Undo</Button><Button variant="outline" size="xs" disabled={history.future[0]?.id !== active.id} onClick={() => travel("redo")} title="Redo (Shift+Ctrl/Cmd+Z)">Redo</Button><Button variant="outline" size="xs" onClick={() => setScopeOpen(true)}>Scope</Button><Button variant="outline" size="xs" onClick={() => startDialog()}>New</Button><Button variant="outline" size="xs" onClick={rename}>Rename</Button><Button variant="outline" size="xs" onClick={() => void duplicate()}>Duplicate</Button><Button variant="destructive" size="xs" onClick={() => void remove()}>Delete</Button></div>
+    <div className="flex flex-wrap items-center gap-2 text-sm"><Button variant="outline" size="xs" onClick={() => open(null)}>Traces</Button><strong className="truncate">{active.name}</strong><span className="text-xs text-muted-foreground">{shown.view.nodes.length} nodes · {shown.view.edges.length} observed edges{shown.counts.size ? ` · ${shown.counts.size} branch${shown.counts.size === 1 ? "" : "es"} hidden` : ""}</span><Button variant="outline" size="xs" disabled={history.past.at(-1)?.id !== active.id} onClick={() => travel("undo")} title="Undo (Ctrl/Cmd+Z)">Undo</Button><Button variant="outline" size="xs" disabled={history.future[0]?.id !== active.id} onClick={() => travel("redo")} title="Redo (Shift+Ctrl/Cmd+Z)">Redo</Button><Button variant="outline" size="xs" onClick={() => setScopeOpen(true)}>Scope</Button><Button variant="outline" size="xs" onClick={() => startDialog()}>New</Button><Button variant="outline" size="xs" onClick={rename}>Rename</Button><Button variant="outline" size="xs" onClick={() => void duplicate()}>Duplicate</Button><Button variant="outline" size="xs" onClick={() => setExportOpen(true)}>Export</Button><Button variant="outline" size="xs" onClick={() => importRef.current?.click()}>Import</Button><Button variant="destructive" size="xs" onClick={() => void remove()}>Delete</Button></div>
     {(active.invalidSteps?.length || active.invalidAnnotations?.length || view.issues.length) ? <p className="text-xs text-destructive">{active.invalidSteps?.length ?? 0} unreadable steps · {active.invalidAnnotations?.length ?? 0} unreadable annotations · {view.issues.length} evidence issues. Review before relying on this trace.</p> : null}
     {(active.invalidSteps?.length || active.invalidAnnotations?.length) ? <div className="flex gap-2 text-xs"><Button variant="outline" size="xs" onClick={() => void navigator.clipboard.writeText(JSON.stringify(loaded, null, 2))}>Copy trace JSON</Button><Button variant="destructive" size="xs" onClick={() => { if (window.confirm("Remove unreadable items from this trace? This cannot be undone.")) persist((trace) => removeInvalidItems(trace)); }}>Remove unreadable items</Button></div> : null}
     {(shown.view.nodes.length > 300 || shown.view.edges.length > 600) && <p className="text-xs text-muted-foreground">This trace draws {shown.view.nodes.length} nodes and {shown.view.edges.length} edges. Hide branches you aren&apos;t working on to keep it readable (right-click a node, or use Hide branch in its panel).</p>}
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 lg:flex-row"><TraceCanvas key={active.id} initialSelection={selection} initialTransform={ui.get(active.id)?.transform} onTransform={(transform) => ui.set(active.id, { transform })} view={shown.view} hidden={shown} onBranchHidden={(id, hidden) => persist((trace) => setBranchHidden(trace, id, hidden))} presentation={presentation} steps={active.steps} names={names} stateOf={evidence.addressState} assetText={assetText} assetName={(id) => assetLabel(id, assets)} onSelection={setSelection} onCandidateDirection={(direction) => { if (active.direction === "both" || active.direction === direction) setCandidateDirection(direction); }} onStartAtNode={(address) => startDialog({ kind: "address", address })} onMapWallet={onMapWallet} onRemoveEvidence={removeEdge} onMove={(positions, patches) => persist((trace) => { let next = Object.keys(positions).length ? setPositions(trace, positions) : trace; for (const item of patches ?? []) next = updateAnnotation(next, item.id, item.patch); return next; })} onOptions={(options) => persist((trace) => setCanvasOptions(trace, options))} onAddAnnotation={(item: Annotation) => persist((trace) => addAnnotation(trace, item))} onUpdateAnnotation={(id: string, patch: Partial<Annotation>) => persist((trace) => updateAnnotation(trace, id, patch))} onRemoveAnnotations={(ids: Set<string>) => persist((trace) => removeAnnotations(trace, ids))} onReorderAnnotation={(id: string, order: "front" | "back") => persist((trace) => reorderAnnotation(trace, id, order))} onNodeStyle={(id: string, style: NodeStyle) => persist((trace) => setNodeStyle(trace, id, style))} />
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 lg:flex-row"><TraceCanvas key={active.id} onCanvas={setCanvas} initialSelection={selection} initialTransform={ui.get(active.id)?.transform} onTransform={(transform) => ui.set(active.id, { transform })} view={shown.view} hidden={shown} onBranchHidden={(id, hidden) => persist((trace) => setBranchHidden(trace, id, hidden))} presentation={presentation} steps={active.steps} names={names} stateOf={evidence.addressState} assetText={assetText} assetName={(id) => assetLabel(id, assets)} onSelection={setSelection} onCandidateDirection={(direction) => { if (active.direction === "both" || active.direction === direction) setCandidateDirection(direction); }} onStartAtNode={(address) => startDialog({ kind: "address", address })} onMapWallet={onMapWallet} onRemoveEvidence={removeEdge} onMove={(positions, patches) => persist((trace) => { let next = Object.keys(positions).length ? setPositions(trace, positions) : trace; for (const item of patches ?? []) next = updateAnnotation(next, item.id, item.patch); return next; })} onOptions={(options) => persist((trace) => setCanvasOptions(trace, options))} onAddAnnotation={(item: Annotation) => persist((trace) => addAnnotation(trace, item))} onUpdateAnnotation={(id: string, patch: Partial<Annotation>) => persist((trace) => updateAnnotation(trace, id, patch))} onRemoveAnnotations={(ids: Set<string>) => persist((trace) => removeAnnotations(trace, ids))} onReorderAnnotation={(id: string, order: "front" | "back") => persist((trace) => reorderAnnotation(trace, id, order))} onNodeStyle={(id: string, style: NodeStyle) => persist((trace) => setNodeStyle(trace, id, style))} />
       {addressFocus ? <aside className="w-full space-y-2 overflow-auto rounded border p-3 text-xs lg:w-96"><Button variant="outline" size="xs" onClick={() => setAddressFocus(null)}>Back to selection</Button>{renderAddressPanel(addressFocus)}</aside> : node && index ? <div className="flex w-full flex-col gap-2 overflow-auto lg:w-96 [&>*]:shrink-0"><section className="rounded border p-2 text-xs"><NodeTraceSection node={node} view={view} trace={active} names={names} evidence={evidence} assetName={(id) => assetLabel(id, assets)} onShowInGraph={onShowInGraph} onMapWallet={onMapWallet} onNewTrace={() => startDialog()} onOpenInTimeline={onOpenTransaction} /></section>{node.service && <section className="rounded border p-2 text-xs"><strong>{node.service.name}</strong> · {node.service.category} · {node.addresses.length} address{node.addresses.length === 1 ? "" : "es"}<Button variant="outline" size="xs" className="ml-2" onClick={() => persist((trace) => setServiceExpanded(trace, node.service!.id, true))}>Show addresses separately</Button></section>}{!node.service && evidence.serviceOf?.(node.id) && active.presentation.expandedServices.includes(evidence.serviceOf(node.id)!.protocolId) && <Button variant="outline" size="xs" onClick={() => persist((trace) => setServiceExpanded(trace, evidence.serviceOf!(node.id)!.protocolId, false))}>Group as {evidence.serviceOf(node.id)!.protocolName}</Button>}<BranchPanel node={node} view={view} hidden={active.presentation.hiddenBranches.includes(node.id)} observations={observations} names={names} assetText={assetText} onHidden={(hidden) => persist((trace) => setBranchHidden(trace, node.id, hidden))} onOpenTransaction={onOpenTransaction} /><CandidatePanel key={`${node.id}:${candidateDirection ?? "default"}`} initialDirection={candidateDirection ?? undefined} node={node} trace={active} index={index} evidence={evidence} caseRange={caseRange} loadedRange={loadedRange} hiddenReason={hiddenReason} names={names} assets={assets} assetText={assetText} loadStatus={loadStatus} loadError={loadError} onAdd={addMovements} onAddConversion={addConversion} onMapWallet={onMapWallet} /><Button variant="outline" size="xs" onClick={() => startDialog({ kind: "address", address: node.addresses[0] })}>Start another trace here</Button>{!node.service && <div className="rounded border p-2">{renderAddressPanel(node.id)}</div>}</div> : edge ? <TraceInspector key={edge.id} edge={edge} trace={active} view={view} evidence={evidence} index={index} names={names} assets={assets} assetText={assetText} eventState={eventState} transactionOf={transactionOf} hiddenReason={hiddenReason} actions={inspectorActions} /> : annotation ? <aside className="w-full space-y-2 rounded border p-3 text-xs lg:w-80"><strong>Annotation · drawn by you</strong><p>{annotation.kind === "note" ? annotation.text : annotation.label}</p><Button variant="outline" size="xs" onClick={() => persist((trace) => reorderAnnotation(trace, annotation.id, "front"))}>Bring to front</Button><Button variant="destructive" size="xs" onClick={() => persist((trace) => removeAnnotations(trace, new Set([annotation.id])))}>Delete annotation</Button></aside> : null}
-    </div>{dialog}{scopeOpen && <ScopeDialog trace={active} assets={assets} caseRange={caseRange} onClose={() => setScopeOpen(false)} onSave={(scope, direction) => persist((trace) => setScope(setDirection(trace, direction), scope))} />}
+    </div>{dialog}{importControls}{exportOpen && <ExportDialog trace={active} view={view} evidence={evidence} options={{ caseRange, decimals: (id) => assets.get(id)?.decimals ?? (id === "SOL" ? 9 : null), labelOf: (address) => { const label = names.label(address); return label && { name: label.name, tags: label.tags }; } }} canvas={() => canvasHandle.current} assetName={(id) => assetLabel(id, assets)} onClose={() => setExportOpen(false)} />}{scopeOpen && <ScopeDialog trace={active} assets={assets} caseRange={caseRange} onClose={() => setScopeOpen(false)} onSave={(scope, direction) => persist((trace) => setScope(setDirection(trace, direction), scope))} />}
   </div>;
 }
