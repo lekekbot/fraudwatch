@@ -58,7 +58,7 @@ export function isValidAnnotation(value: unknown): value is Annotation {
   if (value.kind === "shape") return text(value) && optional(value.strokeWidth, [1, 2, 4]) && point(value.at) && ["rect", "ellipse", "frame", "icon"].includes(String(value.shape)) && (value.shape !== "icon" || isIconKey(value.icon)) &&
     typeof value.width === "number" && value.width > 0 && Number.isFinite(value.width) && typeof value.height === "number" && value.height > 0 && Number.isFinite(value.height) &&
     string(value.label) && value.label.length <= 2000 && color(value.stroke) && (value.fill === "none" || color(value.fill));
-  return value.kind === "connector" && optional(value.route, ["straight", "elbow"]) && optional(value.strokeWidth, [1, 2, 4]) &&
+  return value.kind === "connector" && optional(value.route, ["straight", "curved", "elbow"]) && optional(value.strokeWidth, [1, 2, 4]) && optional(value.lineStyle, ["solid", "dashed"]) &&
     (value.labelAt === undefined || (typeof value.labelAt === "number" && value.labelAt >= 0 && value.labelAt <= 1)) && end(value.from) && end(value.to) && string(value.label) && value.label.length <= 2000 &&
     ["none", "end", "both"].includes(String(value.arrow)) && color(value.color);
 }

@@ -24,6 +24,7 @@ export const SIDES: readonly Side[] = ["n", "e", "s", "w"];
 export type FontSize = "s" | "m" | "l";
 export type TextAlign = "left" | "center" | "right";
 export type StrokeWidth = 1 | 2 | 4;
+export type Route = "straight" | "curved" | "elbow";
 
 /**
  * Where a user connector ends: an evidence node, another annotation, or a free
@@ -66,11 +67,13 @@ export type ConnectorAnnotation = Common & {
   label: string;
   arrow: "none" | "end" | "both";
   color: ColorKey;
-  /** `elbow`: right-angle segments, as draw.io's orthogonal connector. */
-  route?: "straight" | "elbow";
+  /** `curved`: a smooth curve; `elbow`: right-angle segments, as draw.io's orthogonal connector. Straight when unset. */
+  route?: Route;
   /** Where the label sits along the line, 0 (from) to 1 (to); 0.5 when unset. */
   labelAt?: number;
   strokeWidth?: StrokeWidth;
+  /** Dashed when unset, the default for the investigator's own lines; lines drawn from a connection dot start solid. */
+  lineStyle?: "solid" | "dashed";
 };
 export type Annotation = NoteAnnotation | ShapeAnnotation | ConnectorAnnotation;
 

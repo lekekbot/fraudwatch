@@ -2,8 +2,8 @@
 
 import { select } from "d3-selection";
 import { type ZoomBehavior, type ZoomTransform, zoom, zoomIdentity } from "d3-zoom";
-import { AlignCenterHorizontalIcon, AlignCenterVerticalIcon, AlignEndHorizontalIcon, AlignEndVerticalIcon, AlignHorizontalDistributeCenterIcon, AlignStartHorizontalIcon, AlignStartVerticalIcon, AlignVerticalDistributeCenterIcon, GroupIcon, UngroupIcon, UnlockIcon, AlignCenterIcon, AlignLeftIcon, AlignRightIcon, CornerDownRightIcon, MoveHorizontalIcon, MoveRightIcon, MoveUpRightIcon, TypeIcon, BringToFrontIcon, ChevronDownIcon, CopyIcon, SendToBackIcon, Trash2Icon, ChevronUpIcon, CircleIcon, FrameIcon, Grid3x3Icon, LockIcon, MagnetIcon, MinusIcon, MousePointer2Icon, NetworkIcon, PlusIcon, SplineIcon, SquareIcon, StickyNoteIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { AlignCenterHorizontalIcon, AlignCenterVerticalIcon, AlignEndHorizontalIcon, AlignEndVerticalIcon, AlignHorizontalDistributeCenterIcon, AlignStartHorizontalIcon, AlignStartVerticalIcon, AlignVerticalDistributeCenterIcon, GroupIcon, UngroupIcon, UnlockIcon, AlignCenterIcon, AlignLeftIcon, AlignRightIcon, CornerDownRightIcon, MoveHorizontalIcon, MoveRightIcon, MoveUpRightIcon, TypeIcon, BringToFrontIcon, ChevronDownIcon, CopyIcon, SendToBackIcon, Trash2Icon, ChevronUpIcon, CircleIcon, FrameIcon, Grid3x3Icon, LockIcon, MagnetIcon, MinusIcon, MousePointer2Icon, NetworkIcon, PlusIcon, SlashIcon, SplineIcon, SquareIcon, StickyNoteIcon } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { branchDirection, focusPath, type HiddenBranches } from "@/lib/trace/branches";
@@ -169,6 +169,9 @@ export function TraceCanvas({ toolbarStart, toolbarEnd, overlay, onCanvas, selec
   const [hover, setHover] = useState<string | null>(null);
   const [hoverAt, setHoverAt] = useState<Point | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  /** The connection dot under the pointer, drawn filled. */
+  const hoverPortRef = useRef<Side | null>(null);
   const [dragging, setDragging] = useState(false);
   /** The canvas transform as of the last finished pan or zoom: places the quick toolbar and labels the zoom menu. */
   const [viewT, setViewT] = useState({ x: 0, y: 0, k: 1 });
@@ -177,6 +180,13 @@ export function TraceCanvas({ toolbarStart, toolbarEnd, overlay, onCanvas, selec
   const [barWidth, setBarWidth] = useState(320);
   const [marquee, setMarquee] = useState<{ a: Point; b: Point } | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
+  // Place the menu from its measured size so every menu, however long, stays inside the canvas.
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!el || !menu) return;
+    el.style.left = `${Math.max(4, Math.min(menu.x, size.width - el.offsetWidth - 4))}px`;
+    el.style.top = `${Math.max(4, Math.min(menu.y, size.height - el.offsetHeight - 4))}px`;
+  }, [menu, size]);
   /** Ephemeral (unsaved): the node whose path from the seed is in focus. */
   const [focusTarget, setFocusTarget] = useState<string | null>(null);
   /** "N movements hidden" chips, in world coordinates, from the last draw. */
@@ -278,6 +288,19 @@ export function TraceCanvas({ toolbarStart, toolbarEnd, overlay, onCanvas, selec
     const points = connectorPoints(a, connectorLayout(), connectorBox);
     return points && boxFrom(points.from, points.to);
   };
+  /** The single selected node or shape that shows connection dots, as in draw.io. */
+  const portOwner = (): { box: Box; end: (side: Side) => AnnotationEnd } | null => {
+    if (tool !== "select" || selection.nodes.length + selection.annotations.length !== 1) return null;
+    const id = selection.nodes[0] ?? selection.annotations[0], kind = selection.nodes.length ? "node" as const : "annotation" as const;
+    const a = kind === "annotation" ? presentation.annotations.find((x) => x.id === id) : undefined;
+    const box = kind === "node" ? nodeBox(id) : a && a.kind !== "connector" ? annotationBox(a) : null;
+    return box ? { box, end: (side) => ({ kind, id, side }) } : null;
+  };
+  const portAt = (p: Point): AnnotationEnd | null => {
+    const owner = portOwner(), k = transformRef.current.k;
+    const side = owner && SIDES.find((s) => { const q = sidePoint(owner.box, s); return Math.hypot(q.x - p.x, q.y - p.y) <= 8 / k; });
+    return owner && side ? owner.end(side) : null;
+  };
   const selectionBoxes = (sel: TraceSelection = selection) => [
     ...sel.nodes.map(nodeBox),
     ...sel.annotations.map((id) => { const a = draftsRef.current.get(id) ?? presentation.annotations.find((x) => x.id === id); return a ? itemBox(a) : null; }),
@@ -329,9 +352,9 @@ export function TraceCanvas({ toolbarStart, toolbarEnd, overlay, onCanvas, selec
         const path = pathOf(annotation, drawing);
         if (!path) continue;
         ctx.lineWidth = ((selection.annotations.includes(annotation.id) ? 1.5 : 0) + (annotation.strokeWidth ?? 1) * 1.5) / t.k;
-        ctx.setLineDash([6 / t.k, 4 / t.k]); ctx.lineJoin = "round";
+        ctx.setLineDash(annotation.lineStyle === "solid" ? [] : [6 / t.k, 4 / t.k]); ctx.lineJoin = "round";
         ctx.beginPath(); ctx.moveTo(path[0].x, path[0].y); for (const q of path.slice(1)) ctx.lineTo(q.x, q.y); ctx.stroke(); ctx.setLineDash([]);
-        const arrow = (at: Point, from: Point) => { const angle = Math.atan2(at.y - from.y, at.x - from.x), size = (7 + 2 * (annotation.strokeWidth ?? 1)) / t.k; ctx.beginPath(); ctx.moveTo(at.x, at.y); ctx.lineTo(at.x - size * Math.cos(angle - 0.5), at.y - size * Math.sin(angle - 0.5)); ctx.lineTo(at.x - size * Math.cos(angle + 0.5), at.y - size * Math.sin(angle + 0.5)); ctx.stroke(); };
+        const arrow = (at: Point, from: Point) => { const angle = Math.atan2(at.y - from.y, at.x - from.x), size = (10 + 3 * (annotation.strokeWidth ?? 1)) / t.k; ctx.beginPath(); ctx.moveTo(at.x, at.y); ctx.lineTo(at.x - size * Math.cos(angle - 0.45), at.y - size * Math.sin(angle - 0.45)); ctx.lineTo(at.x - size * Math.cos(angle + 0.45), at.y - size * Math.sin(angle + 0.45)); ctx.closePath(); ctx.fillStyle = ctx.strokeStyle; ctx.fill(); };
         if (annotation.arrow === "end" || annotation.arrow === "both") arrow(path[path.length - 1], path[path.length - 2]);
         if (annotation.arrow === "both") arrow(path[0], path[1]);
         if (annotation.label && editing !== annotation.id) {
@@ -495,7 +518,7 @@ export function TraceCanvas({ toolbarStart, toolbarEnd, overlay, onCanvas, selec
     }
     ctx.strokeStyle = palette.guide; ctx.lineWidth = 1 / t.k;
     for (const g of guidesRef.current) { ctx.beginPath(); if (g.axis === "x") { ctx.moveTo(g.at, g.from - 12); ctx.lineTo(g.at, g.to + 12); } else { ctx.moveTo(g.from - 12, g.at); ctx.lineTo(g.to + 12, g.at); } ctx.stroke(); }
-    if (box) { ctx.fillStyle = palette.primary; for (const handle of HANDLES) { const p = handle === "nw" ? [box.x, box.y] : handle === "n" ? [box.x + box.width / 2, box.y] : handle === "ne" ? [box.x + box.width, box.y] : handle === "e" ? [box.x + box.width, box.y + box.height / 2] : handle === "se" ? [box.x + box.width, box.y + box.height] : handle === "s" ? [box.x + box.width / 2, box.y + box.height] : handle === "sw" ? [box.x, box.y + box.height] : [box.x, box.y + box.height / 2]; ctx.fillRect(p[0] - 4 / t.k, p[1] - 4 / t.k, 8 / t.k, 8 / t.k); } }
+    if (box) { ctx.fillStyle = palette.primary; for (const handle of HANDLES.filter((h) => h.length === 2)) { const p = handle === "nw" ? [box.x, box.y] : handle === "n" ? [box.x + box.width / 2, box.y] : handle === "ne" ? [box.x + box.width, box.y] : handle === "e" ? [box.x + box.width, box.y + box.height / 2] : handle === "se" ? [box.x + box.width, box.y + box.height] : handle === "s" ? [box.x + box.width / 2, box.y + box.height] : handle === "sw" ? [box.x, box.y + box.height] : [box.x, box.y + box.height / 2]; ctx.fillRect(p[0] - 4 / t.k, p[1] - 4 / t.k, 8 / t.k, 8 / t.k); } }
     if (active?.kind === "connector") {
       const path = pathOf(active, drawing);
       if (path) {
@@ -503,6 +526,16 @@ export function TraceCanvas({ toolbarStart, toolbarEnd, overlay, onCanvas, selec
         for (const p of [path[0], path[path.length - 1]]) ctx.fillRect(p.x - 5 / t.k, p.y - 5 / t.k, 10 / t.k, 10 / t.k);
         // The label's handle: drag it along the line.
         if (active.label) { const at = labelHandle(path, active), r = 5 / t.k; ctx.beginPath(); ctx.moveTo(at.x, at.y - r); ctx.lineTo(at.x + r, at.y); ctx.lineTo(at.x, at.y + r); ctx.lineTo(at.x - r, at.y); ctx.closePath(); ctx.fill(); }
+      }
+    }
+    // Connection dots on the sides of a single selected node or shape: drag one to another to connect them.
+    const owner = !dragRef.current && portOwner();
+    if (owner) {
+      ctx.strokeStyle = palette.primary; ctx.lineWidth = 1.5 / t.k;
+      for (const side of SIDES) {
+        const q = sidePoint(owner.box, side), on = hoverPortRef.current === side;
+        ctx.beginPath(); ctx.arc(q.x, q.y, (on ? 5.5 : 4) / t.k, 0, Math.PI * 2);
+        ctx.fillStyle = on ? palette.primary : palette.bg; ctx.fill(); ctx.stroke();
       }
     }
     // Connection points of the node or shape under the pointer while connecting; the one it will snap to is filled.
@@ -647,6 +680,9 @@ export function TraceCanvas({ toolbarStart, toolbarEnd, overlay, onCanvas, selec
     const chip = chipsRef.current.find((c) => contains(c, p));
     if (tool === "select" && chip) { onBranchHidden(chip.id, false); return; }
     if (tool !== "select") return begin(event, { kind: "create", origin: p, moved: false, from: tool === "connector" || tool === "arrow" ? endAt(p) : undefined });
+    // A connection dot starts a connector from the selected node or shape.
+    const port = portAt(p);
+    if (port) return begin(event, { kind: "create", origin: p, moved: false, from: port });
     // Handles of a single selected annotation come first.
     const single = selection.annotations.length === 1 && !selection.nodes.length ? presentation.annotations.find((item) => item.id === selection.annotations[0] && !item.locked) : undefined;
     if (single?.kind === "connector") {
@@ -688,6 +724,10 @@ export function TraceCanvas({ toolbarStart, toolbarEnd, overlay, onCanvas, selec
     const connecting = tool === "connector" || tool === "arrow" || drag?.kind === "connector-end" || (drag?.kind === "create" && drag.from !== undefined);
     const anchor = connecting ? anchorAt(p) : null;
     if (anchor?.box !== anchorRef.current?.box || JSON.stringify(anchor?.side) !== JSON.stringify(anchorRef.current?.side)) { anchorRef.current = anchor; requestDraw(); }
+    if (!drag) {
+      const port = portAt(p), side = port && port.kind !== "point" ? port.side ?? null : null;
+      if (side !== hoverPortRef.current) { hoverPortRef.current = side; event.currentTarget.style.cursor = side ? "crosshair" : ""; requestDraw(); }
+    }
     if (!drag) { const item = nodeAt(p)?.id ?? edgeAt(p)?.id ?? null; if (item !== hover) { const r = canvasRef.current!.getBoundingClientRect(); setHover(item); setHoverAt({ x: event.clientX - r.left, y: event.clientY - r.top }); } return; }
     const k = transformRef.current.k;
     if (Math.hypot(p.x - drag.origin.x, p.y - drag.origin.y) > 2 / k) drag.moved = true;
@@ -718,7 +758,7 @@ export function TraceCanvas({ toolbarStart, toolbarEnd, overlay, onCanvas, selec
       }
     } else if (drag.kind === "connector-end") draftsRef.current = new Map([[drag.annotation.id, { ...drag.annotation, [drag.end]: endAt(p) }]]);
     else if (drag.kind === "label") { const path = pathOf(drag.annotation); if (path) draftsRef.current = new Map([[drag.annotation.id, { ...drag.annotation, labelAt: Math.round(projectOnto(path, p).t * 1000) / 1000 }]]); }
-    else if (drag.kind === "create" && drag.from !== undefined) { const id = "draft-connector"; draftsRef.current = new Map([[id, { id, kind: "connector", from: drag.from, to: endAt(p), label: "", arrow: tool === "arrow" ? "end" : "none", color: "gray" }]]); }
+    else if (drag.kind === "create" && drag.from !== undefined) { const id = "draft-connector"; draftsRef.current = new Map([[id, { id, kind: "connector", from: drag.from, to: endAt(p), label: "", arrow: tool === "connector" ? "none" : "end", color: "gray", ...(tool === "select" ? { lineStyle: "solid" as const } : {}) }]]); }
     else setMarquee({ a: drag.origin, b: p });
     requestDraw();
   };
@@ -749,8 +789,11 @@ export function TraceCanvas({ toolbarStart, toolbarEnd, overlay, onCanvas, selec
       const draft = draftsRef.current.get(drag.annotation.id);
       if (draft) onUpdateAnnotation(draft.id, draft.kind === "connector" ? { from: draft.from, to: draft.to } : { at: presentation.canvas.snap ? snap(draft.at, GRID) : draft.at, width: draft.width, ...(draft.height !== undefined ? { height: draft.height } : {}) });
     } else if (drag.kind === "create") {
-      const id = crypto.randomUUID();
-      if (tool === "connector" || tool === "arrow") onAddAnnotation({ id, kind: "connector", from: drag.from ?? { kind: "point", at: drag.origin }, to: endAt(p), label: "", arrow: tool === "arrow" ? "end" : "none", color: "gray", ...(tool === "arrow" ? { strokeWidth: 2 as const } : {}) });
+      const id = crypto.randomUUID(), to = endAt(p);
+      // From a connection dot, keep the line only when it lands on another node or shape.
+      if (tool === "select" && (to.kind === "point" || (drag.from?.kind !== "point" && to.id === drag.from?.id))) return finish();
+      if (drag.from && tool === "select") onAddAnnotation({ id, kind: "connector", from: drag.from, to, label: "", arrow: "end", color: "gray", lineStyle: "solid" });
+      else if (tool === "connector" || tool === "arrow") onAddAnnotation({ id, kind: "connector", from: drag.from ?? { kind: "point", at: drag.origin }, to: endAt(p), label: "", arrow: tool === "arrow" ? "end" : "none", color: "gray", ...(tool === "arrow" ? { strokeWidth: 2 as const } : {}) });
       else if (tool === "text") { const text: Annotation = { id, kind: "note", variant: "text", at: p, width: 220, height: 32, text: "", color: "default", fontSize: "l" }; onAddAnnotation(text); showEditor(text); }
       else if (tool === "note") { const note: Annotation = { id, kind: "note", at: p, width: 200, height: 96, text: "", color: "yellow" }; onAddAnnotation(note); showEditor(note); }
       else { const box = boxFrom(drag.origin, p); onAddAnnotation({ id, kind: "shape", shape: tool === "rect" ? "rect" : tool === "ellipse" ? "ellipse" : "frame", at: { x: box.x, y: box.y }, width: Math.max(80, box.width), height: Math.max(48, box.height), label: "", stroke: "gray", fill: "none" }); }
@@ -985,7 +1028,8 @@ export function TraceCanvas({ toolbarStart, toolbarEnd, overlay, onCanvas, selec
           <Choice label="Line width" value={sameOr(lined.map((a) => a.strokeWidth ?? 1))} options={[[1, <span key="1" className="block h-px w-4 bg-current" />], [2, <span key="2" className="block h-0.5 w-4 bg-current" />], [4, <span key="4" className="block h-1 w-4 bg-current" />]]} onPick={(strokeWidth) => patchAll(() => ({ strokeWidth }))} />
         </>}
         {connectors.length === chosen.length && <>
-          <Choice label="Route" value={sameOr(connectors.map((a) => a.route ?? "straight"))} options={[["straight", <SplineIcon key="s" />], ["elbow", <CornerDownRightIcon key="e" />]]} onPick={(route) => patchAll(() => ({ route }))} />
+          <Choice label="Line style" value={sameOr(connectors.map((a) => a.lineStyle ?? "dashed"))} options={[["solid", <span key="s" className="block w-4 border-t-2 border-current" />], ["dashed", <span key="d" className="block w-4 border-t-2 border-dashed border-current" />]]} onPick={(lineStyle) => patchAll(() => ({ lineStyle }))} />
+          <Choice label="Route" value={sameOr(connectors.map((a) => a.route ?? "straight"))} options={[["straight", <SlashIcon key="s" />], ["curved", <SplineIcon key="c" />], ["elbow", <CornerDownRightIcon key="e" />]]} onPick={(route) => patchAll(() => ({ route }))} />
           <Choice label="Arrowheads" value={sameOr(connectors.map((a) => a.arrow))} options={[["none", <MinusIcon key="n" />], ["end", <MoveRightIcon key="e" />], ["both", <MoveHorizontalIcon key="b" />]]} onPick={(arrow) => patchAll(() => ({ arrow }))} />
         </>}
         <Divider />
@@ -1013,7 +1057,7 @@ export function TraceCanvas({ toolbarStart, toolbarEnd, overlay, onCanvas, selec
   return (
     <div ref={boxRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden" aria-label="Trace graph canvas" onKeyDown={onKeyDown}>
       <canvas ref={canvasRef} className="block h-full w-full touch-none outline-none" tabIndex={0} aria-label="Trace graph. Select nodes with click or arrow keys; press Shift F to fit." onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onPointerLeave={() => { if (!dragRef.current) setHover(null); }} onDoubleClick={beginEdit} onKeyUp={(e) => { if (e.key === " ") spaceRef.current = false; }} onBlur={() => { spaceRef.current = false; }} onContextMenu={openMenu} />
-      {menu && <div role="menu" className="absolute z-20 grid min-w-48 rounded-lg border bg-popover p-1 text-sm shadow-lg" style={{ left: Math.max(4, Math.min(menu.x, size.width - 220)), top: Math.max(4, Math.min(menu.y, size.height - (menu.kind === "node" ? 300 : 210))) }} onKeyDown={(event) => { if (event.key === "Escape") setMenu(null); }}>
+      {menu && <div role="menu" ref={menuRef} className="absolute z-20 grid min-w-48 overflow-y-auto rounded-lg border bg-popover p-1 text-sm shadow-lg" style={{ maxHeight: size.height - 8 }} onKeyDown={(event) => { if (event.key === "Escape") setMenu(null); }}>
         {menu.kind === "node" && <>
           <button type="button" role="menuitem" className="rounded-md px-2 py-1.5 text-left hover:bg-muted" onClick={() => { onCandidateDirection("forward"); setMenu(null); }}>Next movements</button>
           <button type="button" role="menuitem" className="rounded-md px-2 py-1.5 text-left hover:bg-muted" onClick={() => { onCandidateDirection("backward"); setMenu(null); }}>Earlier movements</button>

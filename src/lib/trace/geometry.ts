@@ -1,4 +1,4 @@
-import { resolveEnd, type Annotation, type AnnotationEnd, type FontSize, type Point, type Side, type TracePresentation } from "./presentation";
+import { resolveEnd, type Annotation, type AnnotationEnd, type FontSize, type Point, type Route, type Side, type TracePresentation } from "./presentation";
 
 export type Box = { x: number; y: number; width: number; height: number };
 export type Handle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
@@ -83,14 +83,26 @@ export function nearestSide(box: Box, p: Point, radius: number): Side | null {
 const outward = (side: Side): Point => (side === "n" ? { x: 0, y: -1 } : side === "s" ? { x: 0, y: 1 } : side === "e" ? { x: 1, y: 0 } : { x: -1, y: 0 });
 
 /**
- * The points a connector passes through. Straight: its two ends. Elbow:
- * horizontal and vertical segments only, leaving and entering along the sides
- * the ends are on (or the dominant direction for free ends), like draw.io's
- * orthogonal edge.
+ * The points a connector passes through. Straight: its two ends. Curved: a
+ * cubic curve, sampled, leaving and entering along the sides the ends are on.
+ * Elbow: horizontal and vertical segments only, leaving and entering along the
+ * sides the ends are on (or the dominant direction for free ends), like
+ * draw.io's orthogonal edge.
  */
-export function connectorPath(from: Point, to: Point, route: "straight" | "elbow" = "straight", fromSide?: Side | null, toSide?: Side | null): Point[] {
-  if (route !== "elbow") return [from, to];
+export function connectorPath(from: Point, to: Point, route: Route = "straight", fromSide?: Side | null, toSide?: Side | null): Point[] {
+  if (route === "straight") return [from, to];
   const dx = to.x - from.x, dy = to.y - from.y;
+  if (route === "curved") {
+    const across = Math.abs(dx) >= Math.abs(dy);
+    const toward = (sign: number): Point => (across ? { x: Math.sign(dx) * sign || sign, y: 0 } : { x: 0, y: Math.sign(dy) * sign || sign });
+    const a = fromSide ? outward(fromSide) : toward(1), b = toSide ? outward(toSide) : toward(-1);
+    const reach = Math.max(30, Math.hypot(dx, dy) * 0.4);
+    const c1 = { x: from.x + a.x * reach, y: from.y + a.y * reach }, c2 = { x: to.x + b.x * reach, y: to.y + b.y * reach };
+    return Array.from({ length: 25 }, (_, i) => {
+      const t = i / 24, u = 1 - t;
+      return { x: u * u * u * from.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * to.x, y: u * u * u * from.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * to.y };
+    });
+  }
   const horizontal = (side: Side | null | undefined) => (side ? side === "e" || side === "w" : Math.abs(dx) >= Math.abs(dy));
   const a = horizontal(fromSide), b = horizontal(toSide);
   const stub = 16;
@@ -149,11 +161,17 @@ export function connectorPoints(item: Extract<Annotation, { kind: "connector" }>
   return { from: place(item.from, to, from), to: place(item.to, from, to) };
 }
 
+/** The resize handle at `point`: a corner, or anywhere along a side (whose midpoint the caller may claim first as a connection point). */
 export function handleAt(box: Box, point: Point, radius = 8): Handle | null {
-  const x = [box.x, box.x + box.width / 2, box.x + box.width];
-  const y = [box.y, box.y + box.height / 2, box.y + box.height];
-  const spots: [Handle, number, number][] = [["nw", x[0], y[0]], ["n", x[1], y[0]], ["ne", x[2], y[0]], ["e", x[2], y[1]], ["se", x[2], y[2]], ["s", x[1], y[2]], ["sw", x[0], y[2]], ["w", x[0], y[1]]];
-  return spots.find(([, sx, sy]) => Math.abs(point.x - sx) <= radius && Math.abs(point.y - sy) <= radius)?.[0] ?? null;
+  const right = box.x + box.width, bottom = box.y + box.height;
+  const near = (a: number, b: number) => Math.abs(a - b) <= radius;
+  const between = (v: number, lo: number, hi: number) => v >= lo - radius && v <= hi + radius;
+  const ns = near(point.y, box.y) ? "n" : near(point.y, bottom) ? "s" : "";
+  const we = near(point.x, box.x) ? "w" : near(point.x, right) ? "e" : "";
+  if (ns && we) return (ns + we) as Handle;
+  if (ns && between(point.x, box.x, right)) return ns as Handle;
+  if (we && between(point.y, box.y, bottom)) return we as Handle;
+  return null;
 }
 
 export function resizeBox(box: Box, handle: Handle, delta: Point, keepAspect = false, min: number | { width: number; height: number } = 16): Box {

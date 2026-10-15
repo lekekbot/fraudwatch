@@ -8,6 +8,8 @@ describe("annotation geometry", () => {
     const box = { x: 10, y: 20, width: 100, height: 50 };
     expect(borderPoint(box, { x: 300, y: 45 })).toEqual({ x: 110, y: 45 });
     expect(handleAt(box, { x: 110, y: 70 })).toBe("se");
+    expect(handleAt(box, { x: 30, y: 72 })).toBe("s");
+    expect(handleAt(box, { x: 30, y: 40 })).toBeNull();
     expect(resizeBox(box, "nw", { x: 200, y: 200 })).toEqual({ x: 94, y: 54, width: 16, height: 16 });
     expect(contains(box, { x: 60, y: 45 })).toBe(true);
   });
@@ -45,6 +47,16 @@ describe("annotation geometry", () => {
     // East side to north side: one bend.
     expect(connectorPath({ x: 0, y: 0 }, { x: 100, y: 100 }, "elbow").length).toBeGreaterThan(2);
     expect(connectorPath({ x: 0, y: 0 }, { x: 100, y: 100 })).toEqual([{ x: 0, y: 0 }, { x: 100, y: 100 }]);
+  });
+
+  it("curves connectors out of and into the sides they attach to", () => {
+    const curve = connectorPath({ x: 0, y: 0 }, { x: 100, y: 50 }, "curved", "e", "w");
+    expect(curve[0]).toEqual({ x: 0, y: 0 });
+    expect(curve.at(-1)).toEqual({ x: 100, y: 50 });
+    // Leaves heading east and arrives heading east, into the west side.
+    expect(curve[1].x).toBeGreaterThan(0);
+    expect(Math.abs(curve[1].y)).toBeLessThan(curve[1].x);
+    expect(curve.at(-2)!.x).toBeLessThan(100);
   });
 
   it("places and projects points along a path, and finds connection points", () => {
