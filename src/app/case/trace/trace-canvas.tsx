@@ -3,6 +3,7 @@
 import { select } from "d3-selection";
 import { type ZoomBehavior, type ZoomTransform, zoom, zoomIdentity } from "d3-zoom";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { branchDirection, focusPath, type HiddenBranches } from "@/lib/trace/branches";
 import { annotationBox, connectorPoints, contains, distanceToSegment, handleAt, resizeBox, HANDLES, type Handle } from "@/lib/trace/geometry";
 import type { Names } from "@/lib/labels/labels";
 import { graphWheelAction } from "@/lib/gestures";
@@ -40,8 +41,8 @@ function edgeEnds(a: Point, b: Point, aw: number, bw: number, ah: number, bh: nu
   return { from: { x: a.x, y: a.y + down * ah / 2 }, to: { x: b.x, y: b.y - down * bh / 2 } };
 }
 
-export function TraceCanvas({ view, presentation, steps, names, stateOf, assetText, assetName, onMove, onOptions, onSelection, onCandidateDirection, onStartAtNode, onMapWallet, onRemoveEvidence, onAddAnnotation, onUpdateAnnotation, onRemoveAnnotations, onReorderAnnotation, onNodeStyle }: {
-  view: TraceView; presentation: TracePresentation; steps: readonly TraceStep[]; names: Names;
+export function TraceCanvas({ view, hidden, onBranchHidden, presentation, steps, names, stateOf, assetText, assetName, onMove, onOptions, onSelection, onCandidateDirection, onStartAtNode, onMapWallet, onRemoveEvidence, onAddAnnotation, onUpdateAnnotation, onRemoveAnnotations, onReorderAnnotation, onNodeStyle }: {
+  view: TraceView; hidden: Pick<HiddenBranches, "counts" | "anchors">; onBranchHidden: (id: string, hidden: boolean) => void; presentation: TracePresentation; steps: readonly TraceStep[]; names: Names;
   stateOf: (address: string) => AddressState;
   assetText: (assetId: string, amount: string) => string;
   assetName: (assetId: string) => string;
@@ -81,6 +82,10 @@ export function TraceCanvas({ view, presentation, steps, names, stateOf, assetTe
   const [marquee, setMarquee] = useState<{ a: Point; b: Point } | null>(null);
   const [editFocus, setEditFocus] = useState(false);
   const [size, setSize] = useState({ width: 0, height: 0 });
+  /** Ephemeral (unsaved): the node whose path from the seed is in focus. */
+  const [focusTarget, setFocusTarget] = useState<string | null>(null);
+  /** "N movements hidden" chips, in world coordinates, from the last draw. */
+  const chipsRef = useRef<{ id: string; x: number; y: number; width: number; height: number }[]>([]);
   const requestDraw = useCallback(() => {
     if (frameRef.current) return;
     frameRef.current = requestAnimationFrame(() => { frameRef.current = 0; drawRef.current(); });
@@ -116,7 +121,8 @@ export function TraceCanvas({ view, presentation, steps, names, stateOf, assetTe
 
   const stepById = new Map(steps.map((s) => [s.id, s]));
   const nodeById = new Map(view.nodes.map((n) => [n.id, n]));
-  const anchorId = (id: string) => nodeById.has(id) ? id : id.startsWith("entity:") ? view.nodes.find((node) => node.memberServiceId === id.slice(7))?.id ?? id : id;
+  const focus = focusTarget && nodeById.has(focusTarget) ? focusPath(view, focusTarget) : null;
+  const anchorId = (id: string) => nodeById.has(id) ? id : hidden.anchors.has(id) ? hidden.anchors.get(id)! : id.startsWith("entity:") ? view.nodes.find((node) => node.memberServiceId === id.slice(7))?.id ?? id : id;
   const connectorLayout = (annotations = presentation.annotations): TracePresentation => {
     const positions = { ...positionsRef.current };
     for (const item of annotations) if (item.kind === "connector") for (const end of [item.from, item.to]) if (end.kind === "node" && !nodeById.has(end.id)) {
@@ -195,6 +201,7 @@ export function TraceCanvas({ view, presentation, steps, names, stateOf, assetTe
       const bend = edge.returns ? -28 : 0;
       const warn = edge.steps.some((id) => stale.has(id));
       const supporting = edge.steps.every((id) => { const s = stepById.get(id); return s?.kind === "movement" && ["royalty", "marketplace_fee", "rent", "unidentified"].includes(s.ref.role ?? ""); });
+      ctx.globalAlpha = focus && !focus.edges.has(edge.id) ? 0.2 : 1;
       ctx.strokeStyle = warn ? palette.warn : palette.primary;
       ctx.lineWidth = (selection.edges.includes(edge.id) ? 3 : supporting ? 1.25 : 2) / t.k;
       ctx.beginPath(); ctx.moveTo(ends.from.x, ends.from.y); ctx.quadraticCurveTo(x, y + bend, ends.to.x, ends.to.y); ctx.stroke();
@@ -209,7 +216,9 @@ export function TraceCanvas({ view, presentation, steps, names, stateOf, assetTe
         ctx.fillStyle = palette.bg; ctx.fillRect(x - w / 2, y + bend / 2 - 15 / t.k, w, 18 / t.k);
         ctx.fillStyle = warn ? palette.warn : palette.fg; ctx.textAlign = "center"; ctx.fillText(label, x, y + bend / 2 - 2 / t.k);
       }
+      ctx.globalAlpha = 1;
     }
+    chipsRef.current = [];
     for (const node of view.nodes) {
       const p = positions[node.id];
       if (!p) continue;
@@ -217,7 +226,8 @@ export function TraceCanvas({ view, presentation, steps, names, stateOf, assetTe
       if (p.x + width < minX || p.x - width > maxX || p.y + height < minY || p.y - height > maxY) continue;
       const key = presentation.nodeStyles[node.id]?.color ?? "default";
       const tint = key === "default" ? palette.accent : palette[key] || palette.accent;
-      ctx.fillStyle = tint; ctx.globalAlpha = 0.2; ctx.beginPath(); ctx.roundRect(p.x - width / 2, p.y - height / 2, width, height, 10); ctx.fill(); ctx.globalAlpha = 1;
+      const alpha = focus && !focus.nodes.has(node.id) ? 0.25 : 1;
+      ctx.fillStyle = tint; ctx.globalAlpha = 0.2 * alpha; ctx.beginPath(); ctx.roundRect(p.x - width / 2, p.y - height / 2, width, height, 10); ctx.fill(); ctx.globalAlpha = alpha;
       ctx.strokeStyle = selection.nodes.includes(node.id) ? palette.primary : node.isSeed ? palette.primary : tint;
       ctx.lineWidth = (selection.nodes.includes(node.id) || node.isSeed ? 3 : 1.5) / t.k; ctx.stroke();
       ctx.fillStyle = palette.fg; ctx.textAlign = "left"; ctx.font = `600 ${13 / t.k}px sans-serif`;
@@ -236,6 +246,19 @@ export function TraceCanvas({ view, presentation, steps, names, stateOf, assetTe
           ctx.fillStyle = palette.warn; ctx.fillText(labels.join(" · "), p.x - width / 2 + 12, p.y + height / 2 + 16 / t.k);
         }
       }
+      const count = hidden.counts.get(node.id);
+      if (count !== undefined) {
+        const text = `${count} movement${count === 1 ? "" : "s"} hidden ▸`;
+        ctx.font = `${11 / t.k}px sans-serif`;
+        const w = ctx.measureText(text).width + 12 / t.k;
+        // Beside the node, on the side its hidden branch continues.
+        const chip = { id: node.id, x: (node.depth ?? 0) < 0 ? p.x - width / 2 - w - 8 / t.k : p.x + width / 2 + 8 / t.k, y: p.y - 9 / t.k, width: w, height: 18 / t.k };
+        ctx.fillStyle = palette.bg; ctx.strokeStyle = palette.primary; ctx.lineWidth = 1 / t.k;
+        ctx.beginPath(); ctx.roundRect(chip.x, chip.y, chip.width, chip.height, 6 / t.k); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = palette.fg; ctx.textAlign = "left"; ctx.fillText(text, chip.x + 6 / t.k, chip.y + 13 / t.k);
+        chipsRef.current.push(chip);
+      }
+      ctx.globalAlpha = 1;
     }
     for (const annotation of annotations) {
       if (annotation.kind !== "note") continue;
@@ -330,6 +353,8 @@ export function TraceCanvas({ view, presentation, steps, names, stateOf, assetTe
     if (event.pointerType === "touch" || event.button !== 0 || spaceRef.current) return;
     setMenu(null);
     const p = world(event);
+    const chip = chipsRef.current.find((c) => contains(c, p));
+    if (tool === "select" && chip) { onBranchHidden(chip.id, false); return; }
     if (tool !== "select") {
       dragRef.current = { kind: "create", origin: p, start: {}, moved: false, from: tool === "connector" ? endAt(p) : undefined };
       event.currentTarget.setPointerCapture(event.pointerId); return;
@@ -442,6 +467,7 @@ export function TraceCanvas({ view, presentation, steps, names, stateOf, assetTe
   };
   const onKeyDown = (event: React.KeyboardEvent<HTMLCanvasElement>) => {
     if (event.key === " ") { spaceRef.current = true; event.preventDefault(); return; }
+    if (event.key === "Escape" && focusTarget) { setFocusTarget(null); return; }
     if (event.key === "Escape") { setTool("select"); choose({ nodes: [], edges: [], annotations: [] }); return; }
     if (event.shiftKey && event.key.toLowerCase() === "f") { fit(); event.preventDefault(); return; }
     if (!event.ctrlKey && !event.metaKey && !event.altKey) {
@@ -479,6 +505,8 @@ export function TraceCanvas({ view, presentation, steps, names, stateOf, assetTe
         {menu.kind === "node" ? <>
           <button type="button" role="menuitem" className="rounded p-1 text-left hover:bg-accent" onClick={() => { onCandidateDirection("forward"); setMenu(null); }}>Next movements</button>
           <button type="button" role="menuitem" className="rounded p-1 text-left hover:bg-accent" onClick={() => { onCandidateDirection("backward"); setMenu(null); }}>Earlier movements</button>
+          {(() => { const node = nodeById.get(menu.id), isHidden = hidden.counts.has(menu.id), direction = node && branchDirection(node); return direction && (isHidden || view.edges.some((e) => (direction === "forward" ? e.from : e.to) === menu.id)) ? <button type="button" role="menuitem" className="rounded p-1 text-left hover:bg-accent" onClick={() => { onBranchHidden(menu.id, !isHidden); setMenu(null); }}>{isHidden ? "Show branch" : "Hide branch"}</button> : <button type="button" role="menuitem" disabled className="rounded p-1 text-left text-muted-foreground" title="Nothing downstream to hide, or this is the seed">Hide branch</button>; })()}
+          <button type="button" role="menuitem" className="rounded p-1 text-left hover:bg-accent" onClick={() => { setFocusTarget(menu.id); setMenu(null); canvasRef.current?.focus(); }}>Focus path</button>
           {stateOf(menu.id) === "OBSERVED" && <button type="button" role="menuitem" className="rounded p-1 text-left hover:bg-accent" onClick={() => { onMapWallet(menu.id); setMenu(null); }}>Map wallet</button>}
           <button type="button" role="menuitem" className="rounded p-1 text-left hover:bg-accent" onClick={() => { const p = positionsRef.current[menu.id]; if (p) onAddAnnotation({ id: crypto.randomUUID(), kind: "note", at: { x: p.x + 100, y: p.y + 40 }, width: 200, text: "", color: "yellow" }); setMenu(null); }}>Add note here</button>
           <button type="button" role="menuitem" className="rounded p-1 text-left hover:bg-accent" onClick={() => { void navigator.clipboard.writeText(menu.id); setMenu(null); }}>Copy address</button>
@@ -505,6 +533,7 @@ export function TraceCanvas({ view, presentation, steps, names, stateOf, assetTe
         {selectedAnnotation && <><button type="button" onClick={() => showEditor(selectedAnnotation)}>Edit text</button><button type="button" onClick={() => onReorderAnnotation(selectedAnnotation.id, "front")}>Front</button><button type="button" onClick={() => onReorderAnnotation(selectedAnnotation.id, "back")}>Back</button><button type="button" onClick={() => { onRemoveAnnotations(new Set([selectedAnnotation.id])); choose({ nodes: [], edges: [], annotations: [] }); }}>Delete</button></>}
       </div>}
       {edited && editScreen && <div className="absolute z-10" style={{ left: editScreen.x, top: editScreen.y }}><textarea autoFocus maxLength={2000} className="min-h-20 w-52 rounded border bg-background p-2 text-sm shadow" value={editText} onChange={(e) => setEditText(e.target.value)} onBlur={commitEdit} onKeyDown={(e) => { if (e.key === "Escape") { cancelEditRef.current = true; setEditing(null); e.preventDefault(); } else if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { commitEdit(); e.preventDefault(); } }} />{editText.length >= 1800 && <span className="block bg-background text-right text-xs">{editText.length}/2000</span>}</div>}
+      {focusTarget && <div className="absolute right-3 top-3 flex items-center gap-2 rounded border bg-background/95 p-1 text-xs">{focus ? `Path from the seed to ${nodeById.get(focusTarget)?.service?.name ?? names.of(focusTarget)}` : "No path from the seed to this node"}<button type="button" className="rounded px-2 py-1 hover:bg-accent" onClick={() => setFocusTarget(null)}>Exit focus (Esc)</button></div>}
       {hover && <p className="pointer-events-none absolute bottom-12 left-3 max-w-sm rounded border bg-background p-2 text-xs shadow">{nodeById.has(hover) ? `${nodeById.get(hover)?.service?.name ?? names.of(hover)} · ${nodeById.get(hover)?.addresses.join(", ")}` : (() => { const edge = view.edges.find((e) => e.id === hover)!; return `${edgeLabel(edge)}${edge.via?.length ? ` · via ${edge.via.map((item) => `${item.from} to ${item.to}`).join("; ")}` : ""}`; })()}</p>}
       <p className="pointer-events-none absolute bottom-12 right-3 rounded border bg-background/95 p-1 text-xs">Solid = observed movement · Dashed = your annotation</p>
       <p className="absolute bottom-2 left-3 rounded bg-background/95 px-2 py-1 text-xs text-muted-foreground">Observed movements in time order. Lines don&apos;t show that the same funds moved.</p>

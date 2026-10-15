@@ -99,7 +99,7 @@ It **reads** the existing semantic model (`SemanticEvent.flows`). It never chang
 | 05A | [Annotations & Styling](05A_ANNOTATIONS_AND_STYLING.md) | Critical | MVP | 04, 05 | Core tools on `trace-graph`; small-zoom behavior, browser checks and merge pending |
 | 06 | [Guided Trace Building](06_GUIDED_TRACE_BUILDING.md) | Critical | MVP | 03, 04, 05 | Implemented on `trace-graph`; live-data browser checks and merge pending |
 | 07 | [Service, Protocol & Entity Integration](07_SERVICE_PROTOCOL_ENTITY_INTEGRATION.md) | High | Beta | 06 | Core behavior on `trace-graph`; look-alike exemption, browser checks and merge pending |
-| 08 | [Branches, Cycles & Trace Operations](08_BRANCHES_CYCLES_AND_TRACE_OPERATIONS.md) | High | Beta | 06 | Planned |
+| 08 | [Branches, Cycles & Trace Operations](08_BRANCHES_CYCLES_AND_TRACE_OPERATIONS.md) | High | Beta | 06 | Implemented on `trace-graph`; browser checks recorded, merge pending |
 | 09 | [Inspector & Cross-View Navigation](09_INSPECTOR_AND_CROSS_VIEW_NAVIGATION.md) | High | Beta | 06 | Planned |
 | 10 | [Large-Case Performance](10_LARGE_CASE_PERFORMANCE.md) | High | Release | 06–09 | Planned |
 | 11 | [Export & Reproducibility](11_EXPORT_AND_REPRODUCIBILITY.md) | Medium | Release | 04, 09 | Planned |
@@ -109,6 +109,8 @@ It **reads** the existing semantic model (`SemanticEvent.flows`). It never chang
 Branch status records code on the pushed branch, not completed acceptance. Mark a sprint "Done" only after merge and its Definition of Done checks.
 
 **Branch progress (2026-10-13):** Sprints 05A–07 were pushed to `trace-graph` in `4a66688`: annotation tools, guided trace creation and candidate selection, compact step details, and protocol folding with custody stops. Validation passed: `pnpm test` (34 files, 272 tests), `pnpm typecheck`, `pnpm lint` and `pnpm exec next build --webpack`. A browser smoke test created an address trace, edited a note and reopened the trace in a local case. This browser had no RPC endpoint, so movement selection, map-to-continue, service expand/collapse and large-case performance still need live-data browser checks. MVP and Beta milestones remain open.
+
+**Branch progress (2026-10-15):** Sprint 08 added branch hide/show with "N movements hidden" chips, focus path, branch summaries, observations on the node panel, session undo/redo (buttons and Cmd/Ctrl+Z), the visible-item banner and the 100-children confirmation; `removeSteps` now prunes hidden branches. A failed automatic placement save is no longer retried on every render. Validation: `pnpm test` (36 files, 284 tests), `pnpm typecheck`, `pnpm lint`, and a live-data browser check recorded in the sprint file.
 
 ## 6. Milestones
 

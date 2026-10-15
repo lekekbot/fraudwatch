@@ -42,7 +42,8 @@ export function removeSteps(trace: Trace, stepIds: ReadonlySet<string>, now = ne
   const detached = detachEnds(trace.presentation, removed);
   const positions = Object.fromEntries(Object.entries(detached.positions).filter(([id]) => nodes.has(id) || id.startsWith("entity:")));
   const nodeStyles = Object.fromEntries(Object.entries(detached.nodeStyles).filter(([id]) => nodes.has(id) || id.startsWith("entity:")));
-  return stamp(trace, { steps, presentation: { ...detached, positions, nodeStyles } }, now);
+  const hiddenBranches = detached.hiddenBranches.filter((id) => nodes.has(id) || id.startsWith("entity:"));
+  return stamp(trace, { steps, presentation: { ...detached, positions, nodeStyles, hiddenBranches } }, now);
 }
 
 export function setScope(trace: Trace, scope: TraceScope, now = new Date()): Trace {

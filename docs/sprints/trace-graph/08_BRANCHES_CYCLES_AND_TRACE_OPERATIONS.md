@@ -1,6 +1,6 @@
 # Sprint 08 — Branches, Cycles, and Trace Operations
 
-**Status:** Planned
+**Status:** Implemented on `trace-graph` (2026-10-15); merge pending
 **Depends on:** 06 (independent of 07 and 09)
 
 ## Summary and Why It Matters
@@ -14,6 +14,8 @@ Real traces split, merge, loop back and revisit the same counterparties. Without
 - After 02–06: one node per address (D2), `returns` edges, bundled edges, BFS depth, `presentation.hiddenBranches` reserved, pure updaters with immediate save, Undo toasts for single actions.
 - Behaviour observations already detect circular movement, fund split, consolidation and rapid forwarding per wallet, with their rules and thresholds (`src/lib/behavior/observations.ts`, `BEHAVIOR_THRESHOLDS`). They're **observations**, not traces.
 - No undo/redo stack anywhere in the app.
+
+**Drift found 2026-10-15:** `removeSteps` didn't prune `presentation.hiddenBranches` as this plan assumed; it now does (same rule as positions and styles: entries for removed nodes go, `entity:` ids stay). Sprint 09's navigation isn't merged, so "Observations here" lists the observations and opens each one's first transaction in the Timeline.
 
 ### Gaps and limitations
 
@@ -92,20 +94,20 @@ push(h, before): History; undo(h, current): { history; trace } | null; redo(…)
 
 ### Task Group A — Branch model
 
-- [ ] `branchOf(view, nodeId, direction)` per the definition; `summarizeBranch` with per-asset BigInt totals by unique step id
-- [ ] Hidden-branch filtering in the view model with the "N movements hidden" chip data
-- [ ] Focus path (shortest by steps; ties by earliest order)
+- [x] `branchOf(view, nodeId, direction)` per the definition; `summarizeBranch` with per-asset BigInt totals by unique step id
+- [x] Hidden-branch filtering in the view model with the "N movements hidden" chip data
+- [x] Focus path (shortest by steps; ties by earliest order)
 
 ### Task Group B — Undo/redo
 
-- [ ] `history.ts` with cap; wire every updater call through it in `trace-view.tsx`; keyboard shortcuts; toolbar buttons with disabled states
+- [x] `history.ts` with cap; wire every updater call through it in `trace-view.tsx`; keyboard shortcuts; toolbar buttons with disabled states
 
 ### Task Group C — UI
 
-- [ ] Context menu: Hide branch / Show branch, Focus path; Esc to leave focus
-- [ ] Branch summary in the node panel
-- [ ] Visible-item banner; children confirmation
-- [ ] "Observations involving this wallet" link (opens the observation in the Timeline via 09's navigation, or lists them if 09 isn't merged)
+- [x] Context menu: Hide branch / Show branch, Focus path; Esc to leave focus
+- [x] Branch summary in the node panel
+- [x] Visible-item banner; children confirmation
+- [x] "Observations involving this wallet" link (opens the observation in the Timeline via 09's navigation, or lists them if 09 isn't merged)
 
 ## UI Behavior and Example Scenarios
 
@@ -138,9 +140,20 @@ Branch computations are O(nodes + edges) per call, memoised on (view, hidden set
 
 ## Acceptance Criteria (observable and measurable)
 
-- [ ] F6 and the synthetic fixtures behave as tested.
-- [ ] No operation changes `steps` except add, remove and undo/redo (tests).
-- [ ] Validation commands pass; browser checks recorded.
+- [x] F6 and the synthetic fixtures behave as tested.
+- [x] No operation changes `steps` except add, remove and undo/redo (tests).
+- [x] Validation commands pass; browser checks recorded.
+
+## Implementation Notes (2026-10-15)
+
+- `src/lib/trace/branches.ts`: `branchOf`, `summarizeBranch`, `hideBranches`, `focusPath`, all pure over a built `TraceView` (so they work on collapsed service nodes too). `src/lib/trace/history.ts`: the capped undo stack.
+- **Hiding with merges and rings.** A node in a hidden branch stays drawn when the seed reaches it without passing through a hidden root: along movements ahead of the seed, against them behind it. So in a merge (A→B→C, A→D→C) hiding B keeps C, and in a ring (A→B→C→D→E→A) hiding B hides only C, because D and E are also 2 and 1 hops behind A. The chip counts the branch's steps that aren't drawn, so it can read "0 movements hidden" when everything is still reachable.
+- The chip sits beside the node on the side the branch continues; clicking it shows the branch. Hide branch is disabled for the seed, for unconnected nodes and when there is nothing downstream.
+- **Undo** covers every recorded edit made through `persist`; automatic placement of new nodes isn't recorded. The stack is per trace and resets on switching traces or reloading. Not implemented: the "changed elsewhere" note on undo (saves stamp their own `updatedAt`, so there's no reliable baseline yet).
+- Automatic placement is no longer retried after a failed save (previously a storage error, such as a full quota, re-saved and toasted on every render).
+- Adding movements that give a node more than 100 distinct direct recipients (forward) or senders (backward) asks first. Over 300 drawn nodes or 600 drawn edges shows a banner suggesting hiding branches.
+
+**Validation (2026-10-15):** `pnpm test` (36 files, 284 tests), `pnpm typecheck`, `pnpm lint` pass. Browser check on a local case (live RPC data): added movements to two hops; Undo/Redo by button and Cmd+Z / Shift+Cmd+Z; branch summary (2 steps, 2 nodes, 0.050006 SOL, stops, two circular-movement observations with Open in Timeline); Hide branch from the context menu and the panel; the chip and "1 branch hidden" persisted across reload while the undo stack reset; the chip shows the branch again and Undo re-hides it; Focus path dims everything off the seed→6LQ6→Jitotip path, and Esc leaves it. No console errors. Not checked in the browser: the 300/600 banner and the 100-children confirmation (covered by code review only).
 
 ## Definition of Done
 

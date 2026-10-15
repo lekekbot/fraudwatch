@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addAnnotation, addSteps, duplicateTrace, removeAnnotations, removeSteps, renameTrace, setPositions, setScope } from "./edit";
+import { addAnnotation, addSteps, duplicateTrace, removeAnnotations, removeSteps, renameTrace, reorderAnnotation, setBranchHidden, setCanvasOptions, setDirection, setNodeStyle, setPositions, setScope, setServiceExpanded, updateAnnotation } from "./edit";
 import { event, stepOf, trace } from "./testing";
 
 const now = new Date("2026-02-02T00:00:00.000Z");
@@ -43,5 +43,18 @@ describe("pure trace edits", () => {
     const withNote = addAnnotation(added, note, now);
     const connected = addAnnotation(withNote, { id: "line", kind: "connector", from: { kind: "annotation", id: "note" }, to: { kind: "node", id: "A" }, label: "claim", arrow: "end", color: "default" }, now);
     expect(removeAnnotations(connected, new Set(["note"]), now).presentation.annotations[0]).toMatchObject({ from: { kind: "point", at: { x: 60, y: 20 } } });
+  });
+
+  it("changes steps only through add and remove", () => {
+    const added = addSteps(base(), [step], now);
+    const note = { id: "note", kind: "note" as const, at: { x: 0, y: 0 }, width: 100, text: "", color: "blue" as const };
+    const edits = [
+      (t: typeof added) => setScope(t, { ...t.scope, maxHops: 3 }, now), (t: typeof added) => setDirection(t, "both", now), (t: typeof added) => renameTrace(t, "x", now),
+      (t: typeof added) => setPositions(t, { A: { x: 1, y: 1 } }, now), (t: typeof added) => setNodeStyle(t, "A", { color: "red" }, now), (t: typeof added) => addAnnotation(t, note, now),
+      (t: typeof added) => updateAnnotation(t, "note", { text: "y" }, now), (t: typeof added) => reorderAnnotation(t, "note", "back", now), (t: typeof added) => removeAnnotations(t, new Set(["note"]), now),
+      (t: typeof added) => setCanvasOptions(t, { grid: true }, now), (t: typeof added) => setServiceExpanded(t, "p", true, now), (t: typeof added) => setBranchHidden(t, "B", true, now),
+    ];
+    let current = added;
+    for (const edit of edits) { current = edit(current); expect(current.steps).toBe(added.steps); }
   });
 });
