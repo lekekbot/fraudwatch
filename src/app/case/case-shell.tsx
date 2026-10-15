@@ -265,11 +265,14 @@ function CaseWorkspace({ c, prefs, rpc, rpcKnown }: { c: FraudWatchCase; prefs: 
     for (const [signature, tx] of transactions ?? []) out.set(signature, interpretTransaction(tx, { nfts })[0]);
     return out;
   }, [transactions, nfts]);
+  // Built the first time the Trace view opens, then kept across view switches; rebuilt only when the events change.
+  const [traceOpened, setTraceOpened] = useState(false);
+  if (view === "trace" && !traceOpened) setTraceOpened(true);
   const traceIndex = useMemo(() => {
-    if (view !== "trace") return null;
+    if (!traceOpened) return null;
     const order = chronologicalOrder(transactions?.values() ?? []);
     return buildMovementIndex(semanticEvents.values(), (signature) => order.get(signature));
-  }, [view, transactions, semanticEvents]);
+  }, [traceOpened, transactions, semanticEvents]);
   // Summaries once per wallet (the costly part); filtering below is plain comparisons on them.
   const summariesByWallet = useMemo(() => {
     const out = new Map<string, EffectSummary[]>();

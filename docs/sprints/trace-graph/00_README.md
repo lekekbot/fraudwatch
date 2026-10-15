@@ -101,7 +101,7 @@ It **reads** the existing semantic model (`SemanticEvent.flows`). It never chang
 | 07 | [Service, Protocol & Entity Integration](07_SERVICE_PROTOCOL_ENTITY_INTEGRATION.md) | High | Beta | 06 | Core behavior on `trace-graph`; look-alike exemption, browser checks and merge pending |
 | 08 | [Branches, Cycles & Trace Operations](08_BRANCHES_CYCLES_AND_TRACE_OPERATIONS.md) | High | Beta | 06 | Implemented on `trace-graph`; browser checks recorded, merge pending |
 | 09 | [Inspector & Cross-View Navigation](09_INSPECTOR_AND_CROSS_VIEW_NAVIGATION.md) | High | Beta | 06 | Implemented on `trace-graph`; merge pending |
-| 10 | [Large-Case Performance](10_LARGE_CASE_PERFORMANCE.md) | High | Release | 06–09 | Planned |
+| 10 | [Large-Case Performance](10_LARGE_CASE_PERFORMANCE.md) | High | Release | 06–09 | Implemented on `trace-graph`; merge pending |
 | 11 | [Export & Reproducibility](11_EXPORT_AND_REPRODUCIBILITY.md) | Medium | Release | 04, 09 | Planned |
 | 12 | [Optional Global Preferences Add-On](12_OPTIONAL_GLOBAL_PREFERENCES_ADDON.md) | Optional | Add-on | 06 + Global Preferences 02/03 | Optional / Deferred |
 | 13 | [Validation, Accessibility & Release](13_VALIDATION_ACCESSIBILITY_AND_RELEASE.md) | Critical | Release | 01–11 | Planned |
@@ -112,7 +112,7 @@ Branch status records code on the pushed branch, not completed acceptance. Mark 
 
 **Branch progress (2026-10-15):** Sprint 08 added branch hide/show with "N movements hidden" chips, focus path, branch summaries, observations on the node panel, session undo/redo (buttons and Cmd/Ctrl+Z), the visible-item banner and the 100-children confirmation; `removeSteps` now prunes hidden branches. A failed automatic placement save is no longer retried on every render. Validation: `pnpm test` (36 files, 284 tests), `pnpm typecheck`, `pnpm lint`, and a live-data browser check recorded in the sprint file.
 
-Sprint 09 (same day) replaced the step summary with a full inspector (step evidence, bundled-edge table, other legs, stale replacements, node trace section with boundary explanations, the shell's `AddressPanel`), wired Open in Timeline (with a no-lane message) and Show in Graph through the shell's existing paths, and kept selection and zoom per trace across view switches. The Trace tab now returns to the trace last open. With 07–09 all on the branch, the Beta milestone waits on merge and the remaining browser checks listed in each sprint file.
+Sprint 09 (same day) replaced the step summary with a full inspector (step evidence, bundled-edge table, other legs, stale replacements, node trace section with boundary explanations, the shell's `AddressPanel`), wired Open in Timeline (with a no-lane message) and Show in Graph through the shell's existing paths, and kept selection and zoom per trace across view switches. The Trace tab now returns to the trace last open. With 07–09 all on the branch, the Beta milestone waits on merge and the remaining browser checks listed in each sprint file. Sprint 10 measured every trace stage (all far under target at 10 wallets / 5,000 transactions and 300 nodes; canvas at display rate), fixed a cubic slowdown in automatic placement on large fan-outs and fan-ins with output proven unchanged, kept the movement index across view switches, added the 10,000-candidate filter rule, and recorded an RPC audit with no requests from trace actions.
 
 ## 6. Milestones
 

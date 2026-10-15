@@ -9,6 +9,8 @@ import type { MovementRef, Trace, TraceStep } from "@/lib/trace/model";
 import type { TraceEvidence, TraceNode } from "@/lib/trace/view";
 import { assetLabel, type Assets } from "../asset-format";
 
+const MAX_UNFILTERED = 10_000;
+
 export function CandidatePanel({ node, trace, index, evidence, caseRange, loadedRange, hiddenReason, names, assets, assetText, loadStatus, loadError, initialDirection, onAdd, onAddConversion, onMapWallet }: {
   node: TraceNode; trace: Trace; index: MovementIndex; evidence: TraceEvidence;
   caseRange: { start: string; end: string };
@@ -46,6 +48,8 @@ export function CandidatePanel({ node, trace, index, evidence, caseRange, loaded
     scope: scoped, exclude: new Set(), includeSupporting: supporting, counterpartySearch: search.trim(), hiddenReason,
     loaded: range && coverage ? { complete: coverage.complete, ...range } : null, caseRange,
   }, { limit });
+  // Above this many matches, list only the first page until the investigator narrows by asset, amount or counterparty.
+  const tooMany = page.total > MAX_UNFILTERED && !asset && !minimumUnits && !search.trim();
   const rows = page.items;
   const toggle = (key: string) => setPicked(picked.includes(key) ? picked.filter((id) => id !== key) : [...picked, key]);
   const add = () => {
@@ -62,6 +66,7 @@ export function CandidatePanel({ node, trace, index, evidence, caseRange, loaded
     {node.service && node.addresses.length > 1 && <label>Service address<select className="w-full rounded border bg-background p-1" value={address} onChange={(e) => { setAddress(e.target.value); setPicked([]); }} >{node.addresses.map((id) => <option key={id} value={id}>{names.of(id)} · {id.slice(0, 8)}…</option>)}</select></label>}
     <div className="flex gap-1"><Button size="xs" disabled={trace.direction === "backward"} variant={direction === "forward" ? "secondary" : "outline"} onClick={() => { setDirection("forward"); setPicked([]); }}>Next</Button><Button size="xs" disabled={trace.direction === "forward"} variant={direction === "backward" ? "secondary" : "outline"} onClick={() => { setDirection("backward"); setPicked([]); }}>Earlier</Button></div>
     <p>{page.completeness === "complete" ? "Complete loaded history" : page.completeness === "outside_range" ? "Outside loaded range" : "Partial history: only observed movements are known"}{loadStatus === "running" ? " · Loading, results may change" : ""}</p>
+    {page.completeness === "partial_history" && coverage?.warnings.map((w) => <p key={w} className="text-muted-foreground">{w}</p>)}
     {loadError && <p className="text-destructive">History load failed: {loadError}. Existing trace steps are unchanged.</p>}
     {evidence.isCustodial(address) && direction === "forward" && <p className="text-destructive">Custodial service. Deposits are pooled; later withdrawals cannot be linked to this deposit on-chain.</p>}
     {evidence.addressState(address) === "OBSERVED" && !evidence.isCustodial(address) && <Button variant="outline" size="xs" onClick={() => onMapWallet(address)}>Map {names.of(address)} to load history</Button>}
@@ -71,9 +76,10 @@ export function CandidatePanel({ node, trace, index, evidence, caseRange, loaded
     <label>Counterparty address<input className="w-full rounded border bg-background p-1" value={search} onChange={(e) => { setSearch(e.target.value); setPicked([]); }} /></label>
     <label className="flex gap-1"><input type="checkbox" checked={supporting} onChange={(e) => setSupporting(e.target.checked)} /> Include fees, royalties and rent</label>
     <label className="flex gap-1"><input type="checkbox" checked={allTimes} onChange={(e) => setAllTimes(e.target.checked)} /> Include {direction === "forward" ? "earlier" : "later"} movements</label>
-    <p>{Math.min(limit, page.total)} of {page.total} movements</p>
+    <p>{Math.min(limit, page.total).toLocaleString()} of {page.total.toLocaleString()} movements</p>
+    {tooMany && <p className="text-muted-foreground">{page.total.toLocaleString()} movements: filter by asset, amount or counterparty to list more than the first {limit}.</p>}
     <div className="space-y-2">{rows.map((item: Candidate, i) => { const other = (direction === "forward" ? item.ref.to : item.ref.from)!; const service = evidence.serviceOf?.(other); const added = existing.has(item.ref.key); return <label key={item.ref.key} className="block rounded border p-2"><span className="flex gap-1"><input type="checkbox" checked={added || picked.includes(item.ref.key)} disabled={added} onChange={() => toggle(item.ref.key)} />{i === 0 || rows[i - 1].ref.signature !== item.ref.signature ? <strong>{item.ref.signature.slice(0, 10)}… · {item.groupSize} leg{item.groupSize === 1 ? "" : "s"}</strong> : null}</span><span className="block pl-5" title={other}>{direction === "forward" ? "to" : "from"} {service ? `${service.protocolName} (${service.category === "exchange" ? "custodial" : service.category})` : names.of(other)} · {assetText(item.ref.assetId, item.ref.amount)}{added ? " · already added" : ""}{item.weight === "supporting" ? ` · ${item.ref.role}` : ""}{item.hidden ? ` · hidden (${item.hidden})` : ""}{item.ref.time === null ? " · time unknown" : ""}</span></label>; })}</div>
-    {page.nextCursor !== null && <Button variant="outline" size="xs" onClick={() => setLimit(limit + 50)}>Show 50 more</Button>}
+    {page.nextCursor !== null && !tooMany && <Button variant="outline" size="xs" onClick={() => setLimit(limit + 50)}>Show 50 more</Button>}
     <Button size="sm" disabled={!picked.length || Boolean(minimum.trim() && minimumUnits === null)} onClick={add}>Add {picked.length} movement{picked.length === 1 ? "" : "s"}</Button>
     {conversions.length > 0 && <section className="space-y-1 border-t pt-2"><h4 className="font-semibold">Conversions</h4>{conversions.map((item) => { const added = trace.steps.some((step) => step.kind === "conversion" && step.signature === item.signature && step.address === address); return <div key={`${item.signature}:${item.address}`} className="rounded border p-2"><p>{item.spent.map((a) => assetText(a.assetId, a.amount)).join(" + ")} to {item.received.map((a) => assetText(a.assetId, a.amount)).join(" + ")}</p><label><input type="checkbox" checked={followAsset} onChange={(e) => setFollowAsset(e.target.checked)} /> Follow received asset</label><Button variant="outline" size="xs" disabled={added} onClick={() => onAddConversion({ kind: "conversion", id: crypto.randomUUID(), signature: item.signature, address, spent: item.spent, received: item.received, addedAt: new Date().toISOString() }, followAsset)}>{added ? "Added" : "Add conversion"}</Button></div>; })}</section>}
     {boundaries.length > 0 && <section className="border-t pt-2"><h4 className="font-semibold">Boundaries</h4>{boundaries.map((item, i) => <p key={`${item.signature}:${i}`}>{item.boundary.replaceAll("_", " ")} · {item.signature.slice(0, 10)}…</p>)}</section>}

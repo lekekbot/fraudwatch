@@ -1,6 +1,6 @@
 # Sprint 10 — Large-Case Performance
 
-**Status:** Planned
+**Status:** Implemented on `trace-graph` (2026-10-15); merge pending
 **Depends on:** 06–09
 
 ## Summary and Why It Matters
@@ -15,6 +15,12 @@ Fraud cases involve wallets with thousands of transfers and counterparties. The 
 - Ingestion caps: 5,000 signatures and 25 pages per address; concurrency 8; abort via `AbortController` (`src/lib/ingest/ingest.ts`, `src/hooks/use-ingestion.ts`).
 - Derivations are memoised in `CaseWorkspace`; the Graph is built only when its view is active.
 - Canvas redraws are scheduled with `requestAnimationFrame` in the Timeline.
+
+**Re-checked 2026-10-15.** Drift and findings:
+
+- `autoPlace` (05) was cubic in a fan-out: each probe for a free row scanned every placed node, and every child re-probed the rows its siblings had already filled. Measured before the fix: 60 children 6 ms, 100 children 28 ms (≈ 0.75 s at 300, minutes at 2,000). Fixed, see below.
+- The movement index memo depended on `view`, so it was dropped and rebuilt every time the Trace view was left and reopened. It's now built the first time the Trace view opens and kept, rebuilt only when the events change.
+- Layout functions are `autoPlace` (incremental) and `tidyLayout` (reset), not `layoutTrace`.
 
 ### Gaps and limitations
 
@@ -95,18 +101,18 @@ With the network panel filtered to the RPC host, run: open trace, add and remove
 
 ### Task Group A — Measure
 
-- [ ] Write `performance.test.ts` with the synthetic fixtures and stage timings; print timings
-- [ ] Record baseline numbers in this file
-- [ ] Measure canvas frame rate and inspector responsiveness in the browser; record
+- [x] Write `performance.test.ts` with the synthetic fixtures and stage timings; print timings
+- [x] Record baseline numbers in this file
+- [x] Measure canvas frame rate and inspector responsiveness in the browser; record
 
 ### Task Group B — Fix what exceeds targets
 
-- [ ] For each stage over target: profile, fix algorithmically, re-measure, record
+- [x] For each stage over target: profile, fix algorithmically, re-measure, record
 
 ### Task Group C — Degradation and audit
 
-- [ ] Implement the candidate-total filter requirement and the large-trace banner (if not already present from 08)
-- [ ] Run and record the RPC audit
+- [x] Implement the candidate-total filter requirement and the large-trace banner (if not already present from 08)
+- [x] Run and record the RPC audit
 
 ## UI Behavior and Example Scenarios
 
@@ -133,9 +139,41 @@ This whole sprint.
 
 ## Acceptance Criteria (observable and measurable)
 
-- [ ] Every stage has a recorded number; pure stages within 3× target in CI.
-- [ ] RPC audit recorded with zero unexpected requests.
-- [ ] Interaction Graph and Timeline timings in `src/lib/semantic/performance.test.ts` unchanged (no regression).
+- [x] Every stage has a recorded number; pure stages within 3× target in CI.
+- [x] RPC audit recorded with zero unexpected requests.
+- [x] Interaction Graph and Timeline timings in `src/lib/semantic/performance.test.ts` unchanged (no regression).
+
+## Results (2026-10-15)
+
+Machine: Apple M5 Pro (macOS, Node 24.10), `src/lib/trace/performance.test.ts`, fastest of 5 runs; tests assert 3× target.
+
+| Stage | Scale | Target | Measured |
+|---|---|---|---|
+| `buildMovementIndex` | 10 wallets / 5,000 tx (every 5th a recorded real transaction) | 150 ms | 5–6 ms; ≈ 2 MB heap |
+| `candidates` page | 5,000 movements, asset + minimum + dates + counterparty search | 5 ms | 0.5 ms |
+| `buildTraceView` | 500 steps / 300 nodes | 20 ms | 0.9 ms |
+| `autoPlace` incremental | 300 nodes, 1 new | 5 ms | 0.2 ms |
+| `tidyLayout` reset | 300 nodes | 50 ms | 0.6 ms |
+| `branchOf` / `hideBranches` (3) / `focusPath` | 300 nodes | 5 / 10 / 5 ms | 0.1 / 0.3 / 0.1 ms |
+| Synthetic fan-out 1→2,000 | view / autoPlace / tidy | 40 / 50 / 50 ms | 3.4 / 3.1 / 6.6 ms (autoPlace was minutes before the fix) |
+| Synthetic fan-in 2,000→1 | view / autoPlace / tidy | 40 / 50 / 50 ms | 3.3 / 3.0 / 6.7 ms (autoPlace 152 ms after the first fix) |
+| Synthetic ring of 50, repeated pair of 1,000 | view / autoPlace / tidy | 40 / 50 / 50 ms | ≤ 0.9 ms |
+| Canvas pan and zoom | 300 nodes / 599 edges drawn, all in view | 60 fps | 120 fps (display rate); full redraw 0.8 ms median, 1.3 ms worst |
+| Inspector open | node and edge clicks on the 300-node trace, production build | < 1 frame blocking | handler 0–9 ms including React render; no long tasks; input-to-paint 16–32 ms |
+
+The browser figures used a synthetic 300-node / 600-step trace written to the local case (its steps are stale by design and drawn from stored references), measured with `requestAnimationFrame` intervals, the Event Timing API and a long-task observer. The dev build was measured too: same frame rate, input-to-paint 24–48 ms.
+
+**Fixes (output unchanged).** `autoPlace` now buckets placed nodes in node-sized cells (an overlap check looks at 9 cells instead of every node), remembers where probing around each base point stopped (rows found taken stay taken, since nodes are only added), finds a node's first placed neighbour from a per-node edge list, and caches "does any remaining node have a placed neighbour" until the next placement. `layout.test.ts` keeps the previous implementation verbatim and asserts identical output on fan-out, fan-in, ring and mixed shapes, with and without saved positions, obstacles and grid snapping.
+
+**Graph and Timeline (no regression).** `src/lib/semantic/performance.test.ts` is unchanged and passes: 39 / 42 / 101 ms for 1 / 5 / 10 wallets in this run (budgets 3 / 5 / 10 s). That code wasn't touched; an isolated cold run on `HEAD` measured 192 / 200 ms for the 1- and 10-wallet cases, so these numbers vary with JIT warm-up.
+
+**Degradation.** Over 300 nodes / 600 edges: the banner from 08. Over 10,000 candidates with no asset, amount or counterparty filter: the count is shown, "filter by asset, amount or counterparty to list more than the first 50", and "Show 50 more" is withheld. While ingestion runs: "Loading, results may change" (from 06). Partial history: the ingestion coverage warnings (for example the safety-limit text) are now listed under the completeness line.
+
+**RPC audit (production build).** Network log cleared after the case loaded, then: inspect an edge and a node, add a movement, Undo, Redo, Undo, hide and show a branch, Show in Graph and back, Open in Timeline and back. Requests that left localhost: none to the RPC; two token logos from `assets-cdn.trustwallet.com` loaded by the Graph and Timeline views (existing behaviour, not trace actions). Not run: Map wallet (it would change the case) and export (Sprint 11).
+
+**Also changed.** Show in Graph from a node or a bundled edge now labels the Graph's chip "Only the traced movements of …" rather than just the address, which read like an address filter.
+
+Not checked in the browser: the 10,000-candidate message (no wallet that large in the test case; the rule is a plain condition in `candidate-panel.tsx`).
 
 ## Definition of Done
 

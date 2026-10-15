@@ -54,7 +54,7 @@ export function TraceInspector({ edge, trace, view, evidence, index, names, asse
       <p>Total of added movements: {edge.totals.map((t) => assetText(t.assetId, t.amount)).join(", ")}</p>
       {edge.firstTime !== null && <p>{formatUtc(edge.firstTime)} → {formatUtc(edge.lastTime)} UTC</p>}
       <div className="flex flex-wrap gap-1">
-        <Button variant="outline" size="xs" onClick={() => actions.onShowInGraph(label, signatures)}>Show in Graph</Button>
+        <Button variant="outline" size="xs" onClick={() => actions.onShowInGraph(`the traced movements ${label}`, signatures)}>Show in Graph</Button>
         <Button variant="destructive" size="xs" onClick={() => actions.onRemove(new Set(steps.map((s) => s.id)))}>Remove all {steps.length}</Button>
       </div>
     </Section>}
@@ -148,6 +148,6 @@ export function NodeTraceSection({ node, view, trace, names, assetName, evidence
         <Button variant="outline" size="xs" onClick={() => onOpenInTimeline(step.signature, step.address, null)}>Open in Timeline</Button>
       </div>;
     })}
-    {signatures.length > 0 && <Button variant="outline" size="xs" className="self-start" onClick={() => onShowInGraph(name, signatures)}>Show in Graph ({signatures.length} transaction{signatures.length === 1 ? "" : "s"})</Button>}
+    {signatures.length > 0 && <Button variant="outline" size="xs" className="self-start" onClick={() => onShowInGraph(`the traced movements of ${name}`, signatures)}>Show in Graph ({signatures.length} transaction{signatures.length === 1 ? "" : "s"})</Button>}
   </Section>;
 }
