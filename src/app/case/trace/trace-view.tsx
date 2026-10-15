@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { useLocalQuery } from "@/hooks/use-local-db";
 import { useTraces } from "@/hooks/use-traces";
 import type { BehaviorObservation } from "@/lib/behavior/observations";
+import type { CanonicalTransaction } from "@/lib/solana/canonical";
+import type { WalletState } from "@/lib/state/reconstruct";
 import { describeStorageError } from "@/lib/db/db";
 import { getTrace } from "@/lib/db/traces";
 import type { Names } from "@/lib/labels/labels";
@@ -24,9 +26,14 @@ import { BranchPanel } from "./branch-panel";
 import { CandidatePanel } from "./candidate-panel";
 import { SeedDialog, type NewTraceConfig, type TraceStartRequest } from "./seed-dialog";
 import { ScopeDialog } from "./scope-dialog";
-import { StepSummary } from "./step-summary";
 import { TraceCanvas, type TraceSelection } from "./trace-canvas";
+import { NodeTraceSection, TraceInspector } from "./trace-inspector";
 
+/** What the Trace view keeps per trace while the case is open: selection and zoom survive switching views, never saved. */
+export type TraceUiState = { selection?: TraceSelection; transform?: { x: number; y: number; k: number } };
+export type TraceUiStore = { get: (id: string) => TraceUiState | undefined; set: (id: string, patch: TraceUiState) => void };
+
+const NO_SELECTION: TraceSelection = { nodes: [], edges: [], annotations: [] };
 const MAX_CHILDREN = 100;
 
 /** Whether adding `refs` takes some node past MAX_CHILDREN distinct counterparties in that direction. */
@@ -45,12 +52,15 @@ function widens(steps: readonly TraceStep[], refs: readonly MovementRef[], direc
   return [...children].some(([node, set]) => set.size > MAX_CHILDREN && (before.get(node) ?? 0) <= MAX_CHILDREN);
 }
 
-export function TraceView({ caseId, traceId, evidence, index, caseRange, loadedRange, hiddenReason, wallets, names, assets, observations, requestedSeed, onSeedHandled, onMapWallet, onOpenTransaction, loadStatus, loadError }: {
+export function TraceView({ caseId, traceId, evidence, index, caseRange, loadedRange, hiddenReason, wallets, names, assets, observations, eventState, transactionOf, ui, renderAddressPanel, requestedSeed, onSeedHandled, onMapWallet, onOpenTransaction, onShowInGraph, loadStatus, loadError }: {
   caseId: string; traceId: string | null; evidence: TraceEvidence; index: MovementIndex | null;
   caseRange: { start: string; end: string };
   loadedRange: (address: string) => { start: string; end: string } | null;
   hiddenReason: (signature: string) => "manual" | "rule" | null;
-  wallets: readonly string[]; names: Names; assets: Assets; observations: readonly BehaviorObservation[]; requestedSeed: TraceStartRequest | null; onSeedHandled: () => void;
+  wallets: readonly string[]; names: Names; assets: Assets; observations: readonly BehaviorObservation[];
+  eventState: WalletState | null; transactionOf: (signature: string) => CanonicalTransaction | undefined;
+  ui: TraceUiStore; renderAddressPanel: (address: string) => React.ReactNode;
+  onShowInGraph: (label: string, signatures: string[]) => void; requestedSeed: TraceStartRequest | null; onSeedHandled: () => void;
   onMapWallet: (address: string) => void;
   onOpenTransaction: (signature: string, from: string | null, to: string | null) => void;
   loadStatus: string;
@@ -65,7 +75,10 @@ export function TraceView({ caseId, traceId, evidence, index, caseRange, loadedR
   const [newSeed, setNewSeed] = useState<TraceSeed | null>(null);
   const [newOpen, setNewOpen] = useState(false);
   const [scopeOpen, setScopeOpen] = useState(false);
-  const [selection, setSelection] = useState<TraceSelection>({ nodes: [], edges: [], annotations: [] });
+  const [selection, setSelectionState] = useState<TraceSelection>(() => (traceId && ui.get(traceId)?.selection) || NO_SELECTION);
+  const setSelection = (value: TraceSelection) => { setSelectionState(value); setAddressFocus(null); if (traceId) ui.set(traceId, { selection: value }); };
+  /** An address picked from evidence (not a trace node) shown in the side panel. */
+  const [addressFocus, setAddressFocus] = useState<string | null>(null);
   const [candidateDirection, setCandidateDirection] = useState<"forward" | "backward" | null>(null);
   useEffect(() => {
     if (loaded && latest.current?.id !== loaded.id) latest.current = loaded;
@@ -120,7 +133,7 @@ export function TraceView({ caseId, traceId, evidence, index, caseRange, loadedR
     // eslint-disable-next-line react-hooks/exhaustive-deps -- a new saved trace removes missing positions
   }, [active, missing]);
   const shown = useMemo(() => view && active ? hideBranches(view, active.presentation.hiddenBranches) : null, [view, active]);
-  const open = (id: string | null) => { latest.current = null; placementFailed.current = false; setHistory(emptyHistory()); setOptimistic(null); setSelection({ nodes: [], edges: [], annotations: [] }); window.history.pushState(null, "", buildCasePath(caseId, "trace", id)); };
+  const open = (id: string | null) => { latest.current = null; placementFailed.current = false; setHistory(emptyHistory()); setOptimistic(null); setSelectionState((id && ui.get(id)?.selection) || NO_SELECTION); setAddressFocus(null); window.history.pushState(null, "", buildCasePath(caseId, "trace", id)); };
   const closeNew = () => { setNewOpen(false); setNewSeed(null); onSeedHandled(); };
   const create = async (config: NewTraceConfig) => {
     const steps: TraceStep[] = config.refs.map((ref) => ({ id: crypto.randomUUID(), kind: "movement", ref, direction: config.direction === "backward" ? "backward" : "forward", addedAt: new Date().toISOString() }));
@@ -166,14 +179,26 @@ export function TraceView({ caseId, traceId, evidence, index, caseRange, loadedR
   const node = view.nodes.find((item) => item.id === selection.nodes[0]);
   const edge = view.edges.find((item) => item.id === selection.edges[0]);
   const annotation = active.presentation.annotations.find((item) => item.id === selection.annotations[0]);
+  const inspectorActions = {
+    onRemove: (ids: Set<string>) => removeEdge(ids),
+    onReplace: (stepId: string, ref: MovementRef) => persist((trace) => {
+      const old = trace.steps.find((s) => s.id === stepId);
+      return addSteps(removeSteps(trace, new Set([stepId])), [{ id: crypto.randomUUID(), kind: "movement", ref, direction: old?.kind === "movement" ? old.direction : "forward", addedAt: new Date().toISOString() }]);
+    }),
+    onAddLegs: (refs: MovementRef[]) => addMovements(refs, "forward"),
+    onOpenInTimeline: onOpenTransaction,
+    onShowInGraph,
+    onStartMovement: (step: Extract<TraceStep, { kind: "movement" }>) => startDialog({ kind: "movement", ref: step.ref }),
+    onSelectAddress: setAddressFocus,
+  };
   const removeEdge = (ids: Set<string>) => { if (window.confirm(`Remove ${ids.size} movement${ids.size === 1 ? "" : "s"} from this trace?`)) { persist((trace) => removeSteps(trace, ids)); if (edge && ids.size === edge.steps.length) setSelection({ nodes: [], edges: [], annotations: [] }); } };
   return <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-3">
     <div className="flex flex-wrap items-center gap-2 text-sm"><Button variant="outline" size="xs" onClick={() => open(null)}>Traces</Button><strong className="truncate">{active.name}</strong><span className="text-xs text-muted-foreground">{shown.view.nodes.length} nodes · {shown.view.edges.length} observed edges{shown.counts.size ? ` · ${shown.counts.size} branch${shown.counts.size === 1 ? "" : "es"} hidden` : ""}</span><Button variant="outline" size="xs" disabled={history.past.at(-1)?.id !== active.id} onClick={() => travel("undo")} title="Undo (Ctrl/Cmd+Z)">Undo</Button><Button variant="outline" size="xs" disabled={history.future[0]?.id !== active.id} onClick={() => travel("redo")} title="Redo (Shift+Ctrl/Cmd+Z)">Redo</Button><Button variant="outline" size="xs" onClick={() => setScopeOpen(true)}>Scope</Button><Button variant="outline" size="xs" onClick={() => startDialog()}>New</Button><Button variant="outline" size="xs" onClick={rename}>Rename</Button><Button variant="outline" size="xs" onClick={() => void duplicate()}>Duplicate</Button><Button variant="destructive" size="xs" onClick={() => void remove()}>Delete</Button></div>
     {(active.invalidSteps?.length || active.invalidAnnotations?.length || view.issues.length) ? <p className="text-xs text-destructive">{active.invalidSteps?.length ?? 0} unreadable steps · {active.invalidAnnotations?.length ?? 0} unreadable annotations · {view.issues.length} evidence issues. Review before relying on this trace.</p> : null}
     {(active.invalidSteps?.length || active.invalidAnnotations?.length) ? <div className="flex gap-2 text-xs"><Button variant="outline" size="xs" onClick={() => void navigator.clipboard.writeText(JSON.stringify(loaded, null, 2))}>Copy trace JSON</Button><Button variant="destructive" size="xs" onClick={() => { if (window.confirm("Remove unreadable items from this trace? This cannot be undone.")) persist((trace) => removeInvalidItems(trace)); }}>Remove unreadable items</Button></div> : null}
     {(shown.view.nodes.length > 300 || shown.view.edges.length > 600) && <p className="text-xs text-muted-foreground">This trace draws {shown.view.nodes.length} nodes and {shown.view.edges.length} edges. Hide branches you aren&apos;t working on to keep it readable (right-click a node, or use Hide branch in its panel).</p>}
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 lg:flex-row"><TraceCanvas view={shown.view} hidden={shown} onBranchHidden={(id, hidden) => persist((trace) => setBranchHidden(trace, id, hidden))} presentation={presentation} steps={active.steps} names={names} stateOf={evidence.addressState} assetText={assetText} assetName={(id) => assetLabel(id, assets)} onSelection={setSelection} onCandidateDirection={(direction) => { if (active.direction === "both" || active.direction === direction) setCandidateDirection(direction); }} onStartAtNode={(address) => startDialog({ kind: "address", address })} onMapWallet={onMapWallet} onRemoveEvidence={removeEdge} onMove={(positions, patches) => persist((trace) => { let next = Object.keys(positions).length ? setPositions(trace, positions) : trace; for (const item of patches ?? []) next = updateAnnotation(next, item.id, item.patch); return next; })} onOptions={(options) => persist((trace) => setCanvasOptions(trace, options))} onAddAnnotation={(item: Annotation) => persist((trace) => addAnnotation(trace, item))} onUpdateAnnotation={(id: string, patch: Partial<Annotation>) => persist((trace) => updateAnnotation(trace, id, patch))} onRemoveAnnotations={(ids: Set<string>) => persist((trace) => removeAnnotations(trace, ids))} onReorderAnnotation={(id: string, order: "front" | "back") => persist((trace) => reorderAnnotation(trace, id, order))} onNodeStyle={(id: string, style: NodeStyle) => persist((trace) => setNodeStyle(trace, id, style))} />
-      {node && index ? <div className="flex w-full flex-col gap-2 lg:w-80">{node.service && <section className="rounded border p-2 text-xs"><strong>{node.service.name}</strong> · {node.service.category} · {node.addresses.length} address{node.addresses.length === 1 ? "" : "es"}<Button variant="outline" size="xs" className="ml-2" onClick={() => persist((trace) => setServiceExpanded(trace, node.service!.id, true))}>Show addresses separately</Button></section>}{!node.service && evidence.serviceOf?.(node.id) && active.presentation.expandedServices.includes(evidence.serviceOf(node.id)!.protocolId) && <Button variant="outline" size="xs" onClick={() => persist((trace) => setServiceExpanded(trace, evidence.serviceOf!(node.id)!.protocolId, false))}>Group as {evidence.serviceOf(node.id)!.protocolName}</Button>}<BranchPanel node={node} view={view} hidden={active.presentation.hiddenBranches.includes(node.id)} observations={observations} names={names} assetText={assetText} onHidden={(hidden) => persist((trace) => setBranchHidden(trace, node.id, hidden))} onOpenTransaction={onOpenTransaction} /><CandidatePanel key={`${node.id}:${candidateDirection ?? "default"}`} initialDirection={candidateDirection ?? undefined} node={node} trace={active} index={index} evidence={evidence} caseRange={caseRange} loadedRange={loadedRange} hiddenReason={hiddenReason} names={names} assets={assets} assetText={assetText} loadStatus={loadStatus} loadError={loadError} onAdd={addMovements} onAddConversion={addConversion} onMapWallet={onMapWallet} /><Button variant="outline" size="xs" onClick={() => startDialog({ kind: "address", address: node.addresses[0] })}>Start another trace here</Button></div> : edge ? <StepSummary edge={edge} trace={active} evidence={evidence} names={names} assetText={assetText} onRemove={removeEdge} onOpenTransaction={onOpenTransaction} onStartMovement={(step) => startDialog({ kind: "movement", ref: step.ref })} /> : annotation ? <aside className="w-full space-y-2 rounded border p-3 text-xs lg:w-80"><strong>Annotation · drawn by you</strong><p>{annotation.kind === "note" ? annotation.text : annotation.label}</p><Button variant="outline" size="xs" onClick={() => persist((trace) => reorderAnnotation(trace, annotation.id, "front"))}>Bring to front</Button><Button variant="destructive" size="xs" onClick={() => persist((trace) => removeAnnotations(trace, new Set([annotation.id])))}>Delete annotation</Button></aside> : null}
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 lg:flex-row"><TraceCanvas key={active.id} initialSelection={selection} initialTransform={ui.get(active.id)?.transform} onTransform={(transform) => ui.set(active.id, { transform })} view={shown.view} hidden={shown} onBranchHidden={(id, hidden) => persist((trace) => setBranchHidden(trace, id, hidden))} presentation={presentation} steps={active.steps} names={names} stateOf={evidence.addressState} assetText={assetText} assetName={(id) => assetLabel(id, assets)} onSelection={setSelection} onCandidateDirection={(direction) => { if (active.direction === "both" || active.direction === direction) setCandidateDirection(direction); }} onStartAtNode={(address) => startDialog({ kind: "address", address })} onMapWallet={onMapWallet} onRemoveEvidence={removeEdge} onMove={(positions, patches) => persist((trace) => { let next = Object.keys(positions).length ? setPositions(trace, positions) : trace; for (const item of patches ?? []) next = updateAnnotation(next, item.id, item.patch); return next; })} onOptions={(options) => persist((trace) => setCanvasOptions(trace, options))} onAddAnnotation={(item: Annotation) => persist((trace) => addAnnotation(trace, item))} onUpdateAnnotation={(id: string, patch: Partial<Annotation>) => persist((trace) => updateAnnotation(trace, id, patch))} onRemoveAnnotations={(ids: Set<string>) => persist((trace) => removeAnnotations(trace, ids))} onReorderAnnotation={(id: string, order: "front" | "back") => persist((trace) => reorderAnnotation(trace, id, order))} onNodeStyle={(id: string, style: NodeStyle) => persist((trace) => setNodeStyle(trace, id, style))} />
+      {addressFocus ? <aside className="w-full space-y-2 overflow-auto rounded border p-3 text-xs lg:w-96"><Button variant="outline" size="xs" onClick={() => setAddressFocus(null)}>Back to selection</Button>{renderAddressPanel(addressFocus)}</aside> : node && index ? <div className="flex w-full flex-col gap-2 overflow-auto lg:w-96 [&>*]:shrink-0"><section className="rounded border p-2 text-xs"><NodeTraceSection node={node} view={view} trace={active} names={names} evidence={evidence} assetName={(id) => assetLabel(id, assets)} onShowInGraph={onShowInGraph} onMapWallet={onMapWallet} onNewTrace={() => startDialog()} onOpenInTimeline={onOpenTransaction} /></section>{node.service && <section className="rounded border p-2 text-xs"><strong>{node.service.name}</strong> · {node.service.category} · {node.addresses.length} address{node.addresses.length === 1 ? "" : "es"}<Button variant="outline" size="xs" className="ml-2" onClick={() => persist((trace) => setServiceExpanded(trace, node.service!.id, true))}>Show addresses separately</Button></section>}{!node.service && evidence.serviceOf?.(node.id) && active.presentation.expandedServices.includes(evidence.serviceOf(node.id)!.protocolId) && <Button variant="outline" size="xs" onClick={() => persist((trace) => setServiceExpanded(trace, evidence.serviceOf!(node.id)!.protocolId, false))}>Group as {evidence.serviceOf(node.id)!.protocolName}</Button>}<BranchPanel node={node} view={view} hidden={active.presentation.hiddenBranches.includes(node.id)} observations={observations} names={names} assetText={assetText} onHidden={(hidden) => persist((trace) => setBranchHidden(trace, node.id, hidden))} onOpenTransaction={onOpenTransaction} /><CandidatePanel key={`${node.id}:${candidateDirection ?? "default"}`} initialDirection={candidateDirection ?? undefined} node={node} trace={active} index={index} evidence={evidence} caseRange={caseRange} loadedRange={loadedRange} hiddenReason={hiddenReason} names={names} assets={assets} assetText={assetText} loadStatus={loadStatus} loadError={loadError} onAdd={addMovements} onAddConversion={addConversion} onMapWallet={onMapWallet} /><Button variant="outline" size="xs" onClick={() => startDialog({ kind: "address", address: node.addresses[0] })}>Start another trace here</Button>{!node.service && <div className="rounded border p-2">{renderAddressPanel(node.id)}</div>}</div> : edge ? <TraceInspector key={edge.id} edge={edge} trace={active} view={view} evidence={evidence} index={index} names={names} assets={assets} assetText={assetText} eventState={eventState} transactionOf={transactionOf} hiddenReason={hiddenReason} actions={inspectorActions} /> : annotation ? <aside className="w-full space-y-2 rounded border p-3 text-xs lg:w-80"><strong>Annotation · drawn by you</strong><p>{annotation.kind === "note" ? annotation.text : annotation.label}</p><Button variant="outline" size="xs" onClick={() => persist((trace) => reorderAnnotation(trace, annotation.id, "front"))}>Bring to front</Button><Button variant="destructive" size="xs" onClick={() => persist((trace) => removeAnnotations(trace, new Set([annotation.id])))}>Delete annotation</Button></aside> : null}
     </div>{dialog}{scopeOpen && <ScopeDialog trace={active} assets={assets} caseRange={caseRange} onClose={() => setScopeOpen(false)} onSave={(scope, direction) => persist((trace) => setScope(setDirection(trace, direction), scope))} />}
   </div>;
 }

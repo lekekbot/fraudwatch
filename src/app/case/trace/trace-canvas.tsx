@@ -41,7 +41,9 @@ function edgeEnds(a: Point, b: Point, aw: number, bw: number, ah: number, bh: nu
   return { from: { x: a.x, y: a.y + down * ah / 2 }, to: { x: b.x, y: b.y - down * bh / 2 } };
 }
 
-export function TraceCanvas({ view, hidden, onBranchHidden, presentation, steps, names, stateOf, assetText, assetName, onMove, onOptions, onSelection, onCandidateDirection, onStartAtNode, onMapWallet, onRemoveEvidence, onAddAnnotation, onUpdateAnnotation, onRemoveAnnotations, onReorderAnnotation, onNodeStyle }: {
+export function TraceCanvas({ initialSelection, initialTransform, onTransform, view, hidden, onBranchHidden, presentation, steps, names, stateOf, assetText, assetName, onMove, onOptions, onSelection, onCandidateDirection, onStartAtNode, onMapWallet, onRemoveEvidence, onAddAnnotation, onUpdateAnnotation, onRemoveAnnotations, onReorderAnnotation, onNodeStyle }: {
+  /** Restored when returning to this trace from another view. */
+  initialSelection?: TraceSelection; initialTransform?: { x: number; y: number; k: number }; onTransform?: (t: { x: number; y: number; k: number }) => void;
   view: TraceView; hidden: Pick<HiddenBranches, "counts" | "anchors">; onBranchHidden: (id: string, hidden: boolean) => void; presentation: TracePresentation; steps: readonly TraceStep[]; names: Names;
   stateOf: (address: string) => AddressState;
   assetText: (assetId: string, amount: string) => string;
@@ -61,9 +63,9 @@ export function TraceCanvas({ view, hidden, onBranchHidden, presentation, steps,
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
-  const transformRef = useRef<ZoomTransform>(zoomIdentity);
+  const transformRef = useRef<ZoomTransform>(initialTransform ? zoomIdentity.translate(initialTransform.x, initialTransform.y).scale(initialTransform.k) : zoomIdentity);
   const zoomRef = useRef<ZoomBehavior<HTMLCanvasElement, unknown> | null>(null);
-  const initialFitRef = useRef(false);
+  const initialFitRef = useRef(Boolean(initialTransform));
   const positionsRef = useRef<Record<string, Point>>(presentation.positions);
   const dragRef = useRef<Drag | null>(null);
   const draftRef = useRef<Annotation | null>(null);
@@ -71,7 +73,9 @@ export function TraceCanvas({ view, hidden, onBranchHidden, presentation, steps,
   const spaceRef = useRef(false);
   const frameRef = useRef<number>(0);
   const drawRef = useRef<() => void>(() => {});
-  const [selection, setSelection] = useState<TraceSelection>({ nodes: [], edges: [], annotations: [] });
+  const onTransformRef = useRef(onTransform);
+  useEffect(() => { onTransformRef.current = onTransform; });
+  const [selection, setSelection] = useState<TraceSelection>(initialSelection ?? { nodes: [], edges: [], annotations: [] });
   const [tool, setTool] = useState<Tool>("select");
   const [editing, setEditing] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
@@ -284,7 +288,8 @@ export function TraceCanvas({ view, hidden, onBranchHidden, presentation, steps,
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const behavior = zoom<HTMLCanvasElement, unknown>().scaleExtent([0.2, 4]).filter((event: MouseEvent | TouchEvent) => event.type.startsWith("touch") || (event instanceof MouseEvent && (event.button === 1 || spaceRef.current))).on("zoom", (event: { transform: ZoomTransform }) => { transformRef.current = event.transform; requestDraw(); });
+    const behavior = zoom<HTMLCanvasElement, unknown>().scaleExtent([0.2, 4]).filter((event: MouseEvent | TouchEvent) => event.type.startsWith("touch") || (event instanceof MouseEvent && (event.button === 1 || spaceRef.current))).on("zoom", (event: { transform: ZoomTransform }) => { transformRef.current = event.transform; requestDraw(); })
+      .on("end", (event: { transform: ZoomTransform }) => { const { x, y, k } = event.transform; onTransformRef.current?.({ x, y, k }); });
     select(canvas).call(behavior).on("dblclick.zoom", null);
     zoomRef.current = behavior;
     select(canvas).call(behavior.transform, transformRef.current);

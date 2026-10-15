@@ -69,7 +69,7 @@ import { SearchDialog } from "./search-dialog";
 import { assetLabel, assetLogo, formatAssetAmount, formatUtcMinute, type Assets } from "./asset-format";
 import { copy } from "./timeline/inspector-ui";
 import { TransactionDetails } from "./timeline/transaction-details";
-import { TraceView } from "./trace/trace-view";
+import { type TraceUiState, type TraceUiStore, TraceView } from "./trace/trace-view";
 import type { TraceEvidence } from "@/lib/trace/view";
 import { buildMovementIndex, chronologicalOrder } from "@/lib/trace/movements";
 import { classifyEvent } from "@/lib/trace/movements";
@@ -205,9 +205,13 @@ function CaseWorkspace({ c, prefs, rpc, rpcKnown }: { c: FraudWatchCase; prefs: 
     if (inspectorMode === "on_selection" && (selectedAddress || selectedEdge || tableTx)) setRightOpen(true);
   }, [inspectorMode, selectedAddress, selectedEdge, tableTx]);
 
+  // The trace last open (none after going back to the list), so the Trace tab returns to it from other views.
+  const [lastTraceId, setLastTraceId] = useState<string | null>(null);
+  if (view === "trace" && route.traceId !== lastTraceId) setLastTraceId(route.traceId);
   const routeTo = (nextView: CaseView, wallet?: string | null, replace = false) => {
     if (nextView === "table") setFilter((current) => ({ ...current, address: wallet ?? null }));
-    window.history[replace ? "replaceState" : "pushState"](null, "", buildCasePath(c.id, nextView, wallet));
+    const child = nextView === "trace" && !wallet ? lastTraceId : wallet;
+    window.history[replace ? "replaceState" : "pushState"](null, "", buildCasePath(c.id, nextView, child));
   };
 
   // Remembered for "open cases on the last used view", however the view was reached (tabs, links, back and forward).
@@ -466,6 +470,11 @@ function CaseWorkspace({ c, prefs, rpc, rpcKnown }: { c: FraudWatchCase; prefs: 
     serviceOf: (address) => registry.lookup(address),
     hasUserLabel: (address) => Boolean(names.label(address)),
   }), [semanticEvents, state, c, programs, names]);
+  /** Trace UI kept per trace across view switches (selection, zoom); never saved. */
+  const [traceUi] = useState<TraceUiStore>(() => {
+    const store = new Map<string, TraceUiState>();
+    return { get: (id) => store.get(id), set: (id, patch) => void store.set(id, { ...store.get(id), ...patch }) };
+  });
   const startTrace = (seed: TraceSeed, refs?: MovementRef[]) => { setTraceSeed({ seed, refs }); routeTo("trace"); };
   const shareSearch = buildMapSearch({ wallet: c.primaryWallet, range: c.range });
 
@@ -519,6 +528,14 @@ function CaseWorkspace({ c, prefs, rpc, rpcKnown }: { c: FraudWatchCase; prefs: 
     for (const w of state.status === "done" ? state.result.wallets : []) for (const sig of w.signatures) out.set(sig, [...(out.get(sig) ?? []), w.wallet]);
     return out;
   }, [state]);
+  /** A trace step's transaction on the Timeline: on a lane of one of its own ends if mapped, else any lane that has it. */
+  const openTraceTransaction = (signature: string, from: string | null, to: string | null) => {
+    const lanes = owners.get(signature) ?? [];
+    const lane = lanes.find((wallet) => wallet === from || wallet === to) ?? lanes[0];
+    if (lane) return goToTransaction(signature, lane);
+    const unmapped = from ?? to;
+    toast.info("Not on a timeline lane (no mapped wallet in this transaction).", unmapped ? { action: { label: "Map wallet", onClick: () => { setMapError(null); setMapTarget(unmapped); } } } : undefined);
+  };
 
   // Everything search can find in this case.
   const searchIndex = useMemo<SearchItem[]>(() => {
@@ -1018,7 +1035,7 @@ function CaseWorkspace({ c, prefs, rpc, rpcKnown }: { c: FraudWatchCase; prefs: 
 
   let center: React.ReactNode;
   if (view === "trace") {
-    center = <TraceView caseId={c.id} traceId={route.traceId} evidence={traceEvidence} index={traceIndex} caseRange={c.range} loadedRange={(address) => { const wallet = c.mappedWallets.find((item) => item.address === address); return wallet ? walletRange(c, wallet) : null; }} hiddenReason={(signature) => reasons.get(signature) === "manual" ? "manual" : reasons.get(signature) ? "rule" : null} wallets={c.mappedWallets.map((wallet) => wallet.address)} names={canvasNames} assets={walletStates?.assets ?? EMPTY_ASSETS} observations={observations} requestedSeed={traceSeed} onSeedHandled={() => setTraceSeed(null)} onMapWallet={(address) => { setMapError(null); setMapTarget(address); }} onOpenTransaction={(signature, from, to) => goToTransaction(signature, c.mappedWallets.find((wallet) => wallet.address === from || wallet.address === to)?.address)} loadStatus={state.status} loadError={state.status === "error" ? state.error : null} />;
+    center = <TraceView caseId={c.id} traceId={route.traceId} evidence={traceEvidence} index={traceIndex} caseRange={c.range} loadedRange={(address) => { const wallet = c.mappedWallets.find((item) => item.address === address); return wallet ? walletRange(c, wallet) : null; }} hiddenReason={(signature) => reasons.get(signature) === "manual" ? "manual" : reasons.get(signature) ? "rule" : null} wallets={c.mappedWallets.map((wallet) => wallet.address)} names={canvasNames} assets={walletStates?.assets ?? EMPTY_ASSETS} observations={observations} eventState={walletState ?? walletStates?.states[0] ?? null} transactionOf={(signature) => (state.status === "done" ? state.result.transactions.get(signature) : undefined)} ui={traceUi} renderAddressPanel={(address) => panelFor(address)} onShowInGraph={(label, signatures) => { setFilter((current) => ({ ...current, relationship: { label, signatures: new Set(signatures) } })); routeTo("graph"); }} requestedSeed={traceSeed} onSeedHandled={() => setTraceSeed(null)} onMapWallet={(address) => { setMapError(null); setMapTarget(address); }} onOpenTransaction={openTraceTransaction} loadStatus={state.status} loadError={state.status === "error" ? state.error : null} />;
   } else if (state.status === "done" && walletStates && walletState && visible && visibleState) {
     center =
       view === "graph" && graph ? (

@@ -57,7 +57,7 @@ export function CandidatePanel({ node, trace, index, evidence, caseRange, loaded
   };
   const conversions = index.conversions.get(address) ?? [];
   const boundaries = index.boundaries.get(address) ?? [];
-  return <aside className="flex w-full min-w-64 flex-col gap-2 overflow-auto rounded border p-3 text-xs lg:w-80" aria-label="Trace candidates">
+  return <aside className="flex w-full min-w-64 flex-col gap-2 rounded border p-3 text-xs" aria-label="Trace candidates">
     <h3 className="font-semibold">Movements for {node.service?.name ?? names.of(address)}</h3>
     {node.service && node.addresses.length > 1 && <label>Service address<select className="w-full rounded border bg-background p-1" value={address} onChange={(e) => { setAddress(e.target.value); setPicked([]); }} >{node.addresses.map((id) => <option key={id} value={id}>{names.of(id)} · {id.slice(0, 8)}…</option>)}</select></label>}
     <div className="flex gap-1"><Button size="xs" disabled={trace.direction === "backward"} variant={direction === "forward" ? "secondary" : "outline"} onClick={() => { setDirection("forward"); setPicked([]); }}>Next</Button><Button size="xs" disabled={trace.direction === "forward"} variant={direction === "backward" ? "secondary" : "outline"} onClick={() => { setDirection("backward"); setPicked([]); }}>Earlier</Button></div>

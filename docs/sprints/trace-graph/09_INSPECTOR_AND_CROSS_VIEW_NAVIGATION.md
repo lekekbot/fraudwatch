@@ -1,6 +1,6 @@
 # Sprint 09 — Inspector and Cross-View Navigation
 
-**Status:** Planned. **Beta checkpoint** once 07, 08 and 09 are all merged.
+**Status:** Implemented on `trace-graph` (2026-10-15); merge pending. **Beta checkpoint** once 07, 08 and 09 are all merged.
 **Depends on:** 06
 
 ## Summary and Why It Matters
@@ -18,6 +18,12 @@ A trace is only as convincing as what's behind each line. The inspector shows th
 - Cross-view: `goToTransaction(signature, wallet)` in `case-shell.tsx` → `WalletTimelineHandle.jumpTo`; if the Timeline isn't mounted, sets `focusSignature` and routes. Timeline → Graph: `TxFilter.relationship = { label, signatures }` and `routeTo("graph")`. Toast when a transaction is hidden by filters or a hidden lane.
 - `CaseShell` is hosted by the case layout, so switching views keeps workspace state (comment in `case-shell.tsx`).
 - `formatUtc`, `formatAssetAmount`, `assetLabel` (`src/app/case/asset-format.ts`).
+
+**Re-checked 2026-10-15.** The assumption holds: `EventSummary` and `EventEvidence` need only a `WalletState` (for asset decimals, falling back to the case's asset list), not a lane. Drift:
+
+- There is no way to edit a case's date range after creation, so the "Extend the case range" fix is explanation text only.
+- An explorer link does exist (Solscan, in `transaction-details.tsx`, `edge-panel.tsx`, `address-panel.tsx`), so the step inspector reuses it.
+- The Trace tab dropped the open trace id (`routeTo("trace", null)`), so returning from another view landed on the trace list. Fixed: the shell remembers the last open trace (none after going back to the list).
 
 ### Gaps and limitations
 
@@ -94,19 +100,19 @@ onSelectAddress(address: string): void                        // existing setSel
 
 ### Task Group A — Pure helpers
 
-- [ ] `otherLegs(index, signature, stepKeys)`; `boundaryExplanation(kind, context)`; `replacementCandidates(index, staleStep)`
-- [ ] Tests
+- [x] `otherLegs(index, signature, stepKeys)`; `boundaryExplanation(kind, context)`; `replacementCandidates(index, staleStep)`
+- [x] Tests
 
 ### Task Group B — Inspector
 
-- [ ] Sections per the table; reuse `AddressPanel`, `EventSummary`, `EventEvidence`
-- [ ] "Replace with this" for stale steps (remove plus add, single undo entry)
+- [x] Sections per the table; reuse `AddressPanel`, `EventSummary`, `EventEvidence`
+- [x] "Replace with this" for stale steps (remove plus add, single undo entry)
 
 ### Task Group C — Navigation and retention
 
-- [ ] Wire `onOpenInTimeline`, `onShowInGraph`, `onSelectAddress`
-- [ ] Not-on-a-lane handling
-- [ ] Retain selection and transform per trace across view switches; restore on back/forward
+- [x] Wire `onOpenInTimeline`, `onShowInGraph`, `onSelectAddress`
+- [x] Not-on-a-lane handling
+- [x] Retain selection and transform per trace across view switches; restore on back/forward
 
 ## UI Behavior and Example Scenarios
 
@@ -137,9 +143,20 @@ Inspector sections render only for the selection. `otherLegs` uses `bySignature`
 
 ## Acceptance Criteria (observable and measurable)
 
-- [ ] Every step opens the correct signature in the Timeline when a lane exists (checked on F1 and F3).
-- [ ] Timeline and Graph render identically before and after a round trip (no residual state except the relationship filter chip).
-- [ ] Validation commands pass.
+- [x] Every step opens the correct signature in the Timeline when a lane exists (checked on F1 and F3).
+- [x] Timeline and Graph render identically before and after a round trip (no residual state except the relationship filter chip).
+- [x] Validation commands pass.
+
+## Implementation Notes (2026-10-15)
+
+- `src/lib/trace/inspect.ts`: `otherLegs` (in-trace legs are marked "in trace", not dropped, matching the F3 scenario), `boundaryExplanation` for every `BoundaryKind`, `replacementCandidates` (same signature only, closest match first).
+- `src/app/case/trace/trace-inspector.tsx` replaces `step-summary.tsx`. `TraceInspector`: a bundled edge lists its steps as a selectable table with per-asset totals of added movements; a step shows signature (copy, Solscan), UTC time and slot, exact amount, real ends with names and states, role, category · action · confidence, warnings, fee and fee payer as context, "hidden in this case", other legs with Add, the stale reason with "Replace with this" (one edit, one undo entry), then `EventSummary` and `EventEvidence`. `NodeTraceSection`: depth, steps in and out, an entity's real addresses with registry labels, boundaries with explanations and their fix (Map wallet; start a new trace for custodial stops), conversions, Show in Graph.
+- Node panel: the trace section, the Sprint 08 branch panel, candidates, then the shell's own `AddressPanel` (passed in as `renderAddressPanel`, so its Map, label and look-alike behaviour is unchanged). An address clicked in the evidence opens its `AddressPanel` in place, with "Back to selection".
+- Navigation reuses the shell's paths: Open in Timeline uses `goToTransaction` on a lane that has the transaction (an end's lane first); with no lane it toasts "Not on a timeline lane (no mapped wallet in this transaction)" with Map wallet. Show in Graph sets the existing relationship filter and routes to the Graph.
+- Selection and zoom are kept per trace in the case shell for the session (`TraceUiStore`), restored when returning by tab or by browser Back.
+- Not implemented: conversion and boundary aren't separate canvas selections; they're shown in the node section.
+
+**Validation (2026-10-15):** `pnpm test` (37 files, 287 tests), `pnpm typecheck`, `pnpm lint` pass. Browser check on a local case (live RPC data): step inspector for 6LQ6 → Jitotip 2 (signature, slot, 0.000006 SOL, both ends, TRANSFER · RECEIVE · low, fee, the other leg "in trace", event reading and evidence); Open in Timeline jumped to the transaction on 6LQ6's lane; the Trace tab and browser Back each returned to the same trace with the same pan and selection; Show in Graph narrowed the Graph to that signature with its usual chip (1 of 105 transactions), which clears as usual; the node inspector with trace section, branch, candidates and `AddressPanel` (look-alike warning intact); clicking an address in the evidence opened its panel. No console errors. Not checked in the browser: the no-lane toast, the hidden-transaction note and "Replace with this" (this case had no such steps).
 
 ## Definition of Done
 
