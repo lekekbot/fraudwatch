@@ -43,7 +43,7 @@ export function TraceInspector({ edge, trace, view, evidence, index, names, asse
   const shown = steps.length === 1 ? steps[0] : steps.find((s) => s.id === picked);
   const signatures = [...new Set(steps.map((s) => s.ref.signature))];
   const label = `${names.of(edge.from, 4)} → ${names.of(edge.to, 4)}`;
-  return <aside className="w-full space-y-3 overflow-auto rounded border p-3 text-xs lg:w-96" aria-label="Trace inspector">
+  return <div className="space-y-4 p-3 text-xs">
     {steps.length > 1 && <Section title={`${steps.length} observed movements · ${label}`}>
       <table className="w-full text-left">
         <thead className="text-muted-foreground"><tr><th className="font-normal">Time (UTC)</th><th className="font-normal">Signature</th><th className="text-right font-normal">Amount</th></tr></thead>
@@ -60,7 +60,7 @@ export function TraceInspector({ edge, trace, view, evidence, index, names, asse
     </Section>}
     {shown && <StepDetail key={shown.id} step={shown} trace={trace} view={view} evidence={evidence} index={index} names={names} assets={assets} assetText={assetText} eventState={eventState} transactionOf={transactionOf} hiddenReason={hiddenReason} actions={actions} />}
     {steps.length > 1 && !shown && <p className="text-muted-foreground">Select a row to see its evidence.</p>}
-  </aside>;
+  </div>;
 }
 
 function StepDetail({ step, trace, view, evidence, index, names, assets, assetText, eventState, transactionOf, hiddenReason, actions }: {
@@ -127,7 +127,7 @@ export function NodeTraceSection({ node, view, trace, names, assetName, evidence
   const stepById = new Map(trace.steps.map((s) => [s.id, s]));
   const signatures = [...new Set([...incoming, ...outgoing, ...node.conversions].map((id) => stepById.get(id)).flatMap((s) => (s ? [s.kind === "movement" ? s.ref.signature : s.signature] : [])))];
   const name = node.service?.name ?? names.of(node.id, 4);
-  return <Section title="In this trace">
+  return <div className="flex flex-col gap-2 text-xs">
     <p>{node.isSeed ? "Seed" : node.depth === null ? "Not connected to the seed" : `${Math.abs(node.depth)} hop${Math.abs(node.depth) === 1 ? "" : "s"} ${node.depth < 0 ? "back" : "forward"}`} · {incoming.length} in · {outgoing.length} out</p>
     {node.service && <div className="space-y-0.5">
       <p>{node.service.name} · {node.service.category}. Real addresses in this trace:</p>
@@ -135,7 +135,7 @@ export function NodeTraceSection({ node, view, trace, names, assetName, evidence
     </div>}
     {node.boundaries.map((kind) => {
       const { meaning, fix } = boundaryExplanation(kind);
-      return <div key={kind} className="space-y-1 rounded border p-2">
+      return <div key={kind} className="space-y-1 rounded-lg bg-muted/50 p-2">
         <p><strong>{kind.replaceAll("_", " ")}</strong>: {meaning}</p>
         {fix === "map_wallet" && !node.service && <Button variant="outline" size="xs" onClick={() => onMapWallet(node.id)}>Map wallet</Button>}
         {fix === "start_from_withdrawal" && <Button variant="outline" size="xs" onClick={onNewTrace}>Start a new trace</Button>}
@@ -149,5 +149,5 @@ export function NodeTraceSection({ node, view, trace, names, assetName, evidence
       </div>;
     })}
     {signatures.length > 0 && <Button variant="outline" size="xs" className="self-start" onClick={() => onShowInGraph(`the traced movements of ${name}`, signatures)}>Show in Graph ({signatures.length} transaction{signatures.length === 1 ? "" : "s"})</Button>}
-  </Section>;
+  </div>;
 }

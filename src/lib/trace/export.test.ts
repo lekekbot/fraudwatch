@@ -84,7 +84,15 @@ describe("trace export", () => {
     const back = result.trace;
     expect(back.steps).toEqual(t.steps.map((s) => ({ ...s, addedAt: "2026-03-01T00:00:00.000Z" })));
     expect([back.seed, back.direction, back.scope, back.presentation]).toEqual([t.seed, t.direction, t.scope, t.presentation]);
+    expect(back.addresses).toEqual([]);
     expect(back.skipped).toEqual({ steps: 0, annotations: 0 });
+  });
+
+  it("carries placed addresses through export and import", () => {
+    const { trace: t, view } = build();
+    const placed = { ...t, addresses: ["Suspect"] };
+    const result = parseTraceImport(JSON.stringify(exportTrace(placed, view, evidence, options())));
+    expect(result.ok && result.trace.addresses).toEqual(["Suspect"]);
   });
 
   it("rejects future versions, oversized files, bad JSON and other files; sets aside unreadable steps", () => {

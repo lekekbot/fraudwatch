@@ -1,6 +1,6 @@
 # Sprint 05A — Annotations and Styling
 
-**Status:** Core tools implemented on `trace-graph` at `4a66688`; small-zoom behavior, full browser checks and merge pending
+**Status:** Core tools implemented on `trace-graph` at `4a66688`, extended 2026-10-15 (see the canvas rework note in `00_README.md`: text scales with zoom, word wrap, resizable notes, Text and Arrow tools, connection points and elbow routing, grouping, locking, alignment, icons); merge pending
 **Depends on:** 04 (updaters), 05 (canvas, selection, placement)
 
 *Added 2026-10-10 for D8: the trace canvas carries the investigator's own notes and drawings, like draw.io, kept visibly apart from evidence.*

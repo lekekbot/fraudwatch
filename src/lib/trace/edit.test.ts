@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { addAnnotation, addSteps, duplicateTrace, removeAnnotations, removeSteps, renameTrace, reorderAnnotation, setBranchHidden, setCanvasOptions, setDirection, setNodeStyle, setPositions, setScope, setServiceExpanded, updateAnnotation } from "./edit";
+import { addAddress, addAnnotation, addSteps, removeAddress, duplicateTrace, removeAnnotations, removeSteps, renameTrace, reorderAnnotation, setBranchHidden, setCanvasOptions, setDirection, setNodeStyle, setPositions, setScope, setServiceExpanded, updateAnnotation } from "./edit";
 import { event, stepOf, trace } from "./testing";
+import { parseTrace } from "./storage";
+import { buildTraceView } from "./view";
 
 const now = new Date("2026-02-02T00:00:00.000Z");
 const step = stepOf(event("s", [{ assetId: "SOL", from: "A", to: "B", amount: "5" }]));
@@ -56,5 +58,22 @@ describe("pure trace edits", () => {
     ];
     let current = added;
     for (const edit of edits) { current = edit(current); expect(current.steps).toBe(added.steps); }
+  });
+
+  it("places an address as an unconnected node until a movement links it, and removes it cleanly", () => {
+    const placed = setPositions(addAddress(base(), "Z", now), { Z: { x: 500, y: 0 } }, now);
+    expect(addAddress(placed, "Z", now)).toBe(placed);
+    const evidence = { events: new Map(), coverage: () => null, addressState: () => "OBSERVED" as const, isCustodial: () => false };
+    expect(buildTraceView(placed, evidence).nodes.find((n) => n.id === "Z")).toMatchObject({ depth: null, placed: true, isSeed: false });
+    const loaded = parseTrace(placed);
+    expect(loaded.ok && loaded.trace.addresses).toEqual(["Z"]);
+    const removed = removeAddress(placed, "Z", now);
+    expect(removed.addresses).toEqual([]);
+    expect(removed.presentation.positions.Z).toBeUndefined();
+    // With a movement of its own, the node stays when its placement is removed.
+    const zb = stepOf(event("zb", [{ assetId: "SOL", from: "Z", to: "B", amount: "5" }]));
+    const linked = addSteps(placed, [zb], now);
+    expect(removeAddress(linked, "Z", now).presentation.positions.Z).toEqual({ x: 500, y: 0 });
+    expect(removeAddress(linked, "Z", now).steps).toEqual([zb]);
   });
 });

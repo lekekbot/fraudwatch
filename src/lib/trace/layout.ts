@@ -10,6 +10,9 @@ export type PlaceInput = {
   grid?: number | null;
 };
 
+/** Spacing for the trace canvas's chip nodes: columns wide enough for an amount label between them. */
+export const TRACE_SPACING = { column: 300, row: 60 };
+
 export function snap(p: Point, grid: number): Point {
   if (!Number.isFinite(grid) || grid <= 0) return p;
   return { x: Math.round(p.x / grid) * grid, y: Math.round(p.y / grid) * grid };

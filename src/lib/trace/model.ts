@@ -65,6 +65,12 @@ export type Trace = {
   direction: TraceDirection;
   scope: TraceScope;
   steps: TraceStep[];
+  /**
+   * Addresses the investigator put on the trace themselves. Each is a node
+   * from the start, but it's connected to the seed only through added
+   * movements: placing it claims nothing about the funds.
+   */
+  addresses?: string[];
   /** Damaged saved items remain available for review and removal, never silently discarded. */
   invalidSteps?: unknown[];
   invalidAnnotations?: unknown[];

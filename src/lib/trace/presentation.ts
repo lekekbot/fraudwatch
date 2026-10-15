@@ -1,3 +1,5 @@
+import type { IconKey } from "./icons";
+
 /**
  * The investigator's canvas for a trace: where things sit, how evidence nodes
  * look, and what they drew on top. None of it is evidence. A connector here is
@@ -14,16 +16,37 @@ export type ColorKey = (typeof COLOR_KEYS)[number];
 
 export const isColorKey = (v: unknown): v is ColorKey => typeof v === "string" && (COLOR_KEYS as readonly string[]).includes(v);
 
-export type NodeStyle = { color?: ColorKey; size?: "s" | "m" | "l"; note?: string };
+/** `group` and `locked` mean the same as on annotations: a node can be grouped with notes and shapes, and locked in place. */
+export type NodeStyle = { color?: ColorKey; size?: "s" | "m" | "l"; note?: string; locked?: boolean; group?: string };
 
-/** Where a user connector ends: an evidence node, another annotation, or a free point. */
-export type AnnotationEnd = { kind: "node"; id: string } | { kind: "annotation"; id: string } | { kind: "point"; at: Point };
+export type Side = "n" | "e" | "s" | "w";
+export const SIDES: readonly Side[] = ["n", "e", "s", "w"];
+export type FontSize = "s" | "m" | "l";
+export type TextAlign = "left" | "center" | "right";
+export type StrokeWidth = 1 | 2 | 4;
 
-export type NoteAnnotation = { id: string; kind: "note"; at: Point; width: number; text: string; color: ColorKey };
-export type ShapeAnnotation = {
+/**
+ * Where a user connector ends: an evidence node, another annotation, or a free
+ * point. With `side`, the end sits on that side's midpoint (a draw.io
+ * connection point); without, on the border facing the other end.
+ */
+export type AnnotationEnd = { kind: "node"; id: string; side?: Side } | { kind: "annotation"; id: string; side?: Side } | { kind: "point"; at: Point };
+
+/** What every annotation may carry: membership of a group (moved and selected together) and a lock (not moved or resized). */
+type Common = { group?: string; locked?: boolean };
+
+/**
+ * `height` is set once the note is resized or its text grows it; notes saved
+ * before it existed size to their text. `variant: "text"` draws the text alone,
+ * with no note behind it (the Text tool).
+ */
+export type NoteAnnotation = Common & { id: string; kind: "note"; at: Point; width: number; height?: number; text: string; color: ColorKey; variant?: "text"; fontSize?: FontSize; align?: TextAlign };
+export type ShapeAnnotation = Common & {
   id: string;
   kind: "shape";
-  shape: "rect" | "ellipse" | "frame";
+  /** `icon`: one of the investigation icons (`icon`), with its label underneath. */
+  shape: "rect" | "ellipse" | "frame" | "icon";
+  icon?: IconKey;
   /** Top-left corner. */
   at: Point;
   width: number;
@@ -31,8 +54,11 @@ export type ShapeAnnotation = {
   label: string;
   stroke: ColorKey;
   fill: ColorKey | "none";
+  strokeWidth?: StrokeWidth;
+  fontSize?: FontSize;
+  align?: TextAlign;
 };
-export type ConnectorAnnotation = {
+export type ConnectorAnnotation = Common & {
   id: string;
   kind: "connector";
   from: AnnotationEnd;
@@ -40,6 +66,11 @@ export type ConnectorAnnotation = {
   label: string;
   arrow: "none" | "end" | "both";
   color: ColorKey;
+  /** `elbow`: right-angle segments, as draw.io's orthogonal connector. */
+  route?: "straight" | "elbow";
+  /** Where the label sits along the line, 0 (from) to 1 (to); 0.5 when unset. */
+  labelAt?: number;
+  strokeWidth?: StrokeWidth;
 };
 export type Annotation = NoteAnnotation | ShapeAnnotation | ConnectorAnnotation;
 

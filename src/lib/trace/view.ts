@@ -24,6 +24,8 @@ export type TraceNode = {
   /** Hops from the seed: negative backward, positive forward; null when no steps connect it to the seed. */
   depth: number | null;
   boundaries: BoundaryKind[];
+  /** The investigator put this address on the trace (it may also have movements). */
+  placed?: boolean;
   /** Conversion steps on this address. */
   conversions: string[];
   service?: { id: string; name: string; category: string };
@@ -104,6 +106,8 @@ export function buildTraceView(trace: Trace, evidence: TraceEvidence): TraceView
   }
   const roots = seedAddresses(trace, resolved);
   for (const r of roots) addresses.add(r);
+  const placed = new Set(trace.addresses ?? []);
+  for (const a of placed) addresses.add(a);
 
   const depth = depths(roots, resolved);
 
@@ -144,6 +148,7 @@ export function buildTraceView(trace: Trace, evidence: TraceEvidence): TraceView
       id: address,
       addresses: [address],
       isSeed: roots.includes(address),
+      ...(placed.has(address) ? { placed: true } : {}),
       depth: d,
       boundaries: boundaries(address, frontier, evidence),
       conversions: conversions.get(address) ?? [],

@@ -23,6 +23,7 @@ export function addSteps(trace: Trace, steps: readonly TraceStep[], now = new Da
 function activeNodes(trace: Trace): Set<string> {
   const seed = trace.seed;
   const nodes = new Set<string>(seed.kind === "address" ? [seed.address] : seed.kind === "movement" ? [seed.ref.from ?? seed.ref.to ?? ""] : []);
+  for (const address of trace.addresses ?? []) nodes.add(address);
   for (const step of trace.steps) {
     if (step.kind === "conversion") nodes.add(step.address);
     else {
@@ -33,9 +34,24 @@ function activeNodes(trace: Trace): Set<string> {
   return nodes;
 }
 
-export function removeSteps(trace: Trace, stepIds: ReadonlySet<string>, now = new Date()): Trace {
+/** Put an address on the trace as a node of its own. */
+export function addAddress(trace: Trace, address: string, now = new Date()): Trace {
+  if (!address.trim()) throw new Error("Enter an address.");
+  if (trace.addresses?.includes(address)) return trace;
+  return stamp(trace, { addresses: [...(trace.addresses ?? []), address] }, now);
+}
+
+/** Take a placed address off the trace. Its movements, if any, stay; so does the node they draw. */
+export function removeAddress(trace: Trace, address: string, now = new Date()): Trace {
+  if (!trace.addresses?.includes(address)) return trace;
+  const remaining = { ...trace, addresses: trace.addresses.filter((a) => a !== address) };
+  return activeNodes(remaining).has(address) ? stamp(trace, { addresses: remaining.addresses }, now) : removeSteps(stamp(remaining, {}, now), new Set(), now, [address]);
+}
+
+/** `alsoPrune` names nodes that went away for another reason (a removed placed address), so their presentation is tidied the same way. */
+export function removeSteps(trace: Trace, stepIds: ReadonlySet<string>, now = new Date(), alsoPrune: readonly string[] = []): Trace {
   const steps = trace.steps.filter((s) => !stepIds.has(s.id));
-  if (steps.length === trace.steps.length) return trace;
+  if (steps.length === trace.steps.length && !alsoPrune.length) return trace;
   const remaining = { ...trace, steps };
   const nodes = activeNodes(remaining);
   const removed = new Set(Object.keys(trace.presentation.positions).filter((id) => !nodes.has(id) && !id.startsWith("entity:")));
@@ -98,11 +114,14 @@ export function removeAnnotations(trace: Trace, ids: ReadonlySet<string>, now = 
   return annotations.length === trace.presentation.annotations.length ? trace : stamp(trace, { presentation: { ...detached, annotations } }, now);
 }
 
-export function reorderAnnotation(trace: Trace, id: string, edge: "front" | "back", now = new Date()): Trace {
-  const item = trace.presentation.annotations.find((a) => a.id === id);
-  if (!item) return trace;
-  const rest = trace.presentation.annotations.filter((a) => a.id !== id);
-  return stamp(trace, { presentation: { ...trace.presentation, annotations: edge === "front" ? [...rest, item] : [item, ...rest] } }, now);
+/** Draw order: to the very front or back, or one step forward or backward. */
+export function reorderAnnotation(trace: Trace, id: string, edge: "front" | "back" | "forward" | "backward", now = new Date()): Trace {
+  const list = trace.presentation.annotations, at = list.findIndex((a) => a.id === id);
+  if (at < 0) return trace;
+  const item = list[at], rest = list.filter((a) => a.id !== id);
+  const to = edge === "front" ? rest.length : edge === "back" ? 0 : edge === "forward" ? Math.min(rest.length, at + 1) : Math.max(0, at - 1);
+  if (to === at) return trace;
+  return stamp(trace, { presentation: { ...trace.presentation, annotations: [...rest.slice(0, to), item, ...rest.slice(to)] } }, now);
 }
 
 export function setCanvasOptions(trace: Trace, options: Partial<Trace["presentation"]["canvas"]>, now = new Date()): Trace {

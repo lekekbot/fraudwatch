@@ -35,7 +35,8 @@ export type TraceExport = {
   chain: "solana";
   analysis: ReturnType<typeof analysisVersions> & { fingerprint: string };
   case: { range: { start: string; end: string } };
-  trace: { name: string; seed: TraceSeed; direction: TraceDirection; scope: TraceScope; steps: ExportedStep[] };
+  /** `addresses`: placed on the trace by the investigator, connected only through steps. */
+  trace: { name: string; seed: TraceSeed; direction: TraceDirection; scope: TraceScope; steps: ExportedStep[]; addresses: string[] };
   disclosures: {
     attribution: string;
     hiddenBranches: string[];
@@ -103,7 +104,7 @@ export function exportTrace(trace: Trace, view: TraceView, evidence: TraceEviden
     chain: "solana",
     analysis: { ...analysisVersions(), fingerprint: analysisFingerprint() },
     case: { range: { ...options.caseRange } },
-    trace: { name: trace.name, seed: trace.seed, direction: trace.direction, scope: trace.scope, steps },
+    trace: { name: trace.name, seed: trace.seed, direction: trace.direction, scope: trace.scope, steps, addresses: [...(trace.addresses ?? [])] },
     disclosures: {
       attribution: ATTRIBUTION,
       hiddenBranches: [...trace.presentation.hiddenBranches],
@@ -121,7 +122,7 @@ export function exportTrace(trace: Trace, view: TraceView, evidence: TraceEviden
 
 /** What an import would create: a new trace's content, before it gets an id. */
 export type TraceImport = {
-  name: string; seed: TraceSeed; direction: TraceDirection; scope: TraceScope; steps: TraceStep[]; presentation: TracePresentation;
+  name: string; seed: TraceSeed; direction: TraceDirection; scope: TraceScope; steps: TraceStep[]; addresses: string[]; presentation: TracePresentation;
   /** Steps or annotations in the file that couldn't be read; they aren't imported. */
   skipped: { steps: number; annotations: number };
   exportedAt: string;
@@ -161,12 +162,12 @@ export function parseTraceImport(text: string): { ok: true; trace: TraceImport }
   // The storage parser is the one gate for trace records: it validates every field and sets aside what it can't read.
   const parsed = parseTrace({
     id: "import", caseId: "import", name: typeof t.name === "string" && t.name.trim() ? t.name.trim().slice(0, 80) : "Imported trace",
-    schemaVersion: TRACE_SCHEMA_VERSION, seed: t.seed, direction: t.direction, scope: t.scope, steps, presentation: canvas,
+    schemaVersion: TRACE_SCHEMA_VERSION, seed: t.seed, direction: t.direction, scope: t.scope, steps, addresses: t.addresses, presentation: canvas,
     analysisAtSave: { semantic: 0, registry: 0 }, createdAt: exportedAt, updatedAt: exportedAt,
   });
   if (!parsed.ok) return { ok: false, error: "The trace's seed, direction or scope can't be read." };
   const p = parsed.trace;
-  return { ok: true, trace: { name: p.name, seed: p.seed, direction: p.direction, scope: p.scope, steps: p.steps, presentation: p.presentation, skipped: { steps: p.invalidSteps?.length ?? 0, annotations: p.invalidAnnotations?.length ?? 0 }, exportedAt } };
+  return { ok: true, trace: { name: p.name, seed: p.seed, direction: p.direction, scope: p.scope, steps: p.steps, addresses: p.addresses ?? [], presentation: p.presentation, skipped: { steps: p.invalidSteps?.length ?? 0, annotations: p.invalidAnnotations?.length ?? 0 }, exportedAt } };
 }
 
 /** `[a-z0-9-]` only, for file names. */

@@ -21,7 +21,7 @@ export function BranchPanel({ node, view, hidden, observations, names, assetText
   const direction = branchDirection(node);
   const summary = useMemo(() => direction ? summarizeBranch(view, branchOf(view, node.id, direction)) : null, [direction, view, node.id]);
   const involved = observations.filter((o) => node.addresses.includes(o.wallet) || o.events.some((e) => e.counterparty && node.addresses.includes(e.counterparty)));
-  return <section className="space-y-2 rounded border p-2 text-xs" aria-label="Branch">
+  return <div className="space-y-2 text-xs">
     {summary ? <>
       <p><strong>{direction === "forward" ? "Downstream" : "Upstream"} branch</strong> · {summary.steps} step{summary.steps === 1 ? "" : "s"} · {summary.nodes} node{summary.nodes === 1 ? "" : "s"}</p>
       {summary.totals.length > 0 && <p>Added movements total: {summary.totals.map((t) => assetText(t.assetId, t.amount)).join(", ")}</p>}
@@ -38,5 +38,5 @@ export function BranchPanel({ node, view, hidden, observations, names, assetText
       </div>)}
       {involved.length > 20 && <p className="text-muted-foreground">{involved.length - 20} more in the Timeline.</p>}
     </div>}
-  </section>;
+  </div>;
 }

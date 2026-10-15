@@ -21,7 +21,7 @@ A trace is only as convincing as what's behind each line. The inspector shows th
 
 **Re-checked 2026-10-15.** The assumption holds: `EventSummary` and `EventEvidence` need only a `WalletState` (for asset decimals, falling back to the case's asset list), not a lane. Drift:
 
-- There is no way to edit a case's date range after creation, so the "Extend the case range" fix is explanation text only.
+- A case's range can't be edited freely after creation; the History panel can only extend it to today (`extendedToToday`, `ingestion-panel.tsx`). The "outside range" boundary explanation is text; pointing it at that control is a follow-up. (Corrected 2026-10-15: this line first said the range couldn't be changed at all.)
 - An explorer link does exist (Solscan, in `transaction-details.tsx`, `edge-panel.tsx`, `address-panel.tsx`), so the step inspector reuses it.
 - The Trace tab dropped the open trace id (`routeTo("trace", null)`), so returning from another view landed on the trace list. Fixed: the shell remembers the last open trace (none after going back to the list).
 
